@@ -62,7 +62,12 @@ pub fn build(p: &post_drop::Program, t: &Typed, output: &Path) -> Result<()> {
     let scratch = Scratch::new()?;
     let object = scratch.0.join("program.o");
     let runtime = scratch.0.join("runtime.c");
-    let executable = scratch.0.join("program");
+    // Link beside the destination, then publish by rename. The compiler must
+    // never open the final executable for writing: concurrent child launches
+    // can otherwise inherit a writer transiently and fail with ETXTBSY.
+    let parent = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let publication = Scratch::in_directory(parent)?;
+    let executable = publication.0.join("program");
     std::fs::write(&object, bytes).map_err(io_error)?;
     std::fs::write(&runtime, RUNTIME).map_err(io_error)?;
     let linked = Command::new("cc")
@@ -78,7 +83,7 @@ pub fn build(p: &post_drop::Program, t: &Typed, output: &Path) -> Result<()> {
         return Err(Error { message: format!("native linker failed: {}", String::from_utf8_lossy(&linked.stderr)) });
     }
     // Do not replace an existing executable until codegen and linking succeed.
-    std::fs::copy(executable, output).map_err(io_error)?;
+    std::fs::rename(executable, output).map_err(io_error)?;
     Ok(())
 }
 fn io_error(e: std::io::Error) -> Error {
@@ -87,10 +92,13 @@ fn io_error(e: std::io::Error) -> Error {
 struct Scratch(PathBuf);
 impl Scratch {
     fn new() -> Result<Self> {
+        Self::in_directory(&std::env::temp_dir())
+    }
+    fn in_directory(directory: &Path) -> Result<Self> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT: AtomicU64 = AtomicU64::new(0);
         for _ in 0..1000 {
-            let p = std::env::temp_dir().join(format!("tarn-native-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+            let p = directory.join(format!(".tarn-native-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
             match std::fs::create_dir(&p) {
                 Ok(()) => return Ok(Self(p)),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,

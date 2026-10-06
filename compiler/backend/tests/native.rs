@@ -352,3 +352,17 @@ fn invalid_closure_environment_metadata_is_rejected() {
         assert!(tarn_backend::emit_object(&p, t).is_err(), "mutation {mutation}");
     }
 }
+
+#[test]
+fn executable_publication_replaces_the_inode_before_launch() {
+    let (exe, result) = compile("fn main() { print(42) }", "atomic-publication");
+    // This deterministically reproduces the executable-busy hazard of copying
+    // onto the destination inode. Publication must replace that inode instead.
+    let writer = std::fs::OpenOptions::new().write(true).open(&exe).unwrap();
+    tarn_backend::build(result.drops.as_ref().unwrap(), result.typed.as_ref().unwrap(), &exe).unwrap();
+    let output = Command::new(&exe).env_remove("TARN_TRACE_DROPS").output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"42\n");
+    drop(writer);
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}

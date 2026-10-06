@@ -30,7 +30,9 @@ shared/mutable/consuming callback parameters, returned and nested move closures,
 strings and clones, owned callable captures, generic owned ADTs, arrays, enums, partial field consumption,
 conditional initialization, overwrite, capture reinitialization, never-invoked
 closures, mixed references/owned values and zero-sized captures. Exact destruction
-traces assert capture release and order. Five metadata corruptions are rejected.
+traces assert capture release and order. Five metadata corruptions are rejected. Atomic executable publication has a
+deterministic regression that holds the previous inode open for writing while
+building and launching its replacement.
 
 Frontend pass/fail fixtures cover second consuming invocation (E4001), use after
 ownership capture (E4001), escaped local references and nested stack environments
@@ -60,6 +62,11 @@ must require exclusive environment access even when the call reborrows them.
 Zero-sized owned captures still need reference ABI lanes in reusable bodies.
 Callable struct fields now resolve as value calls rather than missing methods;
 shared access is checked across nested projections.
+
+The expanded parallel native suite exposed an executable launch failing with
+ETXTBSY after copying the linked image onto its destination. Builds now link in
+a private destination-side directory and atomically rename the finished image,
+avoiding the final inode's writer window and retaining failure preservation.
 
 ## Decisions I would defend
 

@@ -178,8 +178,11 @@ cc -std=c11 -O0 -fno-strict-aliasing -no-pie program.o runtime.c -lm -o program
 
 `tarn build path/file.tarn` writes `path/file` beside the source. `-o path` selects
 an explicit output, including paths with spaces. Source overwrite is rejected.
-Codegen/link failures preserve any existing executable. Intermediates use a
-unique process-local temporary directory and are removed by RAII.
+Codegen/link failures preserve any existing executable. Object/runtime intermediates use a unique process-local temporary directory.
+Linking uses a private directory beside the destination, then atomically renames
+the completed executable onto the selected path. Both directories are removed by
+RAII. This avoids opening the final executable inode for writing (which can race
+with execution) and preserves an existing executable on linking failure.
 
 `tarn run path/file.tarn` builds to the temporary directory's
 `tarn-run-<compiler-pid>`, executes with inherited stdin/stdout/stderr, removes it,
