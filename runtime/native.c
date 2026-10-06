@@ -1,5 +1,6 @@
 /* Tarn internal runtime ABI v0: Linux x86_64, System V C ABI. */
 #define _POSIX_C_SOURCE 200809L
+#include <sys/timerfd.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -330,16 +331,38 @@ void tarn_rt_net_addr(TarnNetRaw *out, int32_t fd, uint8_t peer) {
     if (!out->code) net_address(&out->address, (struct sockaddr *)&sa);
 }
 void tarn_rt_net_shutdown(TarnNetRaw *out, int32_t fd, int32_t how) { net_init(out); net_status(out, shutdown(fd, how)); }
+static void net_timer_track(int32_t fd);
+static void net_timer_forget(int32_t fd);
 void tarn_rt_net_close(TarnNetRaw *out, int32_t fd) {
     /* Observe the release attempt before close makes fd reusable by another
      * task. Logging after close can misorder reuse and falsely report two owners.
      * This is only test observation; the syscall remains the actual release. */
     net_trace("close", fd);
+    net_timer_forget(fd); /* before close: the number may be reused at once */
     net_init(out); net_status(out, close(fd));
     if (out->code == EBADF) abort(); /* impossible with a verified live owner */
     /* Linux consumes fd even when close reports EINTR: never retry. */
 }
 void tarn_rt_net_drop(int32_t fd) { TarnNetRaw out; tarn_rt_net_close(&out, fd); }
+/* Phase 14B one-shot timer: a nonblocking CLOCK_MONOTONIC timerfd, readable once
+ * it expires, so it shares the 12B Poll. No thread, no sleep. Zero fires at once
+ * (a zero it_value would disarm instead). Closed like sockets by Timer's owner. */
+void tarn_rt_net_timer_new(TarnNetRaw *out, int64_t millis) {
+    net_init(out);
+    if (millis < 0) { out->code = EINVAL; return; }
+    int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (fd < 0) { out->code = errno; return; }
+    struct itimerspec spec; memset(&spec, 0, sizeof(spec));
+    spec.it_value.tv_sec = (time_t)(millis / 1000);
+    spec.it_value.tv_nsec = (long)(millis % 1000) * 1000000L;
+    if (millis == 0) spec.it_value.tv_nsec = 1;
+    if (timerfd_settime(fd, 0, &spec, NULL) < 0) { out->code = errno; close(fd); return; }
+    net_timer_track(fd);
+    out->value = fd; net_trace("open", fd);
+}
+void tarn_rt_net_timer_read(TarnNetRaw *out, int32_t fd) {
+    uint64_t expirations; net_init(out); net_status(out, read(fd, &expirations, sizeof(expirations)));
+}
 
 void tarn_rt_net_main_error(uint32_t kind, int32_t code) {
     static const char *names[] = {"address in use", "connection refused", "connection reset", "broken pipe", "timed out", "would block", "invalid address", "DNS failure", "other OS error", "write made no progress"};
@@ -395,10 +418,39 @@ void tarn_rt_net_poll_new(TarnNetRaw *out) {
     poll->fd = fd; poll->head = NULL; out->value = (int64_t)(uintptr_t)poll;
     net_trace("open", fd);
 }
+/* Timers have no SO_COOKIE and share one anonymous inode, so each live timer
+ * gets a process-unique identity (high bit set: never a socket cookie). */
+typedef struct TarnTimerId { int32_t fd; uint64_t id; struct TarnTimerId *next; } TarnTimerId;
+static TarnTimerId *net_timers;
+static uint64_t net_timer_next = 1;
+static pthread_mutex_t net_timer_lock = PTHREAD_MUTEX_INITIALIZER;
+static void net_timer_track(int32_t fd) {
+    TarnTimerId *entry = malloc(sizeof(*entry)); if (!entry) abort();
+    pthread_mutex_lock(&net_timer_lock);
+    entry->fd = fd; entry->id = (net_timer_next++) | (UINT64_C(1) << 63); entry->next = net_timers; net_timers = entry;
+    pthread_mutex_unlock(&net_timer_lock);
+}
+static void net_timer_forget(int32_t fd) {
+    pthread_mutex_lock(&net_timer_lock);
+    for (TarnTimerId **link = &net_timers; *link; link = &(*link)->next)
+        if ((*link)->fd == fd) { TarnTimerId *old = *link; *link = old->next; free(old); break; }
+    pthread_mutex_unlock(&net_timer_lock);
+}
+static int net_identity_of(int32_t fd, uint64_t *cookie) {
+    socklen_t n = sizeof(*cookie);
+    if (getsockopt(fd, SOL_SOCKET, SO_COOKIE, cookie, &n) == 0) return 0;
+    if (errno != ENOTSOCK) return -1;
+    int found = 0;
+    pthread_mutex_lock(&net_timer_lock);
+    for (TarnTimerId *t = net_timers; t; t = t->next) if (t->fd == fd) { *cookie = t->id; found = 1; break; }
+    pthread_mutex_unlock(&net_timer_lock);
+    if (!found) errno = ENOTSOCK;
+    return found ? 0 : -1;
+}
 void tarn_rt_net_poll_ctl(TarnNetRaw *out, TarnPoll *poll, int32_t fd, int32_t operation, int32_t interest, uint64_t token) {
-    net_init(out); uint64_t cookie; socklen_t n = sizeof(cookie);
+    net_init(out); uint64_t cookie;
     if (operation < 0 || operation > 2 || interest < 1 || interest > 3) { out->code = EINVAL; return; }
-    if (getsockopt(fd, SOL_SOCKET, SO_COOKIE, &cookie, &n) < 0) { out->code = errno; return; }
+    if (net_identity_of(fd, &cookie) < 0) { out->code = errno; return; }
     TarnRegistration **link = &poll->head;
     while (*link && (*link)->fd != fd) link = &(*link)->next;
     TarnRegistration *record = *link;

@@ -879,3 +879,85 @@ pub async fn UdpSocket.recv_from_async(&mut self, buffer &mut []u8) Result<RecvF
         _async_park()
     }
 }
+
+// ------------------------------------------------ time (Phase 14B, ADR 0039)
+
+/// Monotonic span of time, millisecond resolution.
+pub copy struct Duration { millis u64 }
+pub fn Duration.milliseconds(count u64) Duration { return Duration{millis: count} }
+/// Overflow aborts (checked arithmetic).
+pub fn Duration.seconds(count u64) Duration { return Duration{millis: count * u64(1000)} }
+pub fn Duration.as_millis(self) u64 { return self.millis }
+
+/// One-shot monotonic timer: an owned Linux timerfd on the shared readiness
+/// Poll. Not Share; moving it moves the descriptor; destruction closes it once.
+pub struct Timer { fd i32 }
+extern "intrinsic" fn _timer_new(millis i64) _Raw
+extern "intrinsic" fn _timer_read(fd i32) _Raw
+pub fn Timer.after(duration Duration) Result<Timer, Error> {
+    raw := try _check(_timer_new(i64(duration.millis)))
+    return Ok(Timer{fd: i32(raw.value)})
+}
+pub fn poll_timer(waker &Waker, timer &mut Timer) Progress<Result<void, Error>> {
+    match _check(_timer_read(timer.fd)) {
+        Ok(raw) => { return Progress.Ready(Ok(())) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    match _arm(waker, timer.fd, 1) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match _check(_timer_read(timer.fd)) {
+        Ok(raw) => { return Progress.Ready(Ok(())) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    return Progress.Pending
+}
+pub async fn Timer.wait_async(&mut self) Result<void, Error> {
+    for {
+        match _with_waker(fn(waker &Waker) Progress<Result<void, Error>> { return _leaf(waker, poll_timer(waker, self)) }) {
+            Progress.Ready(result) => { return result }
+            Progress.Pending => {}
+        }
+        _async_park()
+    }
+}
+pub async fn sleep(duration Duration) Result<void, Error> {
+    var timer = try Timer.after(duration)
+    return await timer.wait_async()
+}
+
+// Join with a deadline. Completion is checked before the timer on every poll,
+// so when both are ready the result wins; the outcome is decided exactly once.
+// On timeout the handle is dropped: the pending task is abandoned (structured),
+// never detached. Ok(Some(R)): completed. Ok(None): timed out.
+pub async fn AsyncTask<R>.join_timeout(self, duration Duration) Result<Option<R>, Error> {
+    var timer = try Timer.after(duration)
+    for {
+        match _task_take(&self) {
+            Some(value) => {
+                // Release the timer's readiness registration on this Waker.
+                var released = false
+                done := _with_waker(fn(waker &Waker) bool {
+                    released = true
+                    _disarm(waker)
+                    return released
+                })
+                return Ok(Some(value))
+            }
+            None => {}
+        }
+        var waiting = false
+        raw := _with_waker(fn(waker &Waker) _Raw {
+            waiting = true
+            return _task_wait(self.record, waker)
+        })
+        if raw.code != 0 { panic("async task joined from another execution") }
+        match _with_waker(fn(waker &Waker) Progress<Result<void, Error>> { return _leaf(waker, poll_timer(waker, &mut timer)) }) {
+            Progress.Ready(result) => {
+                try result
+                return Ok(None)
+            }
+            Progress.Pending => {}
+        }
+        _async_park()
+    }
+}

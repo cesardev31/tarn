@@ -218,7 +218,7 @@ impl<'a> Env<'a> {
                 if let Some(id) = env.decls.net_poll {
                     env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });
                 }
-                for name in ["TcpListener", "TcpStream", "UdpSocket"] {
+                for name in ["TcpListener", "TcpStream", "UdpSocket", "Timer"] {
                     if let Some(id) = scope.get(name) {
                         env.decls.net_sockets.push(id);
                         env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });

@@ -1,4 +1,5 @@
 AsyncTask.join -> borrows from {self}
+AsyncTask.join_timeout -> borrows from {self}
 Execution.block_on -> borrows from {operation}
 Execution.spawn_async -> borrows from {self}
 Operation.new -> borrows from {owner, poller}

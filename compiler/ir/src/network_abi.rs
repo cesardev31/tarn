@@ -7,7 +7,7 @@ pub(crate) fn verify(t: &Typed) -> Vec<String> {
         return Vec::new();
     }
     let invalid = || vec!["invalid network declaration ABI".to_string()];
-    if d.net_sockets.len() != 3 || d.net_intrinsics.len() != 32 {
+    if d.net_sockets.len() != 4 || d.net_intrinsics.len() != 34 {
         return invalid();
     }
     // Async-body primitives (ADR 0037): exactly `_with_waker<R>(mut fn(&Waker) R) R`

@@ -395,6 +395,8 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         ("tarn_rt_net_read", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
         ("tarn_rt_net_write", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
         ("tarn_rt_net_recv", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
+        ("tarn_rt_net_timer_new", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_net_timer_read", vec![types::I64, types::I32], vec![]),
         ("tarn_rt_net_send", vec![types::I64, types::I32, types::I64, types::I64, types::I64], vec![]),
         ("tarn_rt_mutex_create", vec![], vec![types::I64]),
         ("tarn_rt_mutex_lock", vec![types::I64], vec![]),
