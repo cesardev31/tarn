@@ -24,6 +24,11 @@ pub fn int_bits(t: IntTy) -> u16 {
         _ => 64,
     }
 }
+fn int_fits(n: i128, t: IntTy) -> bool {
+    let bits = u32::from(int_bits(t));
+    let signed = matches!(t, IntTy::I8 | IntTy::I16 | IntTy::I32 | IntTy::I64 | IntTy::Isize);
+    if signed { n >= -(1i128 << (bits - 1)) && n < (1i128 << (bits - 1)) } else { n >= 0 && n < (1i128 << bits) }
+}
 fn scalar(ty: &Ty) -> Option<cl::Type> {
     Some(match ty {
         Ty::Bool => types::I8,
@@ -1196,6 +1201,11 @@ impl Cx<'_, '_> {
                 let len = self.b.ins().iconst(types::I64, n as i64);
                 let pair = self.pair(v.value.unwrap(), len);
                 Ok(Val { value: Some(pair), ty: ty.clone() })
+            }
+            // A literal that fits its integer target needs no runtime check.
+            Rvalue::Cast(Operand::Const(Const::Int(n, _)), Ty::Int(target)) if int_fits(*n, *target) => {
+                let st = scalar(&Ty::Int(*target)).unwrap();
+                Ok(Val { value: Some(self.b.ins().iconst(st, *n as i64)), ty: Ty::Int(*target) })
             }
             Rvalue::Cast(o, ty) => {
                 let v = self.operand(o)?;

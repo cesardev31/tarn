@@ -42,6 +42,24 @@ enabled. The remaining gap is optimizer work, not copies: Go inlines the small
 parser helpers, while Tarn calls them and checks every arithmetic overflow and
 index. Inlining small functions is the next measurable lever.
 
+### After inlining and constant-cast folding
+
+- `backend::inline`: after monomorphization, small (≤ 40 operations) direct,
+  non-recursive, non-diverging bodies whose call ABI matches exactly are copied
+  into the caller with renumbered locals, flags and blocks. Destruction plans are
+  copied verbatim; the result is re-verified by `post_drop::verify`, including
+  the flag dataflow. Async frames, closures and task code are not inlined.
+- Checked casts of integer literals that fit their target (`u8(10)`) are folded
+  to constants instead of runtime range checks.
+
+| Benchmark | Original | Copy fix | + inline + folding | Go |
+|---|---|---|---|---|
+| `json` | 1.41 s | 0.51 s | **0.40 s (4.4×)** | 0.09 s |
+| `wc` | 0.61 s | 0.60 s | **0.36 s (1.3×)** | 0.28 s |
+
+Next measured levers: removing bounds checks proven by `for i in 0..s.len()`,
+and keeping slice parameters in registers instead of reloading them.
+
 ### Original diagnosis
 
 Root cause of the `json` gap, measured with a microbenchmark (50M calls):
@@ -86,8 +104,8 @@ backend work: word-sized copies, and eliding temporary-to-destination copies.
 
 ## Recommended next steps (by evidence)
 
-1. Done: backend copy fix (15.7× → 5.7× on `json`). Next lever: inlining of
-   small functions, measured before adopting.
+1. Done: copy fix, inlining and literal-cast folding (`json` 15.7× → 4.4×,
+   `wc` 2.2× → 1.3×). Next: proven bounds-check removal, slices in registers.
 2. A minimal collections and I/O phase: growable `Vec<T>`, byte access to
    `string`, byte literals, stdin/stdout and basic `fs` (read/write a file).
 3. Unbounded task ownership: a way to own N task handles (needs `Vec`) and/or

@@ -2,6 +2,7 @@
 //! from post-drop IR. No move checker, loans or provenance enter this crate.
 mod codegen;
 pub mod layout;
+mod inline;
 pub mod mono;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -47,7 +48,7 @@ pub fn emit_object(p: &post_drop::Program, t: &Typed) -> Result<Vec<u8>> {
     if !bugs.is_empty() {
         return Err(Error::bug(bugs.join("\n")));
     }
-    let concrete = mono::specialize(p, t)?;
+    let concrete = inline::inline(mono::specialize(p, t)?, t);
     let bugs = post_drop::verify(&concrete, t);
     if !bugs.is_empty() {
         return Err(Error::bug(bugs.join("\n")));
