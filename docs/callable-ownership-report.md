@@ -43,8 +43,10 @@ Both mutation corpora include closure fixtures; the native corpus verifies emitt
 code. Existing 6A/6B/6C, memory_safety, parser/resolution/types, native/CLI and
 resource-token interpreter tests remain regression gates.
 
-Validation commands: `cargo test`, `cargo check --workspace` and
-`git diff --check`. The host-dependent benchmark remains intentionally ignored.
+Validation: `cargo test` (including all 15 native backend tests),
+`cargo check --workspace` and `git diff --check` pass without compiler warnings.
+`cargo build -p tarn-lsp` also passes. The host-dependent benchmark remains
+intentionally ignored.
 
 ## Bugs found
 

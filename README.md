@@ -27,7 +27,7 @@ cargo test
 
 Docs: [language](docs/language.md) · [ownership](docs/ownership.md) ·
 [errors](docs/errors.md) · [architecture](docs/architecture.md) ·
-[ADRs](docs/adr/). Editor: [editors/vscode](editors/vscode).
+[ADRs](docs/adr/) · [dependency security (planned)](docs/dependency-security.md). Editor: [editors/vscode](editors/vscode).
 
 ## Native execution (Linux x86_64)
 

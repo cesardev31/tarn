@@ -55,3 +55,14 @@ checked shifts/float-to-int casts. Unknown bootstrap stdlib APIs now fail with
 E3040. See [ADR 0028](adr/0028-native-feature-completeness.md) and
 [ADR 0029](adr/0029-checked-shifts-and-float-casts.md). Borrowed dynamic dispatch now executes (ADR 0030); owned dynamic objects remain
 rejected. Optimization remains deferred. Phase 10 adds shared, mutable and consuming callable modes, `move fn` ownership captures and safe returned owned closures (ADR 0032).
+
+
+## Dependency management and supply-chain security (design only)
+
+[Dependency security](dependency-security.md) sets requirements for future
+integrated `tarn` package commands, version-free imports, manifest/lock separation,
+verified immutable content and explicitly constrained build authority. No package
+manager, registry, resolver or sandbox implementation is scheduled by this update.
+SemVer resolution, incompatible-major coexistence, release-age default,
+signing/provenance formats, federation, sandbox enforcement and features remain
+open. Optimization and concurrency remain deferred.

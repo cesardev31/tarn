@@ -46,6 +46,18 @@ Each external crate needs a line in this table with a justification.
 | `url` | tools/lsp | Correct file URI encoding/decoding, including escaped paths |
 | `cranelift-codegen/frontend/module/object/native` | backend | ISA/codegen, SSA builder, symbols, ELF object emission; pinned 0.125.3, dependency audit in ADR 0027 |
 
+## Tarn package security (planned)
+
+Future package operations use the single `tarn` CLI, version-free imports,
+`tarn.toml` intent and a verified exact `tarn.lock` graph. Packages are data until
+explicitly granted constrained execution authority. No package manager, registry,
+resolver or sandbox is implemented. Requirements and open choices are in
+[dependency security](dependency-security.md).
+
+The Cargo crates above and the embedded-runtime system `cc` invocation below are
+existing trusted compiler/toolchain boundaries. They do not authorize future
+package install hooks or imply current sandbox enforcement.
+
 ## Linking
 
 Cranelift ELF object + embedded `runtime/native.c`, compiled/linked through system
@@ -55,9 +67,14 @@ ABI, canonical layout, output paths and limits: [ADR 0027](adr/0027-native-backe
 
 ## Caching (planned, phase 17)
 
-Global cache at `~/.tarn/cache/`, keys = hash(compiler version, target, source
-hash, dependency interface hashes, flags). Per-module first; finer later only
-if measurements justify it.
+Use a content-addressed global store, conceptually `~/.tarn/registry/`,
+`~/.tarn/sources/` and `~/.tarn/artifacts/`; exact disk layout remains open.
+Deduplicate verified sources by content. Artifact keys include source hash,
+compiler/toolchain identity, target, options and resolved dependency graph identity.
+Interface hashes, names or mutable tags alone cannot establish cache identity.
+Reuse must respect content verification and security policy, including authorized
+build inputs. This is a future design constraint; no cache optimization starts here.
+See [dependency security](dependency-security.md).
 
 ## Executable destruction boundary
 

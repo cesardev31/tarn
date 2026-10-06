@@ -900,6 +900,77 @@ Do not pursue "zero dependencies" as a dogma.
 
 Reimplementing complex standards incorrectly merely to avoid one dependency is not a project goal.
 
+
+### Tarn package management and supply-chain security (planned)
+
+The preceding dependency review applies to the compiler's existing dependencies.
+The following requirements govern future Tarn packages. They are design guidance,
+not implemented CLI, registry, resolver or sandbox behavior. Do not add dependencies
+or implement these systems as part of documenting this policy.
+
+“Dependency resolution should be boring, deterministic and auditable.”
+
+“Dependencies are data until explicitly granted execution authority.”
+
+“Tarn should assume that any dependency, including a transitive dependency, may become hostile.”
+
+- Keep one integrated CLI: `tarn add`, `remove`, `update`, `deps`, `audit`,
+  `verify`, `publish`. Do not introduce `tarnpkg`. Normal future application use
+  should be concise: `tarn add postgres`, `tarn add redis`, `tarn build`, `tarn test`.
+- Keep source imports version-free (`import "redis"`, `import "postgres"`), never
+  `redis/v2` or `postgres@4`. Put dependency intent in `tarn.toml` and exact graph,
+  versions, origins and hashes in `tarn.lock`.
+- Normal builds must not silently rewrite locks. Updates must be intentional:
+  `tarn update` or `tarn update <package>`. The same source tree, compiler/toolchain
+  identity and lock must resolve the same dependency bytes and graph; this does
+  not promise bit-identical native binaries or describe implemented support.
+- Express exact, compatible-major, compatible minor/patch and explicit range
+  requirements using ordinary SemVer; explain conflicts. Prefer one compatible
+  version and avoid unnecessary duplicates. Incompatible majors require an
+  explicit future coexistence design, never versioned import paths.
+- Model malicious/compromised direct and transitive packages, compromised
+  publishers, malicious releases, typosquatting and dependency confusion.
+  Official status, popularity, known publishers and previous safety are not trust.
+- Never execute package-provided installation/build hooks by default, including
+  preinstall/install/postinstall/prepare/setup.py/build.rs equivalents. Pure Tarn
+  packages normally need none. Exceptional build execution requires explicit
+  authorization and sandbox enforcement for filesystem, network, processes and
+  environment. Declaration is not a grant; no ambient home, SSH/cloud/package
+  credentials, arbitrary environment, network or whole-filesystem access.
+- Keep releases immutable. Identity/version/content hash must never acquire
+  replacement bytes; yank or deprecate without rewriting releases. Changes need
+  new versions. Verify locked content before use, including cached sources.
+  Minimum lock evidence is package identity, version, source registry, content
+  hash and graph. Plan publisher/repository/commit/publication evidence and
+  signatures/provenance; bind identities to origins to prevent silent substitution.
+- Plan a content-addressed global store, conceptually `~/.tarn/registry/`,
+  `~/.tarn/sources/`, `~/.tarn/artifacts/`. Deduplicate sources; key artifacts by
+  source hash, compiler/toolchain identity, target, options and graph identity,
+  not names or mutable tags alone. Cache reuse must respect verification/policy.
+- Support project/global minimum release age; its default is open. Detect missing
+  provenance, publisher changes, unverified publication and unexpected repository
+  changes. SemVer is not approval: require explicit acknowledgement of trust
+  downgrades and enforce required policy even after acknowledgement.
+- Make `tarn deps --tree`, `--why <package>` and `--trust` explain dependency
+  introducers, selected versions, origins, hashes, publisher/provenance changes,
+  build authority and advisories. `audit` and `verify` must distinguish unknown
+  evidence from success. Surface security decisions when trust or authority changes.
+- Require registry immutability, publisher authentication, strong MFA, namespace
+  ownership, typosquatting defenses, yanking, attestable/signed provenance and
+  advisories. Authentication does not establish trustworthy code.
+- Prefer explicit refusal for insufficient required trust/provenance, hash
+  mismatches or permissions. Never silently select a trusted fallback for convenience
+  or execute without required containment.
+
+Keep exact SemVer resolution, incompatible-major coexistence, default release
+age, signing/provenance formats, federation, sandbox implementation and package
+features/configuration explicitly open. Capability/configuration examples are
+conceptual, not finalized schemas. Existing Cargo bootstrap dependencies and the
+compiler's embedded-runtime `cc` invocation are trusted toolchain boundaries;
+this policy does not claim they are sandboxed today.
+
+Detailed requirements and open choices: [dependency security](docs/dependency-security.md).
+
 ---
 
 ## Tests

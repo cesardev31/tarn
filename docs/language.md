@@ -66,6 +66,11 @@ be used before their declaration; locals cannot. Types, functions and values
 share one namespace per scope. Imports are private to the importing module
 and may form cycles. Full rules: `docs/resolution.md`.
 
+Future external package imports remain version-free, for example `import "redis"`.
+Versions belong to planned `tarn.toml`/`tarn.lock` metadata, not source paths.
+External package resolution is not implemented; see
+[dependency security](dependency-security.md) for requirements and open choices.
+
 ## 3. Bindings
 
 ```tarn
