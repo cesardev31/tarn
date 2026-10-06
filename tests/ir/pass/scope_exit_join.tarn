@@ -1,0 +1,51 @@
+// Joining precedes destruction on every structured scope exit.
+fn normal_exit() {
+    scope {
+        kept := "normal"
+        print(kept)
+    }
+}
+
+fn return_exit() {
+    scope {
+        kept := "return"
+        print(kept)
+        return
+    }
+}
+
+fn break_exit() {
+    for {
+        scope {
+            kept := "break"
+            print(kept)
+            break
+        }
+    }
+}
+
+fn continue_exit() {
+    var remaining = 1
+    for remaining > 0 {
+        remaining = remaining - 1
+        scope {
+            kept := "continue"
+            print(kept)
+            continue
+        }
+    }
+}
+
+fn nested_return() {
+    scope {
+        outer := "outer"
+        scope {
+            kept := "inner"
+            print(kept)
+            print(outer)
+            return
+        }
+    }
+}
+
+fn main() {}

@@ -65,3 +65,48 @@ fn every_checked_program_lowers_to_valid_ir() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert!(lowered >= 40, "only {lowered} programs reached the IR");
 }
+
+/// Scope completion must dominate destruction of storage owned by that scope,
+/// including the lowering's early-exit cleanup paths.
+#[test]
+fn scope_completion_precedes_local_destruction_on_all_exit_kinds() {
+    use tarn_ir::{Builtin, Callee, StatementKind, Terminator};
+    let path = Path::new(PREFIX).join("tests/ir/pass/scope_exit_join.tarn");
+    let result = tarn_driver::check(&path).unwrap();
+    assert!(!result.has_errors());
+    let program = result.ir.as_ref().unwrap();
+    for name in ["normal_exit", "return_exit", "break_exit", "continue_exit", "nested_return"] {
+        let f = program.functions.iter().find(|f| f.name == name).unwrap();
+        let mut pending = vec![(0usize, 0usize)];
+        let mut visited = std::collections::HashSet::new();
+        let mut drops = 0;
+        while let Some((block, joins)) = pending.pop() {
+            if !visited.insert((block, joins.min(2))) { continue; }
+            let b = &f.blocks[block];
+            for stmt in &b.stmts {
+                if let StatementKind::Drop(place) = &stmt.kind {
+                    let local = f.local(place.local);
+                    if local.name.as_deref() == Some("kept") {
+                        assert!(joins >= 1, "{name}: local destruction before join");
+                        drops += 1;
+                    }
+                    if local.name.as_deref() == Some("outer") {
+                        assert!(joins >= 2, "nested return must join both scopes");
+                    }
+                }
+            }
+            let joins = joins + usize::from(matches!(b.term,
+                Terminator::Call { callee: Callee::Builtin(Builtin::JoinScope), .. }));
+            match &b.term {
+                Terminator::Goto(to) => pending.push((to.0 as usize, joins)),
+                Terminator::Call { next: Some(to), .. } => pending.push((to.0 as usize, joins)),
+                Terminator::Switch { cases, otherwise, .. } => {
+                    for (_, to) in cases { pending.push((to.0 as usize, joins)); }
+                    pending.push((otherwise.0 as usize, joins));
+                }
+                _ => {}
+            }
+        }
+        assert!(drops > 0, "{name}: missing scoped destruction");
+    }
+}

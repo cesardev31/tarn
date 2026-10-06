@@ -100,6 +100,8 @@ struct Builder<'a, 'l> {
     /// In a closure: captured symbol → parameter holding `&T`/`&mut T`.
     captures: HashMap<SymbolId, LocalId>,
     scopes: Vec<Vec<LocalId>>,
+    /// Lexical scope depths whose tasks must finish before storage ends.
+    task_scopes: Vec<usize>,
     loops: Vec<LoopCx>,
     /// Temporaries of the statements being lowered (dropped at statement end).
     stmt_temps: Vec<Vec<LocalId>>,
@@ -124,6 +126,7 @@ impl<'a, 'l> Builder<'a, 'l> {
             vars: HashMap::new(),
             captures: HashMap::new(),
             scopes: Vec::new(),
+            task_scopes: Vec::new(),
             loops: Vec::new(),
             stmt_temps: Vec::new(),
             extend_temps: false,
@@ -246,6 +249,9 @@ impl<'a, 'l> Builder<'a, 'l> {
     }
 
     fn pop_scope(&mut self, span: Span) {
+        if !self.dead && self.task_scopes.contains(&(self.scopes.len() - 1)) {
+            self.join_scope(span);
+        }
         let locals = self.scopes.pop().unwrap_or_default();
         if !self.dead {
             self.drop_locals(&locals, span);
@@ -260,9 +266,30 @@ impl<'a, 'l> Builder<'a, 'l> {
             self.push(StatementKind::Drop(Place::local(t)), span);
         }
         let scopes: Vec<Vec<LocalId>> = self.scopes[depth..].iter().rev().cloned().collect();
-        for s in scopes {
+        for (offset, s) in scopes.into_iter().enumerate() {
+            let level = self.scopes.len() - 1 - offset;
+            if self.task_scopes.contains(&level) {
+                self.join_scope(span);
+            }
             self.drop_locals(&s, span);
         }
+    }
+
+    fn join_scope(&mut self, span: Span) {
+        let t = self.temp(Ty::Void, span);
+        let next = self.new_block();
+        self.terminate(
+            Terminator::Call {
+                callee: Callee::Builtin(Builtin::JoinScope),
+                args: Vec::new(),
+                arg_spans: Vec::new(),
+                dest: Place::local(t),
+                next: Some(next),
+                spawn: false,
+            },
+            span,
+        );
+        self.switch_to(next);
     }
 
     fn emit_return(&mut self, span: Span) {
@@ -440,23 +467,9 @@ impl<'a, 'l> Builder<'a, 'l> {
             StmtKind::Match(m) => self.match_stmt(m),
             StmtKind::Block(b) | StmtKind::Unsafe(b) => self.block(b),
             StmtKind::Scope(b) => {
+                self.task_scopes.push(self.scopes.len());
                 self.block(b);
-                if !self.dead {
-                    let t = self.temp(Ty::Void, span);
-                    let next = self.new_block();
-                    self.terminate(
-                        Terminator::Call {
-                            callee: Callee::Builtin(Builtin::JoinScope),
-                            args: Vec::new(),
-                            arg_spans: Vec::new(),
-                            dest: Place::local(t),
-                            next: Some(next),
-                            spawn: false,
-                        },
-                        span,
-                    );
-                    self.switch_to(next);
-                }
+                self.task_scopes.pop();
             }
             StmtKind::Error => {}
         }

@@ -735,19 +735,31 @@ ordinary loans, capture/result provenance and post-drop destruction functions.
 
 Owned closures may escape only while all captured loans remain valid. Borrowed
 stack environments must retain their storage loan and cannot escape their frame.
-Spawn and concurrency remain unsupported; do not add them in this phase.
+Native concurrency implementation is phase 11 work; preserve this callable model
+when introducing task boundaries (proposed ADR 0033).
 
 ---
 
 ## Spawn and Concurrency
 
-Concurrency semantics are intentionally conservative today.
+Phase 11 follows ordinary Copy/Move, callable capture ownership, loans and
+provenance. Do not add a separate thread-safety checker or backend ownership
+queries. Native tasks are not yet implemented; proposed design and implementation
+status: [ADR 0033](docs/adr/0033-safe-native-tasks.md).
 
-Do not allow references to escape through `spawn` merely for convenience.
+Task handles must have deliberate ownership and completion semantics. The v0
+policy is unique handles with join on destruction, no detach or cancellation.
+Scoped completion must precede destruction of borrowed storage on every normal
+exit, including return, break and continue. Retain captured loans until completion;
+do not weaken E4205, E4203 or conservative indexed-place overlap.
 
-Future structured concurrency may relax this safely.
-
-Do not design the complete concurrency model during unrelated phases.
+Distinguish cross-thread value transfer from concurrent shared access using semantic
+capabilities, not Copy or size guesses. Native handles require explicit trusted
+contracts. Synchronization guards must expose ordinary loans and verified
+resource destruction; do not add user-defined destructors to implement locks.
+Panic in any task remains whole-process abort. No async, futures, reactor, green
+threads, scheduler optimization or concurrency platform expansion in this phase.
+Do not design concurrency during unrelated phases.
 
 ---
 
