@@ -364,8 +364,9 @@ impl<'a> Fx<'a> {
                 _ => Vec::new(),
             }),
             Callee::Builtin(_) => Some(Vec::new()),
-            // Opaque std results carry no loans (see `may_hold_refs`).
-            Callee::Opaque(_) => Some(Vec::new()),
+            // Source calls without contracts are rejected with E3040. Keep
+            // manually constructed/recovery IR conservative as well.
+            Callee::Opaque(_) => None,
             Callee::Intrinsic(_) | Callee::Value(_) => None,
         };
         match positions {

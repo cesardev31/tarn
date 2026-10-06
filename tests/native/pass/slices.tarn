@@ -1,0 +1,20 @@
+fn sum(s &[]i64) i64 {
+    var total: i64 = 0
+    for x in s {
+        total = total + x
+    }
+    return total
+}
+fn change(s &mut []i64) {
+    s[0] = 40
+}
+fn main() {
+    var a = [4]i64{1, 2, 3, 4}
+    s := &a[1..3]
+    print(s.len())
+    print(s.is_empty())
+    print(s[1])
+    print(sum(s))
+    change(&mut a[1..3])
+    print(sum(&a))
+}

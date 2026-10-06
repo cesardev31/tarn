@@ -103,12 +103,11 @@ pub fn place_name(f: &Function, t: &Typed, p: &Place) -> String {
 }
 
 /// Can a value of this type hold a reference (and therefore loans)?
-/// Conservative for type parameters and functions/closures. Opaque std values
-/// are assumed not to: their calls are unchecked anyway (ADR 0025), and the
-/// stdlib will declare real signatures with provenance.
+/// Conservative for type parameters, functions/closures and opaque recovery
+/// values. Unmodeled std APIs are rejected before IR (E3040).
 pub fn may_hold_refs(t: &Ty) -> bool {
     match t {
-        Ty::Ref(..) | Ty::Fn(..) | Ty::Param(_) | Ty::Any(_) => true,
+        Ty::Ref(..) | Ty::Fn(..) | Ty::Param(_) | Ty::Any(_) | Ty::Opaque => true,
         Ty::Adt(_, args) => args.iter().any(may_hold_refs),
         Ty::Array(e, _) | Ty::Slice(e) => may_hold_refs(e),
         _ => false,

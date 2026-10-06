@@ -1,0 +1,38 @@
+struct Pair<A, B> {
+    first A
+    second B
+}
+struct ErrorLike {
+    message string
+}
+fn identity<T>(value T) T {
+    return value
+}
+fn bounce<T>(value T, n i64) T {
+    if n == 0 {
+        return value
+    }
+    return bounce(value, n - 1)
+}
+fn main() {
+    p := identity(Pair{first: 42, second: true})
+    print(p.first)
+    print(p.second)
+    o: Option<i64> := Some(7)
+    match o {
+        Some(x) => print(x)
+        None => print(0)
+    }
+    r: Result<string, ErrorLike> := Ok("owned")
+    match r {
+        Ok(x) => print(x)
+        Err(e) => print(e.message)
+    }
+    nested := bounce(Pair{first: Pair{first: "nested", second: 3}, second: "tail"}, 2)
+    print(nested.first.first)
+    print(nested.second)
+    xs := [2]Pair<string, i64>{Pair{first: "a", second: 1}, Pair{first: "b", second: 2}}
+    for x in xs {
+        print(x.first)
+    }
+}

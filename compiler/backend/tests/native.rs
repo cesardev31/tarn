@@ -70,6 +70,7 @@ fn unsupported_valid_features_fail_without_panics() {
             continue;
         }
         let res = tarn_driver::check(&path).unwrap();
+        if path.ends_with("opaque.tarn") {assert!(res.diagnostics.iter().any(|d|d.code=="E3040"));continue;}
         assert!(!res.has_errors(), "{} must be frontend-valid", path.display());
         let error = tarn_backend::emit_object(res.drops.as_ref().unwrap(), res.typed.as_ref().unwrap()).unwrap_err();
         assert!(error.to_string().starts_with("backend not implemented:"), "{error}");

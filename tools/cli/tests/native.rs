@@ -25,7 +25,7 @@ fn build_run_and_failure_paths() {
     assert!(!Command::new(cli).arg("build").arg(&source).arg("-o").arg(&source).output().unwrap().status.success());
     assert_eq!(std::fs::read(&source).unwrap(), original);
     // A rejected feature must preserve an existing compiled output.
-    std::fs::write(&source, "fn id<T>(x T) T {\n    return x\n}\nfn main() {\n    print(id(42))\n}\n").unwrap();
+    std::fs::write(&source, "fn work() {\n}\nfn main() {\n    scope {\n        spawn work()\n    }\n}\n").unwrap();
     let output = Command::new(cli).arg("build").arg(&source).output().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("backend not implemented"));

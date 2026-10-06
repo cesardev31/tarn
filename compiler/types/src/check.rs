@@ -838,7 +838,10 @@ impl<'e, 'a> FnCx<'e, 'a> {
     /// An identifier or a static path used as a value.
     fn name_value(&mut self, e: &Expr) -> Ty {
         match self.res(e.id) {
-            Some(Res::External { .. }) => Ty::Opaque,
+            Some(Res::External { .. }) => {
+                self.err(Diagnostic::error("E3040", "unmodeled_std_api", "standard-library API has no ownership/provenance contract").primary(e.span,"cannot safely type-check this API").help("use a module with explicit Tarn declarations"));
+                Ty::Error
+            },
             Some(Res::ScrutineeVariant(_)) | None => Ty::Error,
             Some(Res::Symbol(s)) => match self.kind(s).clone() {
                 SymbolKind::Local { .. }
@@ -1254,11 +1257,10 @@ impl<'e, 'a> FnCx<'e, 'a> {
         let target = self.res(callee.id);
         match target {
             Some(Res::External { .. }) => {
-                self.record(callee, Ty::Opaque);
-                for a in args {
-                    self.expr(a, Some(&Ty::Opaque));
-                }
-                Ty::Opaque
+                self.err(Diagnostic::error("E3040", "unmodeled_std_api", "standard-library API has no ownership/provenance contract").primary(callee.span,"cannot safely type-check this API").help("use a module with explicit Tarn declarations"));
+                self.record(callee, Ty::Error);
+                for a in args { self.expr(a,None); }
+                Ty::Error
             }
             Some(Res::Symbol(s)) => match self.kind(s).clone() {
                 SymbolKind::Builtin => self.builtin(e, s, args),

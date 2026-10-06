@@ -1,0 +1,13 @@
+fn main() {
+    a: i8 := -8
+    count: u16 := 2
+    print(a >> count)
+    print(a << 1)
+    b: u8 := 128
+    print(b >> 7)
+    print(b << 1)
+    print(i8(127.9))
+    print(i8(-128.9))
+    print(u8(-0.5))
+    print(u64(42.8))
+}

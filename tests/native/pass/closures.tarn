@@ -1,0 +1,21 @@
+fn apply(f fn(i64) i64, x i64) i64 {
+    return f(x)
+}
+fn main() {
+    a := 20
+    b := 22
+    f := fn(x i64) i64 { return x + a + b }
+    print(apply(f, 0))
+    var counter: i64 = 0
+    inc := fn(x i64) i64 {
+        counter = counter + x
+        return counter
+    }
+    print(inc(2))
+    print(counter)
+    nested := fn(x i64) i64 {
+        inner := fn(y i64) i64 { return y + x + a }
+        return inner(1)
+    }
+    print(nested(21))
+}
