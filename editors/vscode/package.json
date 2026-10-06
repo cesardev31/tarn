@@ -105,6 +105,11 @@
           "type": "string",
           "default": "",
           "description": "Path to tarn-lsp. Empty searches the local checkout, workspace targets, then PATH."
+        },
+        "tarn.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Tarn language server. Disable to keep only syntax highlighting and icons. Reload the window after enabling."
         }
       }
     }

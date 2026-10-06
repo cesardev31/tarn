@@ -1,5 +1,6 @@
 {
   "files.associations": {
     "**/tests/**/*.res": "tarn-res"
-  }
+  },
+  "tarn.lsp.enabled": true
 }

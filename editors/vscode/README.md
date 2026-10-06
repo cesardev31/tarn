@@ -35,3 +35,6 @@ file is checked as an entry; its directory remains the driver's module root.
 Checks are synchronous and recheck all open entries; workspace-wide indexing,
 completion, rename, formatting and incremental analysis are future work.
 Run `python3 tools/lsp/tests/smoke.py` after building to verify stdio integration.
+
+Set `tarn.lsp.enabled` to `false` to stop the language server while retaining
+syntax highlighting and icons. Reload the window after enabling it again.

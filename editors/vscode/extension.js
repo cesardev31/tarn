@@ -5,6 +5,7 @@ const { LanguageClient } = require('vscode-languageclient/node');
 let client;
 async function activate(context) {
     const config = vscode.workspace.getConfiguration('tarn');
+    if (!config.get('lsp.enabled', true)) return;
     const configured = config.get('serverPath');
     const binary = process.platform === 'win32' ? 'tarn-lsp.exe' : 'tarn-lsp';
     const roots = [path.resolve(context.extensionPath, '../..'), ...(vscode.workspace.workspaceFolders || []).map(f => f.uri.fsPath)];
@@ -16,9 +17,14 @@ async function activate(context) {
         synchronize: { fileEvents: watcher },
     });
     context.subscriptions.push(watcher);
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(async event => {
+        if (event.affectsConfiguration('tarn.lsp.enabled') && !vscode.workspace.getConfiguration('tarn').get('lsp.enabled', true)) {
+            await client.stop();
+        }
+    }));
     context.subscriptions.push(vscode.commands.registerCommand('tarn.restartServer', async () => {
         await client.stop();
-        await client.start();
+        if (vscode.workspace.getConfiguration('tarn').get('lsp.enabled', true)) await client.start();
     }));
     try { await client.start(); }
     catch (error) {
