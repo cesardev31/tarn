@@ -106,3 +106,17 @@ Members of standard modules (`fs.read_text`) have the opaque type `<std>`,
 which is compatible with everything and never reported. This keeps examples
 that use the future stdlib checkable for everything else. It is a hole by
 design and disappears when the stdlib declares real signatures.
+
+## Callable invocation modes (phase 10)
+
+`fn(A) R`, `mut fn(A) R` and `once fn(A) R` require shared, mutable and consuming
+invocation, respectively. Mode participates in unification and generic
+substitution; annotations are invariant. Local closure modes are inferred from
+typed capture uses. Mutable invocation may borrow an immutable callable binding
+exclusively, but a shared reference cannot supply mutable access (E3044).
+Consuming invocation requires ownership; its second use fails move checking.
+
+Capturing syntax is independent: `fn` borrows captures; `move fn` transfers them.
+Reference captures retain provenance. Explicit storage loans keep borrowed stack
+environments inside their creating scope. Owned capture destruction is generated
+as ordinary functions and elaborated through post-drop. See ADR 0032.

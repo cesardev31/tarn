@@ -1,0 +1,10 @@
+fn make() fn() usize {
+    s := "nested-callable"
+    inner := move fn() usize { return s.len() }
+    return move fn() usize { return inner() }
+}
+fn main() {
+    f := make()
+    print(f())
+    print(f())
+}

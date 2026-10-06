@@ -34,7 +34,8 @@ memory-management details unless those details are semantically necessary.
 HTTP servers, JSON processing, database access, CLI applications and similar
 software should remain concise and predictable.
 
-Low-level control is an available capability, not a tax imposed on every program.
+Tarn is high-level by default and low-level when needed. Low-level control is a
+capability, not a tax imposed on ordinary application code.
 
 If a common application task requires significantly more ownership ceremony
 
@@ -727,11 +728,14 @@ MutableBorrow
 Move
 ```
 
-Current syntax and semantics may only produce borrow captures.
+Borrowed closures use inferred shared/mutable captures and stack environments.
+`move fn` transfers captures into a unique owned environment (ADR 0032).
+Callable types distinguish shared, mutable and consuming invocation. Preserve
+ordinary loans, capture/result provenance and post-drop destruction functions.
 
-Returned closures or spawned closures that would require ownership capture must be rejected clearly until move captures are designed.
-
-Do not invent `move fn` syntax without a dedicated design discussion.
+Owned closures may escape only while all captured loans remain valid. Borrowed
+stack environments must retain their storage loan and cannot escape their frame.
+Spawn and concurrency remain unsupported; do not add them in this phase.
 
 ---
 
@@ -1055,12 +1059,6 @@ Examples:
 Finish the current abstraction boundary first.
 
 ---
-
-## Application Ergonomics
-
-Tarn is high-level by default and low-level when needed. Low-level control is a
-capability, not a tax imposed on ordinary application code. Keep common callbacks
-and handlers simple; expose ownership details only when safety requires them.
 
 ## Design Philosophy
 

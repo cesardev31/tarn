@@ -23,8 +23,8 @@ Ordinary user field/member-name lookup is not an intrinsic or bootstrap API.
 | main; private tarn_fn_N/tarn_thunk_N/tarn_vtable_N | Runtime ABI detail | Native entry shim and deterministic private object symbols. These are not user API contracts. |
 | tarn_rt_string/drop_string/print_i64/print_u64/print_f64/print_bool/print_string/panic/fault/rem_f32/rem_f64; string len header; TARN_TRACE_DROPS | Runtime ABI detail | C runtime and native code must honor ownership, layout and abort promises. Trace is opt-in test observation. No user destructor hook. |
 | DynTable, declaration-index methods, fat pairs, flags and IterArray bitmaps | Required compiler representation / private ABI detail | Explicit lowered operations and canonical layout. They introduce no public magic API name or new semantic inference. |
-| Closure Fn values consumed on invocation; stack capture environments | Required current semantic rule | Fn values are non-Copy; calling through a local moves it. Direct named function calls do not move a callable local. No reusable-call or move-capture redesign in phase 9. |
+| Callable invocation and capture ownership (phase 10 update) | Required semantic rule; ADR 0032 | Shared/mutable calls borrow; consuming calls move. Inferred captures are shared/mutable borrows or ownership moves. Generated ordinary destruction functions pass through post-drop. Borrowed environments carry explicit storage loans. |
+| tarn_rt_env_alloc/env_free/env_drop; environment destruction header | Private runtime ABI detail; ADR 0032 | Unique owned allocations, destruction-thunk dispatch and free. Borrowed/capture-free closures allocate no heap environment. No managed-object system, scheduler or user destructors. |
 
 An audit is not a proof that trusted native implementations are correct. Unsupported
-stdlib APIs, FFI, resource handles, concurrency, pointer semantics and escaping
-ownership captures still prevent a complete end-to-end safety claim.
+stdlib APIs, FFI, resource handles, concurrency, pointer semantics and trusted native implementation contracts still prevent a complete end-to-end safety claim.

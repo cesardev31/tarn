@@ -315,6 +315,7 @@ fn owned_closure_environments_destroy_each_capture_once() {
         ("closure_reinitialize", "drop:old\ndrop:new\ndrop:new\n"),
         ("closure_callbacks", "drop:callback\ndrop:generic-environment\n"),
         ("closure_clone", "drop:clone\ndrop:clone\ndrop:clone\n"),
+        ("closure_own_callable", "drop:nested-callable\n"),
         ("closure_partial", "drop:second-field\ndrop:first-field\ndrop:first-field\ndrop:second-field\ndrop:fallback\ndrop:first-field\ndrop:second-field\n"),
         ("closure_enum_arrays", "drop:enum-consuming\ndrop:array-first\ndrop:array-second\ndrop:enum\n"),
     ] {

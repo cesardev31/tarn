@@ -2,6 +2,9 @@
 
 Status: accepted implementation boundary after phase 7; Linux x86_64.
 
+Callable invocation and ownership-capture decisions below are superseded by
+[ADR 0032](0032-callable-ownership.md), phase 10.
+
 ## Boundary and specialization
 
 The backend continues to consume post-drop IR and the semantic declaration
