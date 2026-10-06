@@ -865,12 +865,77 @@ impl Cx<'_, '_> {
         }
         Ok(())
     }
+    /// Store an aggregate's fields at `addr`. All operands are evaluated
+    /// before any destination byte is written.
+    fn build_aggregate(&mut self, kind: &Aggregate, ops: &[Operand], dest: &Ty, addr: cl::Value) -> Result<()> {
+                let l = layout::layout(self.t, dest)?;
+                let fields = match kind {
+                    Aggregate::Struct(..) => l.fields,
+                    Aggregate::Variant(_, v, _) => {
+                        let tag = self.b.ins().iconst(types::I32, i64::from(*v));
+                        self.b.ins().store(cl::MemFlags::new(), tag, addr, 0);
+                        l.variants.get(*v as usize).ok_or_else(|| Error::bug("aggregate variant"))?.clone()
+                    }
+                    Aggregate::Array(elem) => {
+                        let size = layout::layout(self.t, elem)?.size;
+                        ops.iter().enumerate().map(|(i, _)| (i as u32 * size, elem.clone())).collect()
+                    }
+                    _ => return Err(Error::unsupported("closure aggregate")),
+                };
+                if fields.len() != ops.len() {
+                    return Err(Error::bug("aggregate arity"));
+                }
+                // Evaluate all operands before storing destination bytes.
+                let values = ops.iter().map(|o| self.operand(o)).collect::<Result<Vec<_>>>()?;
+                for ((offset, ty), v) in fields.into_iter().zip(values) {
+                    if ty != v.ty {
+                        return Err(Error::bug("aggregate field type"));
+                    }
+                    let size = layout::layout(self.t, &ty)?.size;
+                    if size == 0 {
+                        continue;
+                    }
+                    let ptr = self.b.ins().iadd_imm(addr, i64::from(offset));
+                    if scalar(&ty).is_some() {
+                        self.b.ins().store(cl::MemFlags::new(), v.value.unwrap(), ptr, 0);
+                    } else {
+                        self.copy(ptr, v.value.unwrap(), size);
+                    }
+                }
+                Ok(())
+    }
+    /// Building directly into the destination is safe when no aggregate
+    /// operand can share its storage: scalar operands are loaded first, and
+    /// aggregate operands must be other locals, not reached through references.
+    fn aggregate_in_place(&self, dest: &Place, ops: &[Operand]) -> Result<bool> {
+        if dest.proj.contains(&Proj::Deref) {
+            return Ok(false);
+        }
+        for o in ops {
+            if let Operand::Copy(p) | Operand::Move(p) = o {
+                let scalar_value = scalar(&self.place_ty(p)?).is_some();
+                if !scalar_value && (p.local == dest.local || p.proj.contains(&Proj::Deref)) {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(!matches!(self.locals[dest.local.0 as usize], Slot::Ssa(_)))
+    }
     fn copy(&mut self, dest: cl::Value, source: cl::Value, size: u32) {
         // Small internal copy, no dependency on libc memcpy signature. Load all
         // bytes before writing so overlapping aggregate assignments are safe.
-        let values: Vec<_> = (0..size).map(|i| self.b.ins().load(types::I8, cl::MemFlags::new(), source, i as i32)).collect();
-        for (i, v) in values.into_iter().enumerate() {
-            self.b.ins().store(cl::MemFlags::new(), v, dest, i as i32);
+        // Word-sized chunks (x86_64 permits unaligned access); the tail uses
+        // narrower widths. Byte-wise copies dominated aggregate-heavy code.
+        let mut chunks = Vec::new();
+        let mut offset = 0u32;
+        while offset < size {
+            let width = [8u32, 4, 2, 1].into_iter().find(|w| offset + w <= size).unwrap();
+            let ty = match width { 8 => types::I64, 4 => types::I32, 2 => types::I16, _ => types::I8 };
+            chunks.push((offset as i32, self.b.ins().load(ty, cl::MemFlags::new(), source, offset as i32)));
+            offset += width;
+        }
+        for (offset, v) in chunks {
+            self.b.ins().store(cl::MemFlags::new(), v, dest, offset);
         }
     }
     fn operand(&mut self, o: &Operand) -> Result<Val> {
@@ -910,6 +975,13 @@ impl Cx<'_, '_> {
         match op {
             post::Op::Plain(StatementKind::Assign(p, rv)) => {
                 let ty = self.place_ty(p)?;
+                if let Rvalue::Aggregate(kind @ (Aggregate::Struct(..) | Aggregate::Variant(..) | Aggregate::Array(_)), ops) = rv
+                    && layout::layout(self.t, &ty)?.size > 0
+                    && self.aggregate_in_place(p, ops)?
+                {
+                    let addr = self.addr(p)?;
+                    return self.build_aggregate(kind, ops, &ty, addr);
+                }
                 let value = self.rvalue(rv, &ty)?;
                 self.write(p, value)?;
             }
@@ -1068,39 +1140,7 @@ impl Cx<'_, '_> {
                 let l = layout::layout(self.t, dest)?;
                 let s = self.stack(l.size, l.align);
                 let addr = self.b.ins().stack_addr(types::I64, s, 0);
-                let fields = match kind {
-                    Aggregate::Struct(..) => l.fields,
-                    Aggregate::Variant(_, v, _) => {
-                        let tag = self.b.ins().iconst(types::I32, i64::from(*v));
-                        self.b.ins().store(cl::MemFlags::new(), tag, addr, 0);
-                        l.variants.get(*v as usize).ok_or_else(|| Error::bug("aggregate variant"))?.clone()
-                    }
-                    Aggregate::Array(elem) => {
-                        let size = layout::layout(self.t, elem)?.size;
-                        ops.iter().enumerate().map(|(i, _)| (i as u32 * size, elem.clone())).collect()
-                    }
-                    _ => return Err(Error::unsupported("closure aggregate")),
-                };
-                if fields.len() != ops.len() {
-                    return Err(Error::bug("aggregate arity"));
-                }
-                // Evaluate all operands before storing destination bytes.
-                let values = ops.iter().map(|o| self.operand(o)).collect::<Result<Vec<_>>>()?;
-                for ((offset, ty), v) in fields.into_iter().zip(values) {
-                    if ty != v.ty {
-                        return Err(Error::bug("aggregate field type"));
-                    }
-                    let size = layout::layout(self.t, &ty)?.size;
-                    if size == 0 {
-                        continue;
-                    }
-                    let ptr = self.b.ins().iadd_imm(addr, i64::from(offset));
-                    if scalar(&ty).is_some() {
-                        self.b.ins().store(cl::MemFlags::new(), v.value.unwrap(), ptr, 0);
-                    } else {
-                        self.copy(ptr, v.value.unwrap(), size);
-                    }
-                }
+                self.build_aggregate(kind, ops, dest, addr)?;
                 Ok(Val { value: if l.size == 0 { None } else { Some(addr) }, ty: dest.clone() })
             }
             Rvalue::Discriminant(p) => {

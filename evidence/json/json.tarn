@@ -1,0 +1,127 @@
+// Recursive-descent JSON validator that sums every integer it contains.
+enum ParseError {
+    UnexpectedEnd
+    Unexpected(u8)
+}
+
+struct Parser {
+    pos usize
+    sum i64
+    depth u32
+}
+
+fn peek(p &Parser, text &[]u8) Result<u8, ParseError> {
+    if p.pos >= text.len() { return Err(ParseError.UnexpectedEnd) }
+    return Ok(text[p.pos])
+}
+
+fn skip_space(p &mut Parser, text &[]u8) {
+    for p.pos < text.len() && (text[p.pos] == u8(32) || text[p.pos] == u8(10)) {
+        p.pos = p.pos + usize(1)
+    }
+}
+
+fn expect(p &mut Parser, text &[]u8, b u8) Result<void, ParseError> {
+    found := try peek(p, text)
+    if found != b { return Err(ParseError.Unexpected(found)) }
+    p.pos = p.pos + usize(1)
+    return Ok(())
+}
+
+fn literal(p &mut Parser, text &[]u8, word &[]u8) Result<void, ParseError> {
+    for i in 0..word.len() { try expect(p, text, word[i]) }
+    return Ok(())
+}
+
+fn string(p &mut Parser, text &[]u8) Result<void, ParseError> {
+    try expect(p, text, u8(34))
+    for {
+        b := try peek(p, text)
+        p.pos = p.pos + usize(1)
+        if b == u8(34) { return Ok(()) }
+    }
+}
+
+fn number(p &mut Parser, text &[]u8) Result<void, ParseError> {
+    var negative = false
+    if try peek(p, text) == u8(45) {
+        negative = true
+        p.pos = p.pos + usize(1)
+    }
+    var parsed = i64(0)
+    var digits = 0
+    for p.pos < text.len() && text[p.pos] >= u8(48) && text[p.pos] <= u8(57) {
+        parsed = parsed * 10 + i64(text[p.pos] - u8(48))
+        p.pos = p.pos + usize(1)
+        digits = digits + 1
+    }
+    if digits == 0 { return Err(ParseError.Unexpected(try peek(p, text))) }
+    if negative { parsed = -parsed }
+    p.sum = p.sum + parsed
+    return Ok(())
+}
+
+fn value(p &mut Parser, text &[]u8) Result<void, ParseError> {
+    skip_space(p, text)
+    b := try peek(p, text)
+    if b == u8(123) { return object(p, text) }
+    if b == u8(91) { return array(p, text) }
+    if b == u8(34) { return string(p, text) }
+    if b == u8(116) { return literal(p, text, &[4]u8{116, 114, 117, 101}) }
+    if b == u8(102) { return literal(p, text, &[5]u8{102, 97, 108, 115, 101}) }
+    if b == u8(110) { return literal(p, text, &[4]u8{110, 117, 108, 108}) }
+    return number(p, text)
+}
+
+fn array(p &mut Parser, text &[]u8) Result<void, ParseError> {
+    try expect(p, text, u8(91))
+    skip_space(p, text)
+    if try peek(p, text) == u8(93) {
+        p.pos = p.pos + usize(1)
+        return Ok(())
+    }
+    for {
+        try value(p, text)
+        skip_space(p, text)
+        if try peek(p, text) == u8(93) {
+            p.pos = p.pos + usize(1)
+            return Ok(())
+        }
+        try expect(p, text, u8(44))
+    }
+}
+
+fn object(p &mut Parser, text &[]u8) Result<void, ParseError> {
+    try expect(p, text, u8(123))
+    skip_space(p, text)
+    if try peek(p, text) == u8(125) {
+        p.pos = p.pos + usize(1)
+        return Ok(())
+    }
+    for {
+        skip_space(p, text)
+        try string(p, text)
+        skip_space(p, text)
+        try expect(p, text, u8(58))
+        try value(p, text)
+        skip_space(p, text)
+        if try peek(p, text) == u8(125) {
+            p.pos = p.pos + usize(1)
+            return Ok(())
+        }
+        try expect(p, text, u8(44))
+    }
+}
+
+fn main() {
+    text := [97]u8{123, 34, 110, 97, 109, 101, 34, 58, 32, 34, 116, 97, 114, 110, 34, 44, 32, 34, 118, 97, 108, 117, 101, 115, 34, 58, 32, 91, 49, 44, 32, 50, 48, 44, 32, 51, 48, 48, 44, 32, 123, 34, 100, 101, 101, 112, 34, 58, 32, 91, 52, 48, 48, 48, 44, 32, 45, 53, 93, 125, 93, 44, 32, 34, 111, 107, 34, 58, 32, 116, 114, 117, 101, 44, 32, 34, 110, 111, 110, 101, 34, 58, 32, 110, 117, 108, 108, 44, 32, 34, 112, 105, 34, 58, 32, 51, 125}
+    var total = i64(0)
+    for round in 0..200000 {
+        var p = Parser{pos: usize(0), sum: i64(0), depth: u32(0)}
+        match value(&mut p, &text) {
+            Ok(v) => { total = total + p.sum }
+            Err(e) => { panic("invalid json") }
+        }
+    }
+    print(total)
+}
