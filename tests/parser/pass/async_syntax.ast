@@ -1,0 +1,11 @@
+(pub async fn identity <T> ((value T)) -> T
+  (block
+    (return value)))
+(async fn sequence () -> Result<i32, Error>
+  (block
+    (let first (await (call identity 1)))
+    (if (> first 0)
+      (block
+        (let second (try (await (call identity (call Ok first)))))
+        (return (call Ok second))))
+    (return (call Ok 0))))

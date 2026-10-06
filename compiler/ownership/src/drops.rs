@@ -111,6 +111,13 @@ pub fn elaborate_drops(p: &ir::Program, t: &Typed, moves: &MoveResults) -> Resul
     if errors.is_empty() {
         errors.extend(post::verify(&out, t));
     }
+    // Verified source async bodies become physical frames (ADR 0037).
+    if errors.is_empty() {
+        errors.extend(tarn_ir::async_frame::lower(&mut out, t));
+    }
+    if errors.is_empty() {
+        errors.extend(post::verify(&out, t));
+    }
     if errors.is_empty() { Ok(out) } else { Err(errors) }
 }
 struct Cx<'a> {

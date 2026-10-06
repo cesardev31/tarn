@@ -1,0 +1,15 @@
+import "net"
+async fn get(stream &mut net.TcpStream) Result<usize, net.Error> {
+    var bytes = [1]u8{0}
+    return await stream.read_async(&mut bytes)
+}
+fn main() Result<void, net.Error> {
+    var listener = try net.TcpListener.bind(&"127.0.0.1:0")
+    var stream = try net.TcpStream.connect_addr(try listener.local_addr())
+    computation := get(&mut stream)
+    moved := stream
+    execution := try net.Execution.new()
+    var op = net.Operation.new(&execution, computation)
+    count := try try execution.block_on(&mut op)
+    return Ok(())
+}

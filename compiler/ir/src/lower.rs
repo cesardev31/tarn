@@ -115,7 +115,7 @@ struct Builder<'a, 'l> {
 impl<'a, 'l> Builder<'a, 'l> {
     fn new(lx: &'l Lx<'a>, m: ModuleId, id: FunctionId, name: String, span: Span) -> Self {
         let kind = lx.kinds.get(&id).cloned().unwrap_or(FnKind::Body);
-        let f = Function { id, name, symbol: None, kind, generics: Vec::new(), param_count: 0, ret: Ty::Void, locals: Vec::new(), blocks: Vec::new(), span };
+        let f = Function { id, name, symbol: None, kind, generics: Vec::new(), param_count: 0, ret: Ty::Void, locals: Vec::new(), blocks: Vec::new(), span, asynchronous: None };
         let mut b = Builder {
             lx,
             m,
@@ -341,9 +341,19 @@ impl<'a, 'l> Builder<'a, 'l> {
                 self.scopes[0].push(l);
             }
         }
+        if f.is_async && f.body.is_some() {
+            let waker = self.waker_ty();
+            let l = self.new_local(waker, LocalKind::Param, Some("async waker".into()), None, false, f.span);
+            self.f.asynchronous = Some(AsyncInfo { waker: l, frame: None });
+        }
         self.f.param_count = self.f.locals.len() as u32 - 1;
         match &f.body {
             Some(body) => {
+                if f.is_async {
+                    // Lazy construction: the body starts at the first poll.
+                    // Abandoning the unstarted computation destroys its parameters.
+                    self.suspend(f.span);
+                }
                 self.stmts(&body.stmts);
                 self.fall_off_end(body.span);
             }
@@ -992,6 +1002,14 @@ impl<'a, 'l> Builder<'a, 'l> {
             return op;
         }
         let op = self.operand_raw(e);
+        if c.kind == CoercionKind::Poller {
+            let Ty::Async(output) = self.ty(e) else { return op };
+            let (Some(waker), Some(progress)) = (self.lx.t.decls.exec_waker, self.lx.t.decls.exec_progress) else { return op };
+            let target = Ty::Fn(tarn_types::CallMode::Mutable, vec![Ty::Ref(false, Box::new(Ty::Adt(waker, Vec::new())))], Box::new(Ty::Adt(progress, vec![*output])));
+            let t = self.new_local(target.clone(), LocalKind::Temp, None, None, false, e.span);
+            self.assign(Place::local(t), Rvalue::Coerce(CoerceKind::Poller, op, target.clone()), e.span);
+            return self.read(Place::local(t), &target);
+        }
         let Ty::Ref(m, inner) = self.ty(e) else { return op };
         let shared = m && !c.mut_to_shared;
         let (kind, target) = match (c.kind, *inner) {
@@ -1071,10 +1089,7 @@ impl<'a, 'l> Builder<'a, 'l> {
                 self.assign(dest, rv, span);
             }
             ExprKind::Try(inner) => self.try_into(e, inner, dest),
-            ExprKind::Await(_) => {
-                self.diags.push(Diagnostic::error("E3062", "async_lowering_unavailable", "await reached ordinary lowering before state-machine transformation")
-                    .primary(e.span, "suspension must be lowered before ownership checking"));
-            }
+            ExprKind::Await(inner) => self.await_into(e, inner, dest),
             ExprKind::StructLit { fields, .. } => {
                 let Ty::Adt(s, targs) = &ty else {
                     self.assign(dest, Rvalue::Use(Operand::Const(Const::Opaque)), span);
@@ -1355,7 +1370,14 @@ impl<'a, 'l> Builder<'a, 'l> {
                         self.assign(dest, Rvalue::Aggregate(Aggregate::Variant(parent, idx, targs), ops), span);
                     }
                     SymbolKind::Function | SymbolKind::Method { .. } | SymbolKind::ImplMethod { .. } => {
+                        if self.async_primitive(s, args, dest.clone(), span) {
+                            return;
+                        }
                         let ops = args.iter().map(|a| self.arg(a)).collect();
+                        if self.is_async_fn(s) {
+                            self.async_construct(s, type_args, ops, dest, span);
+                            return;
+                        }
                         let c = self.fn_callee(s, type_args);
                         self.finish_call(c, ops, spans_of(args), dest, false, spawn, span);
                     }
@@ -1472,6 +1494,10 @@ impl<'a, 'l> Builder<'a, 'l> {
                 };
                 let mut ops = vec![recv_op];
                 ops.extend(arg_ops);
+                if self.is_async_fn(m) {
+                    self.async_construct(m, type_args, ops, dest, span);
+                    return;
+                }
                 let c = self.fn_callee(m, type_args);
                 let spans = std::iter::once(base.span).chain(args.iter().map(|a| a.span)).collect();
                 self.finish_call(c, ops, spans, dest, false, spawn, span);
@@ -1536,6 +1562,123 @@ impl<'a, 'l> Builder<'a, 'l> {
         self.finish_call(Callee::TaskSpawn { worker, drop_result, scoped,
             type_args: self.f.generics.iter().copied().map(Ty::Param).collect() },
             inputs, spans, dest, false, true, e.span);
+    }
+
+    // ------------------------------------------------------------ async (ADR 0037)
+
+    fn is_async_fn(&self, s: SymbolId) -> bool {
+        self.lx.t.decls.fns.get(&s).is_some_and(|sig| sig.is_async) && self.lx.by_symbol.contains_key(&s)
+    }
+
+    /// Trusted `net` async-body primitives. `_with_waker(body)` calls `body`
+    /// with the waker of the current poll; `_async_park()` is a bare
+    /// suspension edge. Neither creates a second wake mechanism: the stdlib
+    /// arms readiness on the same Phase-12C Waker before parking.
+    fn async_primitive(&mut self, s: SymbolId, args: &[Expr], dest: Place, span: Span) -> bool {
+        let decls = &self.lx.t.decls;
+        let (waker, park) = (decls.exec_async_waker == Some(s), decls.exec_async_park == Some(s));
+        if !waker && !park {
+            return false;
+        }
+        let Some(info) = self.f.asynchronous.clone() else {
+            self.diags.push(Diagnostic::error("E3060", "await_outside_async", "async-body primitive used outside an async function").primary(span, "this function does not suspend"));
+            return true;
+        };
+        if waker {
+            let Some(body) = args.first() else { return true };
+            let callee = self.callable_operand(body);
+            self.finish_call(Callee::Value(callee), vec![Operand::Copy(Place::local(info.waker))], vec![span], dest, false, false, span);
+        } else {
+            self.suspend(span);
+            self.assign(dest, Rvalue::Use(Operand::Const(Const::Unit)), span);
+        }
+        true
+    }
+
+    fn waker_ty(&self) -> Ty {
+        match self.lx.t.decls.exec_waker {
+            Some(w) => Ty::Ref(false, Box::new(Ty::Adt(w, Vec::new()))),
+            None => Ty::Error,
+        }
+    }
+
+    /// Calling an async function only moves its arguments into a new frame.
+    fn async_construct(&mut self, s: SymbolId, type_args: Vec<Ty>, ops: Vec<Operand>, dest: Place, span: Span) {
+        let id = self.lx.by_symbol[&s];
+        self.assign(dest, Rvalue::Aggregate(Aggregate::AsyncFrame(id, type_args), ops), span);
+    }
+
+    /// An explicit suspension point. Abandonment runs the drops of every
+    /// enclosing scope and pending temporary, exactly like an early return.
+    fn suspend(&mut self, span: Span) {
+        let (resume, abandon) = (self.new_block(), self.new_block());
+        self.terminate(Terminator::Suspend { resume, abandon }, span);
+        self.switch_to(abandon);
+        self.exit_to(0, span);
+        self.terminate(Terminator::Abandon, span);
+        self.switch_to(resume);
+    }
+
+    /// `await child`: poll the owned child with this poll's waker until Ready.
+    /// Source computations are pollers called directly with the parent waker;
+    /// trusted manual Operations forward wakes through `poll_with` (ADR 0036).
+    fn await_into(&mut self, e: &Expr, inner: &Expr, dest: Place) {
+        let span = e.span;
+        let child_ty = self.ty(inner);
+        let output = self.ty(e);
+        let (Some(progress), Some(info)) = (self.lx.t.decls.exec_progress, self.f.asynchronous.clone()) else {
+            let _ = self.operand(inner);
+            self.assign(dest, Rvalue::Use(Operand::Const(Const::Opaque)), span);
+            return;
+        };
+        // The completed child is destroyed with the statement, releasing its
+        // child-only loans; a borrowed result keeps only the loans it carries.
+        // A manual Operation's result may borrow its poller storage, so the
+        // ordinary borrow checker then rejects that early destruction.
+        let child = self.temp(child_ty.clone(), inner.span);
+        self.expr_into(inner, Place::local(child));
+        let progress_ty = Ty::Adt(progress, vec![output.clone()]);
+        let def = &self.lx.t.decls.enums[&progress];
+        let pending = def.variants.iter().position(|v| v.name == "Pending").unwrap_or(0) as u32;
+        let ready = def.variants.iter().position(|v| v.name == "Ready").unwrap_or(1) as u32;
+        let poll = self.new_block();
+        self.goto(poll, span);
+        self.switch_to(poll);
+        let r = self.new_local(progress_ty.clone(), LocalKind::Temp, None, None, false, span);
+        let waker = Operand::Copy(Place::local(info.waker));
+        let callee = match &child_ty {
+            Ty::Adt(op, args) if Some(*op) == self.lx.t.decls.exec_operation => {
+                let with = self.lx.t.decls.exec_poll_with.and_then(|m| self.lx.by_symbol.get(&m).copied());
+                let this = self.ref_temp(true, Place::local(child), &child_ty, inner.span);
+                match with {
+                    Some(id) => (Callee::Fn(id, args.clone()), vec![this, waker]),
+                    None => (Callee::Opaque("net.Operation.poll_with".into()), vec![this, waker]),
+                }
+            }
+            _ => {
+                let this = self.ref_temp(true, Place::local(child), &child_ty, inner.span);
+                (Callee::Value(this), vec![waker])
+            }
+        };
+        let (callee, args) = callee;
+        let spans = vec![inner.span; args.len()];
+        self.finish_call(callee, args, spans, Place::local(r), false, false, span);
+        let d = self.new_local(Ty::Int(tarn_types::IntTy::U32), LocalKind::Temp, None, None, false, span);
+        self.assign(Place::local(d), Rvalue::Discriminant(Place::local(r)), span);
+        let (pending_bb, ready_bb) = (self.new_block(), self.new_block());
+        self.terminate(Terminator::Switch { discr: Operand::Copy(Place::local(d)), cases: vec![(pending as i128, pending_bb)], otherwise: ready_bb }, span);
+        self.switch_to(pending_bb);
+        self.push(StatementKind::Drop(Place::local(r)), span);
+        let (resume, abandon) = (self.new_block(), self.new_block());
+        self.terminate(Terminator::Suspend { resume, abandon }, span);
+        self.switch_to(resume);
+        self.goto(poll, span);
+        self.switch_to(abandon);
+        self.exit_to(0, span);
+        self.terminate(Terminator::Abandon, span);
+        self.switch_to(ready_bb);
+        let value = self.read(Place::local(r).project(Proj::Downcast(ready)).project(Proj::Field(0)), &output);
+        self.assign(dest, Rvalue::Use(value), span);
     }
 
     // ------------------------------------------------------------ closures
@@ -1692,17 +1835,8 @@ fn prune(f: &mut Function) {
         if !reach[i] {
             continue;
         }
-        let fix = |x: &mut BlockId| x.0 = map[x.0 as usize];
-        match &mut b.term {
-            Terminator::Goto(t) => fix(t),
-            Terminator::Switch { cases, otherwise, .. } => {
-                for (_, t) in cases.iter_mut() {
-                    fix(t);
-                }
-                fix(otherwise);
-            }
-            Terminator::Call { next: Some(t), .. } => fix(t),
-            _ => {}
+        for t in b.term.targets_mut() {
+            t.0 = map[t.0 as usize];
         }
         f.blocks.push(b);
     }

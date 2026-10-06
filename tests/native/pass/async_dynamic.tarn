@@ -1,0 +1,29 @@
+import "net"
+interface Shape {
+    fn area(&self) i32
+}
+struct Square { side i32 }
+impl Shape for Square {
+    fn area(&self) i32 { return self.side * self.side }
+}
+fn pause(owner &net.Execution) net.Operation<void> {
+    var polled = false
+    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
+        if polled { return net.Progress.Ready(()) }
+        polled = true
+        waker.wake()
+        return net.Progress.Pending
+    })
+}
+async fn measure(owner &net.Execution, shape &any Shape) i32 {
+    before := shape.area()
+    await pause(owner)
+    return before + shape.area()
+}
+fn main() Result<void, net.Error> {
+    execution := try net.Execution.new()
+    square := Square{side: 3}
+    var op = net.Operation.new(&execution, measure(&execution, &square))
+    print(try execution.block_on(&mut op))
+    return Ok(())
+}

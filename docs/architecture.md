@@ -175,6 +175,13 @@ Execution owns Poll/mechanical wake bookkeeping; a separate Executor owns a
 bounded operation table, avoiding self-reference. Task insertion consumes and
 returns that table through ordinary provenance. Native helpers only manage
 identity, registration and coalesced wake bits. Tarn schedules fair turns and
-implements all network state transitions. No async/await syntax is added.
+implements all network state transitions.
 See [ADR 0036](adr/0036-suspended-execution.md) and
 [the Phase 12C report](suspended-execution-report.md).
+
+Phase 13 source async (ADR 0037): lowering keeps an async body as an ordinary IR
+function with explicit `Suspend { resume, abandon }`/`Abandon` edges, so move,
+borrow and drop elaboration analyze it unchanged. After verified drop
+elaboration, `ir::async_frame` relocates suspension-live locals and all flags
+into a stable heap frame and makes the state dispatch explicit. The backend only
+places slots at frame offsets and emits poll/destruction adapters.

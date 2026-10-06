@@ -371,9 +371,48 @@ borrowed storage is destroyed. Phase 11C implements owned Mutex/guard resources
 and six concrete sequentially consistent atomics. Mutex Transfer and Share both
 require a Transfer payload; guards have neither capability. The legacy
 `spawn call(...)` form remains frontend-provisional and rejected by native codegen.
-Channels and async/await remain unavailable. Phase 12A adds blocking networking.
+Channels remain unavailable. Phase 12A adds blocking networking; Phase 13 adds
+`async fn`/`await` (section 13c).
 See [ADR 0033](adr/0033-safe-native-tasks.md), accepted for Phase 11, and
 [ADR 0034](adr/0034-blocking-networking.md) for networking.
+
+## 13c. Async functions (Phase 13)
+
+```tarn
+async fn handle(stream &mut net.TcpStream) Result<usize, net.Error> {
+    var bytes = [16]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    count := try await stream.read_async(&mut bytes)
+    try await stream.write_all_async(&bytes[0..count])
+    return Ok(count)
+}
+```
+
+An `async fn f(...) T` declares its output `T`; calling it runs no body code and
+returns an owned `async computation<T>` holding the moved arguments (and the
+loans they carry) in a stable heap frame. `await e` polls `e` with the current
+waker until Ready and evaluates to `T`; it is only valid in an async body (E3060)
+and only on a source computation or the trusted `net.Operation<R>` (E3061).
+`try await e` is `try (await e)`.
+
+Suspension does not change ownership rules: a value moved before an `await` is
+moved after it, a borrow used after an `await` is live across it, and a pending
+computation keeps every borrowed input unavailable until it is destroyed.
+Destroying a computation that has not completed destroys exactly the values its
+current state owns. A completed computation must not be polled again (abort).
+
+Computations run on the Phase-12C executor model. Drive one explicitly:
+
+```tarn
+execution := try net.Execution.new()
+var app = net.Operation.new(&execution, handle(&mut stream))
+count := try try execution.block_on(&mut app)
+```
+
+or add `net.Operation.new(&execution, task())` to a `net.Executor`. Async socket
+operations have distinct names (`read_async`, `write_async`, `write_all_async`,
+`accept_async`, `finish_async`, `recv_from_async`) and require nonblocking
+sockets; blocking methods (and DNS) keep blocking the whole executor if called
+from async code. See [ADR 0037](adr/0037-source-async-lowering.md).
 
 ## 13b. Closures (provisional)
 

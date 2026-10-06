@@ -1,0 +1,10 @@
+error[E4201]: cannot return a reference to `s`
+  --> tests/borrows/fail/E4201_async_frame_reference_escape.tarn:15:5
+   |
+15 |     return &s
+   |     ^^^^^^^^^ returned here
+   |            -- `s` is borrowed here
+   |
+   = note: `s` belongs to this function and is dropped when it returns
+   = help: return an owned value instead, or borrow from a parameter
+

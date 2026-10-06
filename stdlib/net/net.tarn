@@ -560,7 +560,7 @@ pub fn poll_read(waker &Waker, stream &mut TcpStream, buffer &mut []u8) Progress
     return Progress.Pending
 }
 pub fn read_operation(owner &Execution, stream &mut TcpStream, buffer &mut []u8) Operation<Result<usize, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<usize, Error>> { return poll_read(waker, stream, buffer) })
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<usize, Error>> { return _leaf(waker, poll_read(waker, stream, buffer)) })
 }
 pub fn poll_write(waker &Waker, stream &mut TcpStream, buffer &[]u8) Progress<Result<usize, Error>> {
     match _require_nonblocking(stream.fd) { Err(error) => { return Progress.Ready(Err(error)) }
@@ -578,7 +578,7 @@ pub fn poll_write(waker &Waker, stream &mut TcpStream, buffer &[]u8) Progress<Re
     return Progress.Pending
 }
 pub fn write_operation(owner &Execution, stream &mut TcpStream, buffer &[]u8) Operation<Result<usize, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<usize, Error>> { return poll_write(waker, stream, buffer) })
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<usize, Error>> { return _leaf(waker, poll_write(waker, stream, buffer)) })
 }
 pub fn write_all_operation(owner &Execution, stream &mut TcpStream, buffer &[]u8) Operation<Result<void, Error>> {
     var offset = usize(0)
@@ -617,7 +617,7 @@ pub fn poll_accept(waker &Waker, listener &mut TcpListener) Progress<Result<TcpS
     return Progress.Pending
 }
 pub fn accept_operation(owner &Execution, listener &mut TcpListener) Operation<Result<TcpStream, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<TcpStream, Error>> { return poll_accept(waker, listener) })
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<TcpStream, Error>> { return _leaf(waker, poll_accept(waker, listener)) })
 }
 pub fn poll_connect(waker &Waker, connecting &mut Connecting) Progress<Result<void, Error>> {
     match connecting.poll_connected() {
@@ -633,7 +633,7 @@ pub fn poll_connect(waker &Waker, connecting &mut Connecting) Progress<Result<vo
     return Progress.Pending
 }
 pub fn connect_operation(owner &Execution, connecting &mut Connecting) Operation<Result<void, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<void, Error>> { return poll_connect(waker, connecting) })
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<void, Error>> { return _leaf(waker, poll_connect(waker, connecting)) })
 }
 pub fn poll_recv(waker &Waker, socket &mut UdpSocket, buffer &mut []u8) Progress<Result<RecvFrom, Error>> {
     match _require_nonblocking(socket.fd) { Err(error) => { return Progress.Ready(Err(error)) }
@@ -651,7 +651,7 @@ pub fn poll_recv(waker &Waker, socket &mut UdpSocket, buffer &mut []u8) Progress
     return Progress.Pending
 }
 pub fn recv_operation(owner &Execution, socket &mut UdpSocket, buffer &mut []u8) Operation<Result<RecvFrom, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<RecvFrom, Error>> { return poll_recv(waker, socket, buffer) })
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<RecvFrom, Error>> { return _leaf(waker, poll_recv(waker, socket, buffer)) })
 }
 pub fn Execution.wait(&self, timeout i32) Result<void, Error> {
     if timeout < -1 { return Err(Error{kind: ErrorKind.InvalidAddress, code: 22, domain: 0}) }
@@ -678,4 +678,122 @@ pub fn Operation<R>.poll_with(&mut self, parent &Waker) Progress<R> {
     if _wake_link(&self.waker, parent).code != 0 { panic("invalid nested wake association") }
     _wake_take(&self.waker)
     return self.poll()
+}
+
+// Drive one top-level operation on the current thread until Ready (ADR 0037).
+// The caller owns the Operation (an async computation is accepted as its
+// poller by Operation.new); its result may borrow what the poller borrowed,
+// and the Operation is destroyed exactly once by the caller's scope.
+pub fn Execution.block_on<R>(&self, operation &mut Operation<R>) Result<R, Error> {
+    try _check(_wake_owner(&operation.waker, self.state.native))
+    operation.wake()
+    for {
+        if operation.runnable() {
+            match operation.poll() {
+                Progress.Pending => {}
+                Progress.Ready(value) => { return Ok(value) }
+            }
+        } else {
+            try self.wait(-1)
+        }
+    }
+}
+
+// Async-body primitives (ADR 0037), private to this trusted module. Lowering
+// calls `body` with the current poll's Waker, and turns `_async_park` into a
+// bare suspension edge. The Waker loan cannot outlive the callback.
+extern "intrinsic" fn _with_waker<R>(body mut fn(&Waker) R) R
+extern "intrinsic" fn _async_park()
+
+// A completed async leaf releases its readiness registration, as a completed
+// Operation does. Source computations share one Waker sequentially, so the next
+// leaf may arm another descriptor. A wake already queued is preserved.
+fn _disarm(waker &Waker) {
+    queued := _wake_take(waker).value != 0
+    _wake_clear(waker)
+    if queued { _wake(waker) }
+}
+fn _leaf<R>(waker &Waker, progress Progress<R>) Progress<R> {
+    match &progress {
+        Progress.Ready(value) => { _disarm(waker) }
+        Progress.Pending => {}
+    }
+    return progress
+}
+
+// Explicit async I/O over the Phase-12C poll functions. Blocking methods keep
+// their names and behavior; these never block the executor. They require
+// nonblocking sockets, exactly like the manual operations.
+pub async fn TcpStream.read_async(&mut self, buffer &mut []u8) Result<usize, Error> {
+    for {
+        match _with_waker(fn(waker &Waker) Progress<Result<usize, Error>> { return _leaf(waker, poll_read(waker, self, buffer)) }) {
+            Progress.Ready(result) => { return result }
+            Progress.Pending => {}
+        }
+        _async_park()
+    }
+}
+pub async fn TcpStream.write_async(&mut self, buffer &[]u8) Result<usize, Error> {
+    for {
+        match _with_waker(fn(waker &Waker) Progress<Result<usize, Error>> { return _leaf(waker, poll_write(waker, self, buffer)) }) {
+            Progress.Ready(result) => { return result }
+            Progress.Pending => {}
+        }
+        _async_park()
+    }
+}
+// At most one successful write per poll; partial progress wakes the same
+// Waker before parking, so the next executor turn continues (fairness).
+pub async fn TcpStream.write_all_async(&mut self, buffer &[]u8) Result<void, Error> {
+    var offset = usize(0)
+    for {
+        if offset == buffer.len() { return Ok(()) }
+        match _with_waker(fn(waker &Waker) Progress<Result<usize, Error>> {
+            match _leaf(waker, poll_write(waker, self, &buffer[offset..])) {
+                Progress.Ready(result) => match result {
+                    Ok(count) => {
+                        if count != usize(0) && offset + count != buffer.len() { _wake(waker) }
+                        return Progress.Ready(Ok(count))
+                    }
+                    Err(error) => { return Progress.Ready(Err(error)) }
+                }
+                Progress.Pending => { return Progress.Pending }
+            }
+        }) {
+            Progress.Ready(result) => {
+                count := try result
+                if count == usize(0) { return Err(Error{kind: ErrorKind.WriteZero, code: 0, domain: 0}) }
+                offset = offset + count
+            }
+            Progress.Pending => {}
+        }
+        if offset != buffer.len() { _async_park() }
+    }
+}
+pub async fn TcpListener.accept_async(&mut self) Result<TcpStream, Error> {
+    for {
+        match _with_waker(fn(waker &Waker) Progress<Result<TcpStream, Error>> { return _leaf(waker, poll_accept(waker, self)) }) {
+            Progress.Ready(result) => { return result }
+            Progress.Pending => {}
+        }
+        _async_park()
+    }
+}
+pub async fn Connecting.finish_async(&mut self) Result<void, Error> {
+    for {
+        match _with_waker(fn(waker &Waker) Progress<Result<void, Error>> { return _leaf(waker, poll_connect(waker, self)) }) {
+            Progress.Ready(result) => { return result }
+            Progress.Pending => {}
+        }
+        _async_park()
+    }
+}
+pub async fn UdpSocket.recv_from_async(&mut self, buffer &mut []u8) Result<RecvFrom, Error> {
+    for {
+        match _with_waker(fn(waker &Waker) Progress<Result<RecvFrom, Error>> { return _leaf(waker, poll_recv(waker, self, buffer)) }) {
+            Progress.Ready(result) => { return result }
+            Progress.Pending => {}
+        }
+        _async_park()
+    }
 }

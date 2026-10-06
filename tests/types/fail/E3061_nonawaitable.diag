@@ -1,0 +1,6 @@
+error[E3061]: `await` requires a suspended computation
+ --> tests/types/fail/E3061_nonawaitable.tarn:2:11
+  |
+2 |     await 42
+  |           ^^ this value is not awaitable
+

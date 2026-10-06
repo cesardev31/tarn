@@ -24,7 +24,7 @@ tested and documented.
 | 12A | Blocking native TCP/UDP, owned sockets, resolution and Result errors (ADR 0034) | **done within documented blocking Linux v0 subset** |
 | 12B | Nonblocking I/O and level-triggered epoll (ADR 0035) | **done within documented Linux v0 subset** |
 | 12C | Manual suspended operations and single-thread execution (ADR 0036) | **done within documented bootstrap limits; no async syntax** |
-| 13 | Source async lowering over Phase 12C | **in progress: syntax/type foundation; executable frames pending** |
+| 13 | Source async lowering over Phase 12C (ADR 0037) | **done within documented v0 limits; see [the Phase 13 report](phase-13-report.md)** |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
 | 19 | Formatter (basic) | |
 | 20 | VS Code extension (TextMate) | **started**: language + highlighting |
@@ -76,5 +76,6 @@ Blocking networking is covered by Phase 12A and [ADR 0034](adr/0034-blocking-net
 readiness by [ADR 0035](adr/0035-nonblocking-readiness.md) and
 [the Phase 12B report](readiness-report.md).
 The manual execution model is covered by [ADR 0036](adr/0036-suspended-execution.md)
-and [the Phase 12C report](suspended-execution-report.md); source-level async syntax
-requires a later phase.
+and [the Phase 12C report](suspended-execution-report.md); source-level async
+lowering by [ADR 0037](adr/0037-source-async-lowering.md) and
+[the Phase 13 report](phase-13-report.md).

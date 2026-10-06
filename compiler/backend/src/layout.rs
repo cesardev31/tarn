@@ -43,7 +43,7 @@ fn layout_inner(t: &Typed, ty: &Ty, seen: &mut Vec<Ty>) -> Result<Layout> {
                 scalar(8)
             }
         }
-        Ty::Fn(..) => Layout { size: 16, align: 8, fields: Vec::new(), variants: Vec::new() },
+        Ty::Fn(..) | Ty::Async(_) => Layout { size: 16, align: 8, fields: Vec::new(), variants: Vec::new() },
         Ty::Array(elem, n) => {
             if *n > 4096 {
                 return Err(Error::unsupported("fixed arrays exceed v0 limit of 4096 elements"));

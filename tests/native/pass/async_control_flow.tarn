@@ -1,0 +1,84 @@
+import "net"
+struct Buffer { bytes [4]i32
+    len usize }
+enum Shape {
+    Empty
+    Count(i32)
+}
+fn pause(owner &net.Execution) net.Operation<void> {
+    var polled = false
+    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
+        if polled { return net.Progress.Ready(()) }
+        polled = true
+        waker.wake()
+        return net.Progress.Pending
+    })
+}
+async fn identity<T>(owner &net.Execution, value T) T {
+    await pause(owner)
+    return value
+}
+async fn checked(owner &net.Execution, value i32) Result<i32, string> {
+    await pause(owner)
+    if value < 0 { return Err("negative") }
+    return Ok(value * 2)
+}
+async fn fill(owner &net.Execution, buffer &mut Buffer) usize {
+    for i in 0..4 {
+        await pause(owner)
+        buffer.bytes[i] = i32(i) * 10
+        buffer.len = buffer.len + usize(1)
+    }
+    return buffer.len
+}
+async fn first(owner &net.Execution, a &Buffer, b &Buffer) &Buffer {
+    await pause(owner)
+    if a.len >= b.len { return a }
+    return b
+}
+async fn flow(owner &net.Execution) Result<i32, string> {
+    var total = 0
+    var n = 0
+    for {
+        n = n + 1
+        if n == 3 { continue }
+        if n > 5 { break }
+        total = total + await identity(owner, n)
+    }
+    print(total)
+    shape := await identity(owner, Shape.Count(7))
+    match shape {
+        Shape.Empty => { print("empty") }
+        Shape.Count(c) => { total = total + await identity(owner, c) }
+    }
+    name := await identity(owner, "owned string")
+    print(&name)
+    var counter = 0
+    bump := fn() { counter = counter + 1 }
+    bump()
+    await pause(owner)
+    bump()
+    print(counter)
+    doubled := try await checked(owner, total)
+    print(doubled)
+    var buffer = Buffer{bytes: [4]i32{0, 0, 0, 0}, len: usize(0)}
+    filled := await fill(owner, &mut buffer)
+    print(filled)
+    print(buffer.bytes[3])
+    other := Buffer{bytes: [4]i32{1, 1, 1, 1}, len: usize(1)}
+    chosen := await first(owner, &buffer, &other)
+    print(chosen.len)
+    bad := try await checked(owner, -1)
+    print("unreachable")
+    return Ok(bad)
+}
+fn main() Result<void, net.Error> {
+    execution := try net.Execution.new()
+    var op = net.Operation.new(&execution, flow(&execution))
+    result := try execution.block_on(&mut op)
+    match result {
+        Ok(v) => { print(v) }
+        Err(e) => { print(e) }
+    }
+    return Ok(())
+}

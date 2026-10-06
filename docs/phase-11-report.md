@@ -266,8 +266,11 @@ because conditional owner methods remain unsupported.
 General callable-value spawn, richer erased capture evidence, borrowed scoped
 results, projected completion precision and passing scoped handles through
 ordinary functions remain deliberately conservative. Reference-bearing generic
-replace results may keep receiver/argument loans longer than necessary. General
-native contract annotation syntax remains future work; unknown contracts reject.
+replace results may keep receiver/argument loans longer than necessary.
+Loan-bearing replacement inputs now reject with E3051 after Phase-13 review
+demonstrated a scope-local reference escaping through a discarded replacement.
+Constructors and reference-free replacements retain their existing behavior.
+General native contract annotation syntax remains future work; unknown contracts reject.
 Join-on-drop and nonrecursive locking can deadlock on application dependencies.
 These are explicit v0 limits, not unresolved promises blocking ADR acceptance.
 

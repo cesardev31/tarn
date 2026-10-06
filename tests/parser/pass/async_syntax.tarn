@@ -1,0 +1,11 @@
+pub async fn identity<T>(value T) T {
+    return value
+}
+async fn sequence() Result<i32, Error> {
+    first := await identity(1)
+    if first > 0 {
+        second := try await identity(Ok(first))
+        return Ok(second)
+    }
+    return Ok(0)
+}

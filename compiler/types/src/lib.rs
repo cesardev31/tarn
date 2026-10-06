@@ -46,6 +46,9 @@ pub enum CoercionKind {
     Unsize,
     /// `&T → &any I`.
     ToDyn(SymbolId),
+    /// `async computation<T>` → trusted manual poller `mut fn(&Waker) Progress<T>`
+    /// (ADR 0037). Same owned representation; never the reverse direction.
+    Poller,
 }
 
 /// How a binding introduced by a pattern or `for` gets its value (ADR 0018).

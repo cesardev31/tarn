@@ -146,6 +146,19 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 return true;
             }
         }
+        if let (Ty::Async(output), Ty::Fn(tarn_ast::CallMode::Mutable, params, ret)) = (&a, &x)
+            && let [Ty::Ref(false, waker)] = params.as_slice()
+            && matches!(waker.as_ref(), Ty::Adt(w, ws) if Some(*w) == self.env.decls.exec_waker && ws.is_empty())
+            && let Ty::Adt(p, ps) = self.infer.shallow(ret)
+            && Some(p) == self.env.decls.exec_progress
+            && ps.len() == 1
+            && self.infer.unify(output, &ps[0])
+        {
+            if let Some(n) = node {
+                self.tables.coercions.insert(n, Coercion { mut_to_shared: false, kind: CoercionKind::Poller });
+            }
+            return true;
+        }
         if self.infer.unify(&a, &x) {
             return true;
         }
@@ -199,10 +212,6 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     pub fn function(&mut self, f: &FnDecl, sig: &FnSig) {
         self.async_context = f.is_async;
-        if f.is_async {
-            self.err(Diagnostic::error("E3062", "async_lowering_unavailable", "async state-machine lowering is not implemented at this checkpoint")
-                .primary(f.name.span, "this declaration requires generated suspended state"));
-        }
         if let (Some(r), Some(st)) = (&f.receiver, &sig.self_ty) {
             let t = match r.kind {
                 ReceiverKind::Value => st.clone(),

@@ -226,4 +226,6 @@ See [the manual I/O fixture](../tests/native/pass/suspended_io.tarn),
 [the executor example](../tests/native/pass/executor_turns.tarn),
 [ADR 0036](adr/0036-suspended-execution.md) and
 [the Phase 12C report](suspended-execution-report.md). This is a manual bootstrap
-model; async fn, await and a public cancellation API remain deferred.
+model. Phase 13 adds `async fn`/`await` over it and explicit `*_async` socket
+methods ([ADR 0037](adr/0037-source-async-lowering.md)); public cancellation
+remains deferred.

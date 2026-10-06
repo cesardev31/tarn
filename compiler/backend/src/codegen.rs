@@ -44,10 +44,50 @@ fn abi_type(t: &Typed, ty: &Ty) -> Result<Option<cl::Type>> {
     let l = layout::layout(t, ty)?;
     Ok(if l.size == 0 { None } else { Some(scalar(ty).unwrap_or(types::I64)) })
 }
+fn frame(f: &ir::Function) -> Option<&AsyncFrame> {
+    f.asynchronous.as_ref().and_then(|a| a.frame.as_ref())
+}
+/// Mechanical placement of a verified async frame (ADR 0037): an 8-byte
+/// destruction header, the listed locals, then every drop flag.
+struct FrameLayout {
+    size: u32,
+    locals: HashMap<LocalId, u32>,
+    flags: Vec<u32>,
+}
+fn frame_layout(t: &Typed, f: &post::Function) -> Result<FrameLayout> {
+    let frame = frame(&f.decl).ok_or_else(|| Error::bug("frame layout of non-async function"))?;
+    let mut offset = 8u32;
+    let mut locals = HashMap::new();
+    let grow = |offset: u32, size: u32| offset.checked_add(size).filter(|n| *n <= 65536).ok_or_else(|| Error::unsupported("async frame exceeds 64 KiB"));
+    for l in &frame.stored {
+        let lyt = layout::layout(t, &f.decl.local(*l).ty)?;
+        offset = (offset + lyt.align.max(1) - 1) & !(lyt.align.max(1) - 1);
+        locals.insert(*l, offset);
+        offset = grow(offset, lyt.size)?;
+    }
+    let mut flags = Vec::new();
+    for flag in &f.flags {
+        flags.push(offset);
+        let n = match flag {
+            post::FlagKind::Value(_) => 1,
+            post::FlagKind::Elements(_, n) => u32::try_from(*n).map_err(|_| Error::unsupported("bitmap too large"))?.max(1),
+        };
+        offset = grow(offset, n)?;
+    }
+    Ok(FrameLayout { size: offset.max(8), locals, flags })
+}
 fn signature(module: &ObjectModule, t: &Typed, f: &ir::Function) -> Result<cl::Signature> {
     let mut sig = module.make_signature();
     if layout::layout(t, &f.ret)?.size > 0 && scalar(&f.ret).is_none() {
         sig.params.push(cl::AbiParam::new(types::I64));
+    }
+    if frame(f).is_some() {
+        // (frame, waker, abandon); the result is Progress<T>.
+        sig.params.extend([cl::AbiParam::new(types::I64), cl::AbiParam::new(types::I64), cl::AbiParam::new(types::I8)]);
+        if let Some(ty) = scalar(&f.ret) {
+            sig.returns.push(cl::AbiParam::new(ty));
+        }
+        return Ok(sig);
     }
     for p in f.params() {
         if let Some(ty) = abi_type(t, &f.local(p).ty)? {
@@ -85,10 +125,68 @@ fn environment(t: &Typed, f: &ir::Function) -> Result<(u32, Vec<(u32, Ty)>)> {
 }
 fn closure_signature(module: &ObjectModule, t: &Typed, f: &ir::Function) -> Result<cl::Signature> {
     let mut sig = signature(module, t, f)?;
+    if frame(f).is_some() {
+        // Polled as `mut fn(&Waker) Progress<T>`: drop the abandon lane.
+        sig.params.pop();
+        return Ok(sig);
+    }
     let sret = usize::from(layout::layout(t, &f.ret)?.size > 0 && scalar(&f.ret).is_none());
     let capture_lanes = f.params().take(capture_count(f)).filter(|l| layout::layout(t, &f.local(*l).ty).is_ok_and(|l| l.size > 0)).count();
     sig.params.splice(sret..sret + capture_lanes, [cl::AbiParam::new(types::I64)]);
     Ok(sig)
+}
+/// Poll adapter (`mut fn(&Waker)` ABI) and frame destruction for one async
+/// body. Destruction runs the body's verified abandonment path, then frees.
+fn emit_frame_thunks(module: &mut ObjectModule, t: &Typed, f: &ir::Function, body: FuncId, poll: FuncId, drop: FuncId, free: FuncId) -> Result<()> {
+    let sret = layout::layout(t, &f.ret)?.size > 0 && scalar(&f.ret).is_none();
+    let size = layout::layout(t, &f.ret)?;
+    for (thunk, abandon) in [(poll, false), (drop, true)] {
+        let mut ctx = module.make_context();
+        ctx.func.signature = if abandon {
+            let mut sig = module.make_signature();
+            sig.params.push(cl::AbiParam::new(types::I64));
+            sig
+        } else {
+            closure_signature(module, t, f)?
+        };
+        let mut fb = FunctionBuilderContext::new();
+        {
+            let mut b = FunctionBuilder::new(&mut ctx.func, &mut fb);
+            let entry = b.create_block();
+            b.append_block_params_for_function_params(entry);
+            b.switch_to_block(entry);
+            let params = b.block_params(entry).to_vec();
+            let target = module.declare_func_in_func(body, b.func);
+            let mut values = Vec::new();
+            if abandon {
+                if sret {
+                    let slot = b.create_sized_stack_slot(cl::StackSlotData::new(cl::StackSlotKind::ExplicitSlot, size.size.max(1), size.align.trailing_zeros() as u8));
+                    values.push(b.ins().stack_addr(types::I64, slot, 0));
+                }
+                let zero = b.ins().iconst(types::I64, 0);
+                let yes = b.ins().iconst(types::I8, 1);
+                values.extend([params[0], zero, yes]);
+            } else {
+                values.extend_from_slice(&params);
+                let no = b.ins().iconst(types::I8, 0);
+                values.push(no);
+            }
+            let call = b.ins().call(target, &values);
+            let results = b.inst_results(call).to_vec();
+            if abandon {
+                let free = module.declare_func_in_func(free, b.func);
+                b.ins().call(free, &[params[0]]);
+                b.ins().return_(&[]);
+            } else {
+                b.ins().return_(&results);
+            }
+            b.seal_all_blocks();
+            b.finalize();
+        }
+        cranelift_codegen::verify_function(&ctx.func, module.isa()).map_err(|e| Error::bug(e.to_string()))?;
+        module.define_function(thunk, &mut ctx).map_err(|e| Error::bug(e.to_string()))?;
+    }
+    Ok(())
 }
 pub(crate) fn verify_dynamic(p: &post::Program, t: &Typed) -> Result<()> {
     for f in &p.functions {
@@ -209,6 +307,15 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         let thunk = module.declare_function(&format!("tarn_thunk_{}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?;
         thunks.insert(*id, thunk);
     }
+    let mut frame_drops = HashMap::new();
+    for id in &ordered {
+        if frame(&p.functions[id.0 as usize].decl).is_some() {
+            let mut sig = module.make_signature();
+            sig.params.push(cl::AbiParam::new(types::I64));
+            let drop = module.declare_function(&format!("tarn_async_drop_{}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?;
+            frame_drops.insert(*id, drop);
+        }
+    }
     let task_adapters = emit_task_adapters(&mut module, p, t, &ids)?;
     let mut runtime = HashMap::new();
     for (name, params, returns) in [
@@ -311,6 +418,8 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
                 f,
                 ids: &ids,
                 thunks: &thunks,
+                frame_drops: &frame_drops,
+                env: None,
                 runtime: &runtime,
                 task_adapters: &task_adapters,
                 tables: &tables,
@@ -329,6 +438,10 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     thunk_order.sort_by_key(|(id, _)| **id);
     for (id, thunk) in thunk_order {
         let f = &p.functions[id.0 as usize].decl;
+        if frame(f).is_some() {
+            emit_frame_thunks(&mut module, t, f, ids[id], *thunk, frame_drops[id], runtime["tarn_rt_env_free"])?;
+            continue;
+        }
         let n = capture_count(f);
         let mut ctx = module.make_context();
         ctx.func.signature = closure_signature(&module, t, f)?;
@@ -486,12 +599,17 @@ fn emit_task_adapters(module: &mut ObjectModule, p: &post::Program, t: &Typed,
 enum Slot {
     Ssa(Variable),
     Stack(cl::StackSlot),
+    /// Offset in the stable heap frame of an async body.
+    Frame(u32),
     Empty,
 }
 #[derive(Clone, Copy)]
 enum Flag {
     Bit(Variable),
     Bits(cl::StackSlot, u64),
+    /// Async frame offsets: flags persist across polls.
+    FrameBit(u32),
+    FrameBits(u32, u64),
 }
 #[derive(Clone)]
 struct Val {
@@ -506,6 +624,9 @@ struct Cx<'a, 'b> {
     f: &'b post::Function,
     ids: &'b HashMap<FunctionId, FuncId>,
     thunks: &'b HashMap<FunctionId, FuncId>,
+    frame_drops: &'b HashMap<FunctionId, FuncId>,
+    /// Frame pointer of an async body.
+    env: Option<cl::Value>,
     runtime: &'b HashMap<String, FuncId>,
     task_adapters: &'b HashMap<FunctionId, (FuncId, FuncId)>,
     tables: &'b [(tarn_resolve::SymbolId, Ty, Vec<FunctionId>, DataId)],
@@ -526,9 +647,12 @@ impl Cx<'_, '_> {
                 }
             }
         }
+        let placement = if frame(&self.f.decl).is_some() { Some(frame_layout(self.t, self.f)?) } else { None };
         for (i, l) in self.f.decl.locals.iter().enumerate() {
             let lyt = layout::layout(self.t, &l.ty)?;
-            let slot = if lyt.size == 0 {
+            let slot = if let Some(offset) = placement.as_ref().and_then(|p| p.locals.get(&LocalId(i as u32))) {
+                if lyt.size == 0 { Slot::Empty } else { Slot::Frame(*offset) }
+            } else if lyt.size == 0 {
                 Slot::Empty
             } else if let Some(ty) = scalar(&l.ty).filter(|_| !addressed.contains(&LocalId(i as u32))) {
                 Slot::Ssa(self.b.declare_var(ty))
@@ -537,10 +661,12 @@ impl Cx<'_, '_> {
             };
             self.locals.push(slot);
         }
-        for flag in &self.f.flags {
-            let slot = match flag {
-                post::FlagKind::Value(_) => Flag::Bit(self.b.declare_var(types::I8)),
-                post::FlagKind::Elements(_, n) => Flag::Bits(self.stack(u32::try_from(*n).map_err(|_| Error::unsupported("bitmap too large"))?.max(1), 1), *n),
+        for (i, flag) in self.f.flags.iter().enumerate() {
+            let slot = match (flag, &placement) {
+                (post::FlagKind::Value(_), Some(p)) => Flag::FrameBit(p.flags[i]),
+                (post::FlagKind::Elements(_, n), Some(p)) => Flag::FrameBits(p.flags[i], *n),
+                (post::FlagKind::Value(_), None) => Flag::Bit(self.b.declare_var(types::I8)),
+                (post::FlagKind::Elements(_, n), None) => Flag::Bits(self.stack(u32::try_from(*n).map_err(|_| Error::unsupported("bitmap too large"))?.max(1), 1), *n),
             };
             self.flags.push(slot);
         }
@@ -561,11 +687,20 @@ impl Cx<'_, '_> {
                 pi += 1;
             }
         }
+        let mut entry_values = Vec::new();
+        if let (Some(info), Some(frame)) = (&self.f.decl.asynchronous, frame(&self.f.decl)) {
+            self.env = Some(params[pi]);
+            for (local, value) in [(info.waker, params[pi + 1]), (frame.abandon, params[pi + 2])] {
+                let ty = self.f.decl.local(local).ty.clone();
+                self.write(&Place::local(local), Val { value: Some(value), ty })?;
+                entry_values.push(local.0 as usize);
+            }
+        }
         // Non-SSA uninitialized locals have no reads on valid source paths.
         // Give SSA slots an arbitrary zero entry definition so a dead/uninit
         // edge through a guarded drop does not require an undefined SSA use.
         for i in 0..self.locals.len() {
-            if i > 0 && i <= self.f.decl.param_count as usize {
+            if (i > 0 && i <= self.f.decl.param_count as usize) || entry_values.contains(&i) {
                 continue;
             }
             if let Slot::Ssa(var) = self.locals[i] {
@@ -586,6 +721,18 @@ impl Cx<'_, '_> {
         self.b.seal_all_blocks();
         // The outer caller consumes/finalizes the builder after lowering.
         Ok(())
+    }
+    /// Address and width of a memory-resident flag (stack bitmap or frame).
+    fn flag_memory(&mut self, id: post::FlagId) -> Result<(cl::Value, u64)> {
+        Ok(match self.flags[id.0 as usize] {
+            Flag::Bits(slot, n) => (self.b.ins().stack_addr(types::I64, slot, 0), n),
+            Flag::FrameBit(offset) | Flag::FrameBits(offset, _) => {
+                let env = self.env.ok_or_else(|| Error::bug("frame flag outside async body"))?;
+                let n = if let Flag::FrameBits(_, n) = self.flags[id.0 as usize] { n } else { 1 };
+                (self.b.ins().iadd_imm(env, i64::from(offset)), n)
+            }
+            Flag::Bit(_) => return Err(Error::bug("register flag has no address")),
+        })
     }
     fn stack(&mut self, size: u32, alignment: u32) -> cl::StackSlot {
         self.b.create_sized_stack_slot(cl::StackSlotData::new(cl::StackSlotKind::ExplicitSlot, size.max(1), alignment.trailing_zeros() as u8))
@@ -626,6 +773,10 @@ impl Cx<'_, '_> {
                 Slot::Empty => {
                     let s = self.stack(1, 1);
                     self.b.ins().stack_addr(types::I64, s, 0)
+                }
+                Slot::Frame(offset) => {
+                    let env = self.env.ok_or_else(|| Error::bug("frame slot outside async body"))?;
+                    self.b.ins().iadd_imm(env, i64::from(offset))
                 }
                 Slot::Ssa(_) => return Err(Error::bug("address-taken SSA local")),
             }
@@ -768,21 +919,22 @@ impl Cx<'_, '_> {
                 let v = self.b.ins().iconst(types::I8, i64::from(*value));
                 match self.flags[id.0 as usize] {
                     Flag::Bit(var) => self.b.def_var(var, v),
-                    Flag::Bits(s, n) => {
+                    Flag::FrameBit(_) | Flag::Bits(..) | Flag::FrameBits(..) => {
+                        let (base, n) = self.flag_memory(*id)?;
                         for i in 0..n {
-                            self.b.ins().stack_store(v, s, i as i32);
+                            self.b.ins().store(cl::MemFlags::new(), v, base, i as i32);
                         }
                     }
                 }
             }
             post::Op::ClearElement(id, idx) => {
-                let Flag::Bits(s, n) = self.flags[id.0 as usize] else {
+                if !matches!(self.flags[id.0 as usize], Flag::Bits(..) | Flag::FrameBits(..)) {
                     return Err(Error::bug("element flag not bitmap"));
-                };
+                }
+                let (ptr, n) = self.flag_memory(*id)?;
                 let i = self.read(&Place::local(*idx))?.value.unwrap();
                 let bad = self.b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, i, n as i64);
                 self.fault_if(bad);
-                let ptr = self.b.ins().stack_addr(types::I64, s, 0);
                 let ptr = self.b.ins().iadd(ptr, i);
                 let zero = self.b.ins().iconst(types::I8, 0);
                 self.b.ins().store(cl::MemFlags::new(), zero, ptr, 0);
@@ -832,6 +984,42 @@ impl Cx<'_, '_> {
                     _ => return Err(Error::unsupported("unary operation")),
                 };
                 Ok(Val { value: Some(value), ty: v.ty })
+            }
+            Rvalue::Aggregate(Aggregate::AsyncFrame(id, _), ops) => {
+                // Lazy construction: allocate the stable frame, move arguments
+                // into their parameter slots, start in state 0. No body code runs.
+                let g = &self.p.functions[id.0 as usize];
+                let frame = frame(&g.decl).ok_or_else(|| Error::bug("async construction without frame"))?;
+                let placement = frame_layout(self.t, g)?;
+                if frame.params.len() != ops.len() {
+                    return Err(Error::bug("async construction arity"));
+                }
+                let size = self.b.ins().iconst(types::I64, i64::from(placement.size));
+                let env = self.runtime("tarn_rt_env_alloc", &[size])[0];
+                let drop = self.module.declare_func_in_func(self.frame_drops[id], self.b.func);
+                let drop_code = self.b.ins().func_addr(types::I64, drop);
+                self.b.ins().store(cl::MemFlags::new(), drop_code, env, 0);
+                for (param, o) in frame.params.iter().zip(ops) {
+                    let v = self.operand(o)?;
+                    let ty = &g.decl.local(*param).ty;
+                    if v.ty != *ty {
+                        return Err(Error::bug("async parameter type"));
+                    }
+                    let ptr = self.b.ins().iadd_imm(env, i64::from(placement.locals[param]));
+                    if let Some(value) = v.value {
+                        if scalar(ty).is_some() {
+                            self.b.ins().store(cl::MemFlags::new(), value, ptr, 0);
+                        } else {
+                            self.copy(ptr, value, layout::layout(self.t, ty)?.size);
+                        }
+                    }
+                }
+                let zero = self.b.ins().iconst(types::I32, 0);
+                self.b.ins().store(cl::MemFlags::new(), zero, env, placement.locals[&frame.state] as i32);
+                let target = self.module.declare_func_in_func(self.thunks[id], self.b.func);
+                let code = self.b.ins().func_addr(types::I64, target);
+                let value = self.pair(code, env);
+                Ok(Val { value: Some(value), ty: dest.clone() })
             }
             Rvalue::Aggregate(Aggregate::Closure(id, _), ops) => {
                 let f = &self.p.functions[id.0 as usize].decl;
@@ -973,7 +1161,7 @@ impl Cx<'_, '_> {
                 let v = self.operand(o)?;
                 self.cast(v, ty)
             }
-            Rvalue::Coerce(CoerceKind::MutToShared, o, ty) => {
+            Rvalue::Coerce(CoerceKind::MutToShared | CoerceKind::Poller, o, ty) => {
                 let v = self.operand(o)?;
                 Ok(Val { value: v.value, ty: ty.clone() })
             }
@@ -1218,6 +1406,7 @@ impl Cx<'_, '_> {
             Terminator::Unreachable => {
                 self.b.ins().trap(cl::TrapCode::user(2).unwrap());
             }
+            Terminator::Suspend { .. } | Terminator::Abandon => return Err(Error::bug("async suspension reached the backend before frame lowering")),
             Terminator::Call { callee, args, dest, next, spawn, .. } => {
                 if *spawn && !matches!(callee, Callee::TaskSpawn { .. }) {
                     return Err(Error::unsupported("spawn"));
@@ -1345,8 +1534,18 @@ impl Cx<'_, '_> {
                     Callee::Value(o) => {
                         let closure = self.operand(o)?;
                         let callable_ty = if let Ty::Ref(_, inner) = &closure.ty { inner.as_ref() } else { &closure.ty };
-                        let Ty::Fn(_, params, ret) = callable_ty else {
-                            return Err(Error::bug("indirect nonfunction"));
+                        // A source async computation is polled as `mut fn(&Waker) Progress<T>`.
+                        let polled;
+                        let (params, ret) = match callable_ty {
+                            Ty::Fn(_, params, ret) => (params, ret),
+                            Ty::Async(output) => {
+                                let (Some(waker), Some(progress)) = (self.t.decls.exec_waker, self.t.decls.exec_progress) else {
+                                    return Err(Error::bug("async poll without trusted declarations"));
+                                };
+                                polled = (vec![Ty::Ref(false, Box::new(Ty::Adt(waker, Vec::new())))], Box::new(Ty::Adt(progress, vec![(**output).clone()])));
+                                (&polled.0, &polled.1)
+                            }
+                            _ => return Err(Error::bug("indirect nonfunction")),
                         };
                         if params.len() != args.len() || **ret != dest_ty || params.iter().zip(&args).any(|(t, v)| *t != v.ty) {
                             return Err(Error::bug("indirect ABI mismatch"));
@@ -1476,10 +1675,14 @@ impl Cx<'_, '_> {
         match d {
             post::Drop::Value(p) => self.drop_value(p)?,
             post::Drop::Guard(id, d) => {
-                let Flag::Bit(v) = self.flags[id.0 as usize] else {
-                    return Err(Error::bug("guard bitmap"));
+                let c = match self.flags[id.0 as usize] {
+                    Flag::Bit(v) => self.b.use_var(v),
+                    Flag::FrameBit(_) => {
+                        let (addr, _) = self.flag_memory(*id)?;
+                        self.b.ins().load(types::I8, cl::MemFlags::new(), addr, 0)
+                    }
+                    _ => return Err(Error::bug("guard bitmap")),
                 };
-                let c = self.b.use_var(v);
                 let yes = self.b.create_block();
                 let next = self.b.create_block();
                 self.b.ins().brif(c, yes, &[], next, &[]);
@@ -1514,11 +1717,12 @@ impl Cx<'_, '_> {
                 self.b.switch_to_block(next);
             }
             post::Drop::Remaining { place, flag } => {
-                let Flag::Bits(slot, n) = self.flags[flag.0 as usize] else {
+                if !matches!(self.flags[flag.0 as usize], Flag::Bits(..) | Flag::FrameBits(..)) {
                     return Err(Error::bug("remaining without bitmap"));
-                };
+                }
+                let (base, n) = self.flag_memory(*flag)?;
                 for i in 0..n {
-                    let c = self.b.ins().stack_load(types::I8, slot, i as i32);
+                    let c = self.b.ins().load(types::I8, cl::MemFlags::new(), base, i as i32);
                     let yes = self.b.create_block();
                     let next = self.b.create_block();
                     self.b.ins().brif(c, yes, &[], next, &[]);
@@ -1577,7 +1781,7 @@ impl Cx<'_, '_> {
             return Ok(());
         }
         match ty {
-            Ty::Fn(..) => {
+            Ty::Fn(..) | Ty::Async(_) => {
                 let env = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 8);
                 self.runtime("tarn_rt_env_drop", &[env]);
             }

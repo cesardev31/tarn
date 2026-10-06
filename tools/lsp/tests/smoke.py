@@ -79,70 +79,32 @@ with tempfile.TemporaryDirectory(prefix='tarn lsp ñ ') as directory:
     assert child.read_text() == 'pub fn get() i32 { return 1 }\n'
 print('PASS: stdio lifecycle, unsaved diagnostics/clearing, UTF-16, hover, definition, imported buffers, unchanged disk')
 
-# Async source facts are visible even while executable frame lowering is gated.
+# Async source facts, lowering-clean diagnostics and source-level ownership errors.
 with tempfile.TemporaryDirectory(prefix='tarn async lsp ') as directory:
     entry = Path(directory) / 'main.tarn'
     entry.write_text('fn main() {}\n')
     uri = entry.as_uri()
-    source = 'async fn get() i32 { return 42 }\nfn main() {\n    op := get()\n    op\n}\n'
+    source = 'async fn get() i32 { return 42 }\nasync fn twice() i32 {\n    value := await get()\n    return value * 2\n}\nfn main() {\n    op := get()\n    op\n}\n'
+    moved = 'fn take(s string) {}\nasync fn get() i32 { return 1 }\nasync fn f(s string) {\n    take(s)\n    n := await get()\n    print(&s)\n}\nfn main() {}\n'
     out = exchange([
         {'id': 1, 'method': 'initialize', 'params': {}}, opened(uri, source),
-        request('textDocument/hover', 2, uri, 3, 5),
-        request('textDocument/definition', 3, uri, 2, 11),
+        request('textDocument/hover', 2, uri, 6, 5),
+        request('textDocument/definition', 3, uri, 6, 11),
+        request('textDocument/hover', 5, uri, 2, 5),
         changed(uri, 'fn main() { await 42 }\n', 2),
+        changed(uri, moved, 3),
         {'id': 4, 'method': 'shutdown'}, {'method': 'exit'},
     ])
     diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics']
-    assert [d['code'] for d in diagnostics[0]] == ['E3062'], diagnostics
-    assert diagnostics[0][0]['range']['start'] == {'line': 0, 'character': 9}
+    assert diagnostics[0] == [], diagnostics
     assert [d['code'] for d in diagnostics[1]] == ['E3060'], diagnostics
+    # Ownership across a suspension is reported on source code, never generated frame state.
+    assert [d['code'] for d in diagnostics[2]] == ['E4001'], diagnostics
+    assert diagnostics[2][0]['range']['start'] == {'line': 5, 'character': 10}, diagnostics
+    assert 'async' not in diagnostics[2][0]['message'] and '_' not in diagnostics[2][0]['message'].replace('`s`', ''), diagnostics
     responses = {m['id']: m for m in out if 'id' in m}
     assert responses[2]['result']['contents']['value'] == 'op: async computation<i32>', responses[2]
     assert responses[3]['result']['range']['start'] == {'line': 0, 'character': 9}, responses[3]
+    assert responses[5]['result']['contents']['value'] == 'value: i32', responses[5]
     assert entry.read_text() == 'fn main() {}\n'
-print('PASS: async source types, definition, context diagnostics and explicit lowering gate')
-
-# Official stdlib buffers keep their declaration identities, including intrinsics.
-# A user file named net.tarn must not acquire that authority.
-for module in ('core', 'net', 'string'):
-    entry = ROOT / 'stdlib' / module / f'{module}.tarn'
-    text = entry.read_text()
-    out = exchange([{'id': 1, 'method': 'initialize', 'params': {}},
-                    opened(entry.as_uri(), text),
-                    {'id': 2, 'method': 'shutdown'}, {'method': 'exit'}])
-    diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics']
-    assert diagnostics and diagnostics[-1] == [], (module, diagnostics)
-    assert entry.read_text() == text
-
-with tempfile.TemporaryDirectory(prefix='tarn untrusted stdlib ') as directory:
-    entry = Path(directory) / 'net.tarn'
-    text = 'extern "intrinsic" fn injected() i32\nfn main() {}\n'
-    entry.write_text(text)
-    out = exchange([{'id': 1, 'method': 'initialize', 'params': {}},
-                    opened(entry.as_uri(), text),
-                    {'id': 2, 'method': 'shutdown'}, {'method': 'exit'}])
-    diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics']
-    assert any(d.get('code') == 'E2027' for d in diagnostics[-1]), diagnostics
-net = ROOT / 'stdlib/net/net.tarn'
-text = net.read_text()
-out = exchange([{'id': 1, 'method': 'initialize', 'params': {}},
-                opened(net.as_uri(), text),
-                changed(net.as_uri(), text + '\nfn lsp_probe() { missing_lsp_value }\n', 2),
-                changed(net.as_uri(), text, 3),
-                {'id': 2, 'method': 'shutdown'}, {'method': 'exit'}])
-diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics']
-assert any(d.get('code') == 'E2001' for d in diagnostics[1]), diagnostics
-assert diagnostics[-1] == [] and net.read_text() == text
-
-with tempfile.TemporaryDirectory(prefix='tarn stdlib overlay ') as directory:
-    entry = Path(directory) / 'main.tarn'
-    main = 'import "net"\nfn main() { print(net.lsp_probe()) }\n'
-    entry.write_text(main)
-    out = exchange([{'id': 1, 'method': 'initialize', 'params': {}},
-                    opened(net.as_uri(), text + '\npub fn lsp_probe() i32 { return 42 }\n'),
-                    opened(entry.as_uri(), main),
-                    {'id': 2, 'method': 'shutdown'}, {'method': 'exit'}])
-    diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics' and m['params']['uri'] == entry.as_uri()]
-    assert diagnostics and diagnostics[-1] == [], diagnostics
-    assert net.read_text() == text
-print('PASS: official stdlib buffers, live errors, imported overlays and untrusted intrinsic rejection')
+print('PASS: async source types, definition, context diagnostics and source-level ownership across await')

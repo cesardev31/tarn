@@ -97,10 +97,9 @@ Bitwise operators bind tighter than comparisons (unlike C), so
 `try a.b() + 1` is `(try a.b()) + 1`.
 `try await f()` is `try (await f())`; `await f() + 1` is
 `(await f()) + 1`. Async blocks, async closures and nested function items are
-not introduced. The Phase-13 syntax/type foundation is in progress: executable
-state-machine lowering is not available yet and async declarations report E3062.
-At this checkpoint the modifier is recognized on free and inherent method items;
-async interface/impl declarations remain outside the parser's supported surface.
+not introduced. The modifier is recognized on free and inherent method items;
+async interface/impl declarations remain outside the supported surface. Async
+bodies lower onto Phase-12C suspended execution (ADR 0037).
 
 ## Newlines (ADR 0008)
 

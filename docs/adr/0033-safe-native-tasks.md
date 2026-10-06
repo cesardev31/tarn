@@ -269,6 +269,10 @@ generic obligations; conditional method-owner bounds remain unsupported by
 ADR 0015. No dereference syntax, public raw storage or separate lifetime checker
 was added. Generic reference-bearing replace results retain conservative inflow
 from receiver and arguments; they may keep loans longer than strictly necessary.
+Phase-13 review found that accepting a new replacement carrying loans did not
+retain those loans in the mutex after the guard/result ended. Such inputs now
+reject with E3051. Reference-free owned replacements remain supported; new stored
+loan effects require a deliberate contract rather than optimistic acceptance.
 
 ### Verified destruction and native mechanics
 

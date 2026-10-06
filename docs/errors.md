@@ -184,10 +184,11 @@ Golden tests in `tests/**/fail/*.tarn` pin the rendered text of each code.
 
 | Code | Name | Meaning |
 |------|------|---------|
+| E3051 | `unmodeled_replacement_loans` | a native guard replacement cannot accept new payload loans without a stored-loan effect contract |
 | E3060 | `await_outside_async` | await requires an async function context; an ordinary closure does not inherit that context |
 | E3061 | `not_awaitable` | the operand is neither a source async computation nor the trusted Phase-12C Operation declaration |
-| E3062 | `async_lowering_unavailable` | temporary implementation gate: executable async frame lowering has not been implemented |
+| E3062 | `async_lowering_unavailable` | retired: temporary Phase-13 checkpoint gate, removed when frame lowering landed; never reused |
 
-E3062 is not a language restriction or evidence that an async body executes
-synchronously. The gate prevents any native compilation of async declarations
-until their state machines and destruction are implemented and verified.
+E3062 was a temporary gate that prevented native compilation of async
+declarations before their state machines and destruction were implemented.
+Async bodies now lower onto verified frames (ADR 0037); the code is retired.

@@ -368,12 +368,26 @@ impl<'a> Fx<'a> {
             Callee::Opaque(_) => None,
             Callee::Intrinsic(_) | Callee::Value(_) => None,
         };
+        // Polling a source async computation: its result cannot borrow the
+        // generated frame (the async body's own provenance rejects returning
+        // frame storage) nor the per-poll waker, which source code cannot name.
+        // It carries the loans the computation captured (ADR 0037).
+        let polled_async = matches!(callee, Callee::Value(o) if operand_place(o).is_some_and(|p| matches!(tarn_ir::post_drop::place_ty(self.f, self.t, p), Some(Ty::Ref(_, inner)) if matches!(*inner, Ty::Async(_)))));
         match positions {
+            _ if polled_async => {}
             Some(ps) => ps.iter().filter_map(|&i| args.get(i)).for_each(|a| self.holds_of(h, a, &mut inflow)),
             None => args.iter().for_each(|a| self.holds_of(h, a, &mut inflow)),
         }
         if let Callee::Value(o) = callee {
-            self.holds_of(h, o, &mut inflow);
+            let mut callee_holds = BitSet::new(self.loans.len());
+            self.holds_of(h, o, &mut callee_holds);
+            for l in callee_holds.iter() {
+                let place = &self.loans[l].place;
+                let frame_borrow = polled_async && self.loans[l].param.is_none() && !place.proj.contains(&Proj::Deref) && matches!(self.f.local(place.local).ty, Ty::Async(_));
+                if !frame_borrow {
+                    inflow.insert(l);
+                }
+            }
         }
         inflow
     }
@@ -610,6 +624,27 @@ impl<'a> Fx<'a> {
         let tspan = blk.term_span;
         match &blk.term {
             Terminator::Call { callee, args, arg_spans, dest, spawn, .. } => {
+                // Native replacement transfers bytes into an existing owner.
+                // Result provenance alone cannot retain newly stored loans in
+                // that owner. Keep this boundary conservative until stored-loan
+                // effects are modeled, rather than accepting a dangling payload.
+                if matches!(callee, Callee::Intrinsic(name) if name == "MutexGuard.replace")
+                    && args.len() == 2
+                    && let Some(receiver) = operand_place(&args[0])
+                {
+                    let mut receiver_ty = &self.f.local(receiver.local).ty;
+                    while let Ty::Ref(_, inner) = receiver_ty { receiver_ty = inner; }
+                    if matches!(receiver_ty, Ty::Adt(id, _) if Some(*id) == self.t.decls.mutex_guard) {
+                        let mut stored = BitSet::new(self.loans.len());
+                        self.holds_of(h, &args[1], &mut stored);
+                        if let Some(loan) = stored.iter().next() {
+                            self.diags.push(Diagnostic::error("E3051", "unmodeled_replacement_loans", "replacement values with retained loans are not supported")
+                                .primary(arg_spans.get(1).copied().unwrap_or(tspan), "use an owned replacement without retained borrows")
+                                .secondary(self.loans[loan].span, "the replacement carries this loan")
+                                .note("v0 does not propagate newly stored loans from a guard into its mutex owner"));
+                        }
+                    }
+                }
                 if let Callee::Value(o) = callee
                     && let Some(p) = operand_place(o)
                 {

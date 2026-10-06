@@ -109,12 +109,14 @@ impl P<'_> {
                     format!("{}{}.{name}({})", self.r.symbol(*e).name, self.targs(targs), self.ops(os))
                 }
                 Aggregate::Array(_) => format!("[{}]", self.ops(os)),
+                Aggregate::AsyncFrame(id, targs) => format!("async {}{}[{}]", self.p.function(*id).name, self.targs(targs), self.ops(os)),
                 Aggregate::Closure(id, storage) => format!("closure {}[{}]{}", self.p.function(*id).name, self.ops(os), storage.as_ref().map(|p| format!(" borrowing {}", self.place(p))).unwrap_or_default()),
             },
             Rvalue::Cast(o, t) => format!("cast({}) as {}", self.operand(o), self.ty(t)),
             Rvalue::Coerce(k, o, t) => {
                 let k = match k {
                     CoerceKind::MutToShared => "mut_to_shared",
+                    CoerceKind::Poller => "poller",
                     CoerceKind::Unsize => "unsize",
                     CoerceKind::ToDyn(_) | CoerceKind::DynTable { .. } => "to_dyn",
                 };
@@ -194,6 +196,8 @@ fn print_function_annotated(f: &Function, p: &Program, r: &Resolved, t: &Typed, 
                 }
             ),
             Terminator::Return => "return".into(),
+                Terminator::Suspend { resume, abandon } => format!("suspend -> [resume: bb{}, abandon: bb{}]", resume.0, abandon.0),
+                Terminator::Abandon => "abandon".into(),
             Terminator::Unreachable => "unreachable".into(),
         };
         let _ = writeln!(out, "    {term}");

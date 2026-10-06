@@ -130,6 +130,7 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
     }
     let mut errors = crate::verify(&mirror);
     errors.extend(crate::network_abi::verify(t));
+    errors.extend(crate::async_frame::verify(p, t));
     for f in &p.functions {
         let mut err = |msg: String| errors.push(format!("{}: {msg}", f.decl.name));
         if !f.decl.blocks.is_empty() {
@@ -235,7 +236,9 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
                 }
             }
         }
-        if f.blocks.is_empty() {
+        // Physical frames keep flags across polls; their initialization was
+        // verified on the source form before frame lowering.
+        if f.blocks.is_empty() || f.decl.asynchronous.as_ref().is_some_and(|a| a.frame.is_some()) {
             continue;
         }
         // Intersection at joins, initialized to top except entry. Back-edges
@@ -428,6 +431,8 @@ pub fn print_program(p: &Program, r: &Resolved, t: &Typed) -> String {
                     next.map(|b| format!(" -> bb{}", b.0)).unwrap_or(" -> !".into())
                 ),
                 Terminator::Return => "return".into(),
+                Terminator::Suspend { resume, abandon } => format!("suspend -> [resume: bb{}, abandon: bb{}]", resume.0, abandon.0),
+                Terminator::Abandon => "abandon".into(),
                 Terminator::Unreachable => "unreachable".into(),
             };
             let _ = writeln!(out, "    {text}");

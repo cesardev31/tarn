@@ -1,0 +1,12 @@
+error[E4103]: cannot move out of `stream` because it is borrowed
+  --> tests/borrows/fail/E4103_async_stream_moved_while_borrowed.tarn:10:14
+   |
+ 9 |     computation := get(&mut stream)
+   |                        ----------- mutable borrow of `stream` starts here
+10 |     moved := stream
+   |              ^^^^^^ moved here while borrowed
+12 |     var op = net.Operation.new(&execution, computation)
+   |                                            ----------- the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

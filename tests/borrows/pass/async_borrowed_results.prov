@@ -1,0 +1,9 @@
+Execution.block_on -> borrows from {operation}
+Operation.new -> borrows from {owner, poller}
+Operation.poll -> borrows from {self}
+Operation.poll_with -> borrows from {self}
+_leaf -> borrows from {progress}
+first -> borrows from {a, b}
+forward -> borrows from {owner, a, b}
+string.choose -> borrows from {self, other}
+string.view -> borrows from {self}

@@ -1,0 +1,9 @@
+error[E3051]: replacement values with retained loans are not supported
+ --> tests/types/fail/E3051_mutex_reference_replacement.tarn:8:23
+  |
+8 |         guard.replace(&local)
+  |                       ^^^^^^ use an owned replacement without retained borrows
+  |                       ------ the replacement carries this loan
+  |
+  = note: v0 does not propagate newly stored loans from a guard into its mutex owner
+

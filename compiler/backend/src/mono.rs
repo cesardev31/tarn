@@ -70,6 +70,7 @@ fn concrete_inner(ty: &Ty, depth: usize, nodes: &mut usize) -> Result<()> {
             }
             concrete_inner(ret, depth + 1, nodes)?;
         }
+        Ty::Async(output) => concrete_inner(output, depth + 1, nodes)?,
         _ => {}
     }
     Ok(())
@@ -88,6 +89,9 @@ pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
         f.decl.ret = tarn_types::subst(&f.decl.ret, &map);
         for l in &mut f.decl.locals {
             l.ty = tarn_types::subst(&l.ty, &map);
+        }
+        if let Some(frame) = f.decl.asynchronous.as_mut().and_then(|a| a.frame.as_mut()) {
+            frame.output = tarn_types::subst(&frame.output, &map);
         }
         if let FnKind::Closure { environment, destructor, .. } = &mut f.decl.kind {
             for ty in environment {
@@ -134,6 +138,12 @@ pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
                                     }
                                 }
                                 Aggregate::Array(ty) => *ty = tarn_types::subst(ty, &map),
+                                Aggregate::AsyncFrame(id, ts) => {
+                                    for ty in ts.iter_mut() {
+                                        *ty = tarn_types::subst(ty, &map);
+                                    }
+                                    *id = cx.intern(*id, ts.clone())?;
+                                }
                                 Aggregate::Closure(id, _) => {
                                     let def = &p.functions[id.0 as usize].decl;
                                     let args = def.generics.iter().map(|p| map.get(p).cloned().unwrap_or(Ty::Param(*p))).collect();

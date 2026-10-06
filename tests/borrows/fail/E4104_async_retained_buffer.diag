@@ -1,0 +1,12 @@
+error[E4104]: cannot use `buffer.len` while it is mutably borrowed
+  --> tests/borrows/fail/E4104_async_retained_buffer.tarn:22:11
+   |
+21 |     computation := fill(&execution, &mut buffer)
+   |                                     ----------- mutable borrow of `buffer` starts here
+22 |     print(buffer.len)
+   |           ^^^^^^^^^^ used here
+23 |     var op = net.Operation.new(&execution, computation)
+   |                                            ----------- the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

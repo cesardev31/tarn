@@ -15,6 +15,7 @@
 //! Not SSA: locals are mutable slots assigned many times; places (`x.f`,
 //! `(*r)[i]`) are first-class because borrow checking reasons about them.
 
+pub mod async_frame;
 mod lower;
 pub mod post_drop;
 mod pretty;
@@ -91,6 +92,38 @@ pub struct Function {
     pub locals: Vec<LocalDecl>,
     pub blocks: Vec<BasicBlock>,
     pub span: Span,
+    /// Present for a source `async fn` body (ADR 0037).
+    pub asynchronous: Option<AsyncInfo>,
+}
+
+/// A source async body. Ownership phases analyze the ordinary source CFG,
+/// in which `Suspend` is an explicit edge; `ret` is the declared output.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AsyncInfo {
+    /// Hidden per-poll `&Waker` parameter (the last parameter).
+    pub waker: LocalId,
+    /// Mechanical frame placement, filled after drop elaboration.
+    pub frame: Option<AsyncFrame>,
+}
+
+/// Physical frame of a verified async body (see `async_frame`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct AsyncFrame {
+    /// Locals stored in the stable heap frame, in layout order. Construction
+    /// parameters come first, then the state word, then values live across
+    /// a suspension. Every other local stays in the per-poll native frame.
+    pub stored: Vec<LocalId>,
+    /// Source parameters written by construction, in call-argument order.
+    pub params: Vec<LocalId>,
+    /// `u32` state word: suspension index, or `done` after completion.
+    pub state: LocalId,
+    /// Per-call `bool` selecting abandonment (frame destruction).
+    pub abandon: LocalId,
+    /// The declared output `T`; `ret` becomes `Progress<T>`.
+    pub output: Ty,
+    /// Holds the source result before it is wrapped in `Ready`.
+    pub result: LocalId,
+    pub done: u32,
 }
 
 impl Function {
@@ -244,12 +277,17 @@ pub enum Aggregate {
     /// A borrowed stack environment carries an ordinary loan of `storage`.
     /// Owned environments have no storage loan and use the destruction body.
     Closure(FunctionId, Option<Place>),
+    /// Lazy construction of a source async computation (ADR 0037): operands
+    /// are moved into the callee's frame parameters; no body statement runs.
+    AsyncFrame(FunctionId, Vec<Ty>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CoerceKind {
     /// `&mut T → &T`.
     MutToShared,
+    /// Async computation used as its trusted manual poller (same value).
+    Poller,
     /// `&[N]T → &[]T`.
     Unsize,
     /// `&T → &any I`.
@@ -337,6 +375,12 @@ pub enum Terminator {
     Return,
     /// Proven unreachable (e.g. after an exhaustive `match`).
     Unreachable,
+    /// Async suspension point: the computation returns Pending. A later poll
+    /// continues at `resume`; destroying the pending computation continues at
+    /// `abandon`, whose ordinary drops end in `Abandon`.
+    Suspend { resume: BlockId, abandon: BlockId },
+    /// End of an abandonment path: no result is produced.
+    Abandon,
 }
 
 impl Terminator {
@@ -345,7 +389,19 @@ impl Terminator {
             Terminator::Goto(b) => vec![*b],
             Terminator::Switch { cases, otherwise, .. } => cases.iter().map(|(_, b)| *b).chain([*otherwise]).collect(),
             Terminator::Call { next, .. } => next.iter().copied().collect(),
-            Terminator::Return | Terminator::Unreachable => Vec::new(),
+            Terminator::Suspend { resume, abandon } => vec![*resume, *abandon],
+            Terminator::Return | Terminator::Unreachable | Terminator::Abandon => Vec::new(),
+        }
+    }
+
+    /// Every successor slot, in `successors` order, for CFG rewriting.
+    pub fn targets_mut(&mut self) -> Vec<&mut BlockId> {
+        match self {
+            Terminator::Goto(b) => vec![b],
+            Terminator::Switch { cases, otherwise, .. } => cases.iter_mut().map(|(_, b)| b).chain([otherwise]).collect(),
+            Terminator::Call { next, .. } => next.iter_mut().collect(),
+            Terminator::Suspend { resume, abandon } => vec![resume, abandon],
+            Terminator::Return | Terminator::Unreachable | Terminator::Abandon => Vec::new(),
         }
     }
 }

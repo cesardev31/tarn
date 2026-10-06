@@ -1,0 +1,4 @@
+async fn invalid() {
+    await 42
+}
+fn main() {}

@@ -1,0 +1,6 @@
+error[E3060]: `await` is only allowed inside an async function
+ --> tests/types/fail/E3060_await_outside_async.tarn:2:14
+  |
+2 |     value := await 42
+  |              ^^^^^^^^ this function does not suspend
+

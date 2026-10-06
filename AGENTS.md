@@ -822,6 +822,29 @@ See [ADR 0036](docs/adr/0036-suspended-execution.md).
 
 ---
 
+## Source Async
+
+Phase 13 lowers `async fn`/`await` onto Phase-12C suspended execution (ADR 0037).
+
+`async` does not weaken Tarn ownership; suspension extends ordinary ownership
+and loan obligations across time.
+
+`await` is compiler lowering over the same Pending/Ready/Waker model validated
+before async syntax existed. Do not add a second wake or runtime mechanism.
+
+Generated async frames are ordinary owned state whose destruction must be
+correct in every suspension state. Ownership analysis runs on the source CFG with
+explicit `Suspend`/`Abandon` edges; frame placement happens only afterwards.
+
+The backend does not decide async ownership semantics; it only places frame
+slots and emits mechanical poll/destruction adapters.
+
+Calls are lazy; blocking and async I/O have distinct names; there is no hidden
+global executor. Do not add async closures/blocks, select, cancellation, timers or
+multi-thread executors without a separate approved phase.
+
+---
+
 ## Drops
 
 Lowering emits abstract drops.

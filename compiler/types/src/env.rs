@@ -97,6 +97,12 @@ pub struct Decls {
     pub exec_state: Option<SymbolId>,
     pub exec_owner: Option<SymbolId>,
     pub exec_operation: Option<SymbolId>,
+    /// Trusted `Progress<R>` and `Operation<R>.poll_with` used by await lowering.
+    pub exec_progress: Option<SymbolId>,
+    pub exec_poll_with: Option<SymbolId>,
+    /// Private trusted async-body primitives: per-poll waker, bare suspension.
+    pub exec_async_waker: Option<SymbolId>,
+    pub exec_async_park: Option<SymbolId>,
     pub result: Option<SymbolId>,
     pub net_intrinsics: HashMap<String, SymbolId>,
     pub mutex: Option<SymbolId>,
@@ -170,6 +176,13 @@ impl<'a> Env<'a> {
                 env.decls.exec_owner = scope.get("Execution");
                 env.decls.exec_operation = scope.get("Operation");
                 env.decls.exec_state = scope.get("_ExecutionState");
+                env.decls.exec_progress = scope.get("Progress");
+                env.decls.exec_async_waker = scope.get("_with_waker");
+                env.decls.exec_async_park = scope.get("_async_park");
+                env.decls.exec_poll_with = r.symbols.iter().enumerate().find(|(_, s)| {
+                    s.name == "poll_with" && s.module == Some(ModuleId(index as u32))
+                        && matches!(s.kind, SymbolKind::Method { owner } if Some(owner) == env.decls.exec_operation)
+                }).map(|(i, _)| SymbolId(i as u32));
                 for name in ["Waker", "_ExecutionState", "Execution"] {
                     if let Some(id) = scope.get(name) {
                         env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: false, share: false });
@@ -194,7 +207,8 @@ impl<'a> Env<'a> {
                 }
                 for id in &scope.symbols {
                     let symbol = r.symbol(*id);
-                    if symbol.name.starts_with("_") && env.decls.fns.get(id).is_some_and(|sig| sig.abi.as_deref() == Some("intrinsic")) {
+                    let async_primitive = Some(*id) == env.decls.exec_async_waker || Some(*id) == env.decls.exec_async_park;
+                    if !async_primitive && symbol.name.starts_with("_") && env.decls.fns.get(id).is_some_and(|sig| sig.abi.as_deref() == Some("intrinsic")) {
                         env.decls.net_intrinsics.insert(format!("net.{}", symbol.name), *id);
                     }
                 }

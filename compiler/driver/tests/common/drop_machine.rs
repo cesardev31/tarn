@@ -226,6 +226,7 @@ impl Machine<'_> {
                     return fr.locals[0].take().unwrap_or(Value::Unit);
                 }
                 Terminator::Unreachable => panic!("executed unreachable"),
+                Terminator::Suspend { .. } | Terminator::Abandon => panic!("suspension edge after frame lowering"),
             }
         }
     }

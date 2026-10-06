@@ -1,0 +1,10 @@
+error[E4104]: cannot use `b.len` while it is mutably borrowed
+  --> tests/borrows/fail/E4104_async_mutable_across_await.tarn:17:11
+   |
+15 |     r := &mut b
+   |          ------ mutable borrow of `b` starts here
+17 |     print(b.len)
+   |           ^^^^^ used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

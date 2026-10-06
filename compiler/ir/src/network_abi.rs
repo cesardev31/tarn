@@ -10,6 +10,18 @@ pub(crate) fn verify(t: &Typed) -> Vec<String> {
     if d.net_sockets.len() != 3 || d.net_intrinsics.len() != 32 {
         return invalid();
     }
+    // Async-body primitives (ADR 0037): exactly `_with_waker<R>(mut fn(&Waker) R) R`
+    // and `_async_park()`, both private trusted intrinsics.
+    let primitive = |id: Option<tarn_resolve::SymbolId>| id.and_then(|id| d.fns.get(&id)).filter(|sig| sig.abi.as_deref() == Some("intrinsic") && sig.receiver.is_none());
+    let (Some(with_waker), Some(park)) = (primitive(d.exec_async_waker), primitive(d.exec_async_park)) else { return invalid() };
+    let waker_ref = d.exec_waker.map(|w| Ty::Ref(false, Box::new(Ty::Adt(w, Vec::new()))));
+    let [generic] = with_waker.generics.as_slice() else { return invalid() };
+    if with_waker.ret != Ty::Param(*generic)
+        || with_waker.params != vec![Ty::Fn(tarn_types::CallMode::Mutable, waker_ref.into_iter().collect(), Box::new(Ty::Param(*generic)))]
+        || !park.generics.is_empty() || !park.params.is_empty() || park.ret != Ty::Void
+    {
+        return invalid();
+    }
     let i32_ty = Ty::Int(IntTy::I32);
     let Some(raw) = d.net_intrinsics.get("net._resolve").and_then(|id| d.fns.get(id)).map(|sig| sig.ret.clone()) else { return invalid() };
     let Ty::Adt(raw_id, raw_args) = &raw else { return invalid() };
