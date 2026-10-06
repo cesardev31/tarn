@@ -23,7 +23,7 @@ fn corpus() -> Vec<PathBuf> {
     out.push(root.join("tests/native/pass/synchronization.tarn"));
     out.push(root.join("tests/native/pass/atomic_types.tarn"));
     out.push(root.join("tests/native/pass/synchronization_owned.tarn"));
-    for fixture in ["network_tcp", "network_udp", "network_errors"] { out.push(root.join(format!("tests/native/pass/{fixture}.tarn"))); }
+    for fixture in ["network_tcp", "network_udp", "network_errors", "network_readiness"] { out.push(root.join(format!("tests/native/pass/{fixture}.tarn"))); }
     out.sort();
     out
 }

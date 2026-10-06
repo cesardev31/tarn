@@ -3,11 +3,11 @@ use tarn_types::{IntTy, Ty, Typed};
 
 pub(crate) fn verify(t: &Typed) -> Vec<String> {
     let d = &t.decls;
-    if d.net_intrinsics.is_empty() && d.net_sockets.is_empty() {
+    if d.net_intrinsics.is_empty() && d.net_sockets.is_empty() && d.net_poll.is_none() {
         return Vec::new();
     }
     let invalid = || vec!["invalid network declaration ABI".to_string()];
-    if d.net_sockets.len() != 3 || d.net_intrinsics.len() != 15 {
+    if d.net_sockets.len() != 3 || d.net_intrinsics.len() != 23 {
         return invalid();
     }
     let i32_ty = Ty::Int(IntTy::I32);
@@ -86,6 +86,25 @@ pub(crate) fn verify(t: &Typed) -> Vec<String> {
     if !error_def.fields[0].is_pub || error_def.fields[1..].iter().any(|f| f.ty != i32_ty || f.is_pub) {
         return invalid();
     }
+    let Some(poll_id) = d.net_poll else { return invalid() };
+    let Some(poll) = d.structs.get(&poll_id) else { return invalid() };
+    if poll.is_copy || !poll.generics.is_empty() || poll.fields.len() != 1
+        || poll.fields[0].name != "handle" || poll.fields[0].is_pub
+        || poll.fields[0].ty != Ty::Int(IntTy::Usize)
+        || !d.native_capabilities.get(&poll_id).is_some_and(|c| c.transfer && !c.share) { return invalid(); }
+    let Some(wait) = d.net_intrinsics.get("net._poll_wait").and_then(|id| d.fns.get(id)) else { return invalid() };
+    let Some(Ty::Ref(true, slice)) = wait.params.get(1) else { return invalid() };
+    let Ty::Slice(event) = slice.as_ref() else { return invalid() };
+    let Ty::Adt(event_id, event_args) = event.as_ref() else { return invalid() };
+    let Some(event_def) = d.structs.get(event_id) else { return invalid() };
+    if !event_args.is_empty() || !event_def.is_copy || !event_def.generics.is_empty() || event_def.fields.len() != 5
+        || event_def.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>() != ["token", "readable", "writable", "error", "hangup"]
+        || event_def.fields.iter().any(|f| !f.is_pub) || event_def.fields[1..].iter().any(|f| f.ty != Ty::Bool) { return invalid(); }
+    let Ty::Adt(token_id, token_args) = &event_def.fields[0].ty else { return invalid() };
+    let Some(token) = d.structs.get(token_id) else { return invalid() };
+    if !token_args.is_empty() || !token.is_copy || !token.generics.is_empty() || token.fields.len() != 1
+        || token.fields[0].name != "value" || token.fields[0].is_pub || token.fields[0].ty != Ty::Int(IntTy::U64) { return invalid(); }
+    let events = Ty::Slice(event.clone());
     let bytes = Ty::Slice(Box::new(Ty::Int(IntTy::U8)));
     for (operation, params) in [
         ("resolve", vec![Ty::Ref(false, Box::new(Ty::Str))]),
@@ -99,7 +118,15 @@ pub(crate) fn verify(t: &Typed) -> Vec<String> {
         ("recv", vec![i32_ty.clone(), Ty::Ref(true, Box::new(bytes.clone()))]),
         ("send", vec![i32_ty.clone(), Ty::Ref(false, Box::new(bytes)), addr]),
         ("addr", vec![i32_ty.clone(), Ty::Bool]),
-        ("shutdown", vec![i32_ty, Ty::Int(IntTy::I32)]),
+        ("shutdown", vec![i32_ty.clone(), Ty::Int(IntTy::I32)]),
+        ("nonblocking", vec![i32_ty.clone(), Ty::Bool]),
+        ("mode", vec![i32_ty.clone()]),
+        ("connected", vec![i32_ty.clone()]),
+        ("now", vec![]),
+        ("poll_new", vec![]),
+        ("poll_ctl", vec![Ty::Int(IntTy::Usize), i32_ty.clone(), i32_ty.clone(), i32_ty.clone(), Ty::Int(IntTy::U64)]),
+        ("poll_wait", vec![Ty::Int(IntTy::Usize), Ty::Ref(true, Box::new(events)), i32_ty.clone()]),
+        ("close_poll", vec![Ty::Adt(poll_id, vec![])]),
         ("close_listener", vec![Ty::Adt(d.net_sockets[0], vec![])]),
         ("close_stream", vec![Ty::Adt(d.net_sockets[1], vec![])]),
         ("close_udp", vec![Ty::Adt(d.net_sockets[2], vec![])]),

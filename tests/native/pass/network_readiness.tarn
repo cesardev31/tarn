@@ -1,0 +1,92 @@
+import "net"
+fn require(value bool) { if !value { panic("readiness assertion") } }
+fn main() Result<void, net.Error> {
+    var poll = try net.Poll.new()
+    var events = [2]net.Event{net.Event.empty(), net.Event.empty()}
+    require(try poll.wait(&mut events, 0) == usize(0))
+    require(try poll.wait(&mut events, 1) == usize(0))
+    var listener = try net.TcpListener.bind(&"127.0.0.1:0")
+    try listener.set_nonblocking(true)
+    match listener.accept() {
+        Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+            _ => panic("accept error") }
+        Ok(stream) => panic("unexpected accept")
+    }
+    lt := try poll.register_listener(&listener, net.Interest.Readable)
+    var connecting = try net.TcpStream.connect_nonblocking_addr(try listener.local_addr())
+    ct := try poll.register_connecting(&connecting)
+    var connected = false
+    for !connected {
+        require(try poll.wait(&mut events, 5000) > usize(0))
+        connected = try connecting.poll_connected()
+    }
+    try poll.deregister_connecting(&connecting, ct)
+    var client = try connecting.into_stream()
+    require(try poll.wait(&mut events, -1) > usize(0))
+    var server = try listener.accept()
+    match listener.accept() {
+        Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+            _ => panic("accept readiness race error") }
+        Ok(stream) => panic("unexpected second accept")
+    }
+    try server.write_all(&[0]u8{})
+    try poll.deregister_listener(&listener, lt)
+    try server.set_nonblocking(true)
+    st := try poll.register_stream(&server, net.Interest.Readable)
+    var buffer = [2]u8{0, 0}
+    match server.read(&mut buffer) {
+        Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+            _ => panic("read error") }
+        Ok(count) => panic("unexpected read")
+    }
+    match client.write_all(&buffer) {
+        Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+            _ => panic("write_all error") }
+        Ok(value) => panic("nonblocking write_all accepted")
+    }
+    require(try client.write(&[2]u8{41, 42}) == usize(2))
+    try client.shutdown(net.Shutdown.Write)
+    require(try poll.wait(&mut events, 5000) > usize(0))
+    require(events[0].token.same(st) && events[0].readable)
+    require(try server.read(&mut buffer) == usize(2))
+    require(buffer[0] == u8(41) && buffer[1] == u8(42))
+    require(try poll.wait(&mut events, 5000) > usize(0))
+    require(try server.read(&mut buffer) == usize(0))
+    try poll.modify_stream(&server, st, net.Interest.ReadableWritable)
+    require(try poll.wait(&mut events, 0) > usize(0))
+    require(events[0].writable && events[0].hangup)
+    try poll.deregister_stream(&server, st)
+    try client.set_nonblocking(false)
+    try client.write_all(&buffer[0..0])
+    // UDP zero-length datagrams remain data, not EOF.
+    var receiver = try net.UdpSocket.bind(&"127.0.0.1:0")
+    var sender = try net.UdpSocket.bind(&"127.0.0.1:0")
+    try receiver.set_nonblocking(true)
+    ut := try poll.register_udp(&receiver, net.Interest.Readable)
+    peer := try receiver.local_addr()
+    for i in 0..128 {
+        require(try sender.send_to(&buffer[0..0], peer) == usize(0))
+        require(try poll.wait(&mut events, 5000) == usize(1))
+        require(events[0].token.same(ut) && events[0].readable)
+        require((try receiver.recv_from(&mut buffer)).count == usize(0))
+        match receiver.recv_from(&mut buffer) {
+            Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+            _ => panic("udp error") }
+            Ok(packet) => panic("udp readiness guaranteed progress")
+        }
+    }
+    try poll.modify_udp(&receiver, ut, net.Interest.Writable)
+    require(try poll.wait(&mut events, 0) == usize(1))
+    require(events[0].writable)
+    try poll.deregister_udp(&receiver, ut)
+    try receiver.close()
+    var replacement = try net.UdpSocket.bind(&"127.0.0.1:0")
+    nt := try poll.register_udp(&replacement, net.Interest.Writable)
+    require(!nt.same(ut))
+    match poll.deregister_udp(&replacement, ut) { Err(error) => {}
+        Ok(value) => panic("stale token accepted") }
+    try replacement.close()
+    require(try poll.wait(&mut events, 0) == usize(0))
+    print("readiness ok")
+    return Ok(())
+}

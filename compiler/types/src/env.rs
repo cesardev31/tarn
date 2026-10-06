@@ -91,6 +91,7 @@ pub struct Decls {
     pub task: Option<SymbolId>,
     pub net_sockets: Vec<SymbolId>,
     pub net_error: Option<SymbolId>,
+    pub net_poll: Option<SymbolId>,
     pub result: Option<SymbolId>,
     pub net_intrinsics: HashMap<String, SymbolId>,
     pub mutex: Option<SymbolId>,
@@ -162,6 +163,10 @@ impl<'a> Env<'a> {
             if input.name == "net" && input.trusted_stdlib {
                 let scope = r.scope(r.modules[index].scope);
                 env.decls.net_error = scope.get("Error");
+                env.decls.net_poll = scope.get("Poll");
+                if let Some(id) = env.decls.net_poll {
+                    env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });
+                }
                 for name in ["TcpListener", "TcpStream", "UdpSocket"] {
                     if let Some(id) = scope.get(name) {
                         env.decls.net_sockets.push(id);

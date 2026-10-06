@@ -22,7 +22,7 @@ tested and documented.
 | 10 | Callable invocation and owned closures (ADR 0032) | **done within documented subset** |
 | 11 | Safe native concurrency (ADR 0033) | **done within documented v0 subset: tasks, capabilities, scoped loans, Mutex guards and sequentially consistent atomics** |
 | 12A | Blocking native TCP/UDP, owned sockets, resolution and Result errors (ADR 0034) | **done within documented blocking Linux v0 subset** |
-| 12B | Nonblocking I/O foundations | deferred; requires separate approval |
+| 12B | Nonblocking I/O and level-triggered epoll (ADR 0035) | **done within documented Linux v0 subset** |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
 | 19 | Formatter (basic) | |
 | 20 | VS Code extension (TextMate) | **started**: language + highlighting |
@@ -69,5 +69,7 @@ verified immutable content and explicitly constrained build authority. No packag
 manager, registry, resolver or sandbox implementation is scheduled by this update.
 SemVer resolution, incompatible-major coexistence, release-age default,
 signing/provenance formats, federation, sandbox enforcement and features remain
-open. Optimization, nonblocking I/O and async remain deferred. Blocking networking is
-covered by Phase 12A and [ADR 0034](adr/0034-blocking-networking.md).
+open. Optimization and async remain deferred; 12B supplies explicit readiness.
+Blocking networking is covered by Phase 12A and [ADR 0034](adr/0034-blocking-networking.md);
+readiness by [ADR 0035](adr/0035-nonblocking-readiness.md) and
+[the Phase 12B report](readiness-report.md).

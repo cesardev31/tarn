@@ -214,6 +214,15 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     for (name, params, returns) in [
         ("tarn_rt_net_main_error", vec![types::I32, types::I32], vec![]),
         ("tarn_rt_net_drop", vec![types::I32], vec![]),
+        ("tarn_rt_net_poll_drop", vec![types::I64], vec![]),
+        ("tarn_rt_net_nonblocking", vec![types::I64, types::I32, types::I8], vec![]),
+        ("tarn_rt_net_mode", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_net_connected", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_net_now", vec![types::I64], vec![]),
+        ("tarn_rt_net_poll_new", vec![types::I64], vec![]),
+        ("tarn_rt_net_poll_ctl", vec![types::I64, types::I64, types::I32, types::I32, types::I32, types::I64], vec![]),
+        ("tarn_rt_net_poll_wait", vec![types::I64, types::I64, types::I64, types::I64, types::I32], vec![]),
+        ("tarn_rt_net_close_poll", vec![types::I64, types::I64], vec![]),
         ("tarn_rt_net_resolve", vec![types::I64; 2], vec![]),
         ("tarn_rt_net_socket", vec![types::I64, types::I64, types::I8], vec![]),
         ("tarn_rt_net_bind", vec![types::I64, types::I32, types::I64], vec![]),
@@ -1534,6 +1543,11 @@ impl Cx<'_, '_> {
         self.drop_at(addr, &ty)
     }
     fn drop_at(&mut self, addr: cl::Value, ty: &Ty) -> Result<()> {
+        if matches!(ty, Ty::Adt(id, _) if Some(*id) == self.t.decls.net_poll) {
+            let handle = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
+            self.runtime("tarn_rt_net_poll_drop", &[handle]);
+            return Ok(());
+        }
         if matches!(ty, Ty::Adt(id, _) if self.t.decls.net_sockets.contains(id)) {
             let fd = self.b.ins().load(types::I32, cl::MemFlags::new(), addr, 0);
             self.runtime("tarn_rt_net_drop", &[fd]);

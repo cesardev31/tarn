@@ -796,8 +796,15 @@ never retry EINTR. Safe syscall retries and high-level behavior belong in Tarn.
 Trusted private bridge declarations must be structurally verified and cannot
 be authorized merely by a user module name. See [ADR 0034](docs/adr/0034-blocking-networking.md).
 
-Networking blocks the current native task, including DNS. Do not introduce
-nonblocking I/O, async, reactors, schedulers, pools or HTTP during 12A.
+Blocking networking blocks the current native task, including DNS. Phase 12B
+adds explicit nonblocking socket mode and owned level-triggered readiness (ADR 0035).
+Readiness is evidence that an operation may make progress, not permission to bypass
+normal socket error handling. Readiness registration never transfers ownership of
+a socket or application buffer to the kernel/runtime. Tarn must not keep borrowed
+application buffers pending across readiness waits in the Phase 12B model.
+Keep actual I/O under ordinary exclusive loans. Tokens must not confuse recycled
+file descriptors with earlier owners. No async, scheduler, io_uring, HTTP or TLS
+is authorized by readiness support.
 
 ---
 

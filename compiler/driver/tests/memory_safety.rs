@@ -6,6 +6,10 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("poll double close", Some("E4001"), "import \"net\"\nfn bad(poll net.Poll) { poll.close()\n poll.close() }"),
+    ("poll event buffer conflicting alias", Some("E4101"), "import \"net\"\nfn bad(poll &mut net.Poll) { var events = [1]net.Event{net.Event.empty()}\n loan := &events\n poll.wait(&mut events, 0)\n print(loan[0].readable) }"),
+    ("poll registration retains no socket loan", None, "import \"net\"\nfn good(poll &mut net.Poll, socket net.UdpSocket) { token := poll.register_udp(&socket, net.Interest.Readable)\n socket.close() }") ,
+    ("poll event buffer released after wait", None, "import \"net\"\nfn good(poll &mut net.Poll) { var events = [1]net.Event{net.Event.empty()}\n poll.wait(&mut events, 0)\n events[0] = net.Event.empty() }"),
     ("socket use after move", Some("E4001"), "import \"net\"\nfn take(value net.TcpStream) {}\nfn bad(conn net.TcpStream) { other := conn\n conn.local_addr() }"),
     ("socket double close", Some("E4001"), "import \"net\"\nfn bad(conn net.TcpStream) { conn.close()\n conn.close() }"),
     ("socket original after spawn", Some("E4001"), "import \"net\"\nfn bad(conn net.TcpStream) { task := spawn move fn() { conn.close() }\n conn.local_addr()\n task.join() }"),

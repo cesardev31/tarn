@@ -337,3 +337,105 @@ void tarn_rt_net_main_error(uint32_t kind, int32_t code) {
     if (kind >= sizeof(names) / sizeof(names[0])) abort();
     fprintf(stderr, "network error: %s (native code %" PRId32 ")\n", names[kind], code);
 }
+
+/* Phase 12B: no application pointers survive any of these calls. */
+#include <sys/epoll.h>
+#include <fcntl.h>
+#include <time.h>
+#ifndef SO_COOKIE
+#define SO_COOKIE 57
+#endif
+/* Poll bookkeeping does not own sockets. Cookie checks prevent fd reuse from
+   turning an old token into modification/deletion authority over a new socket. */
+typedef struct TarnRegistration {
+    int fd;
+    uint64_t cookie, token;
+    struct TarnRegistration *next;
+} TarnRegistration;
+typedef struct { int fd; TarnRegistration *head; } TarnPoll;
+typedef struct { uint64_t token; uint8_t readable, writable, error, hangup; uint8_t padding[4]; } TarnEvent;
+_Static_assert(sizeof(TarnEvent) == 16 && offsetof(TarnEvent, hangup) == 11, "event ABI");
+static _Atomic uint64_t net_next_token = 1;
+void tarn_rt_net_nonblocking(TarnNetRaw *out, int32_t fd, uint8_t enabled) {
+    net_init(out);
+    int mode = fcntl(fd, F_GETFL);
+    if (mode < 0) { out->code = errno; return; }
+    net_status(out, fcntl(fd, F_SETFL, enabled ? mode | O_NONBLOCK : mode & ~O_NONBLOCK));
+}
+void tarn_rt_net_mode(TarnNetRaw *out, int32_t fd) {
+    net_init(out); int mode = fcntl(fd, F_GETFL);
+    if (mode < 0) out->code = errno; else out->value = !!(mode & O_NONBLOCK);
+}
+void tarn_rt_net_connected(TarnNetRaw *out, int32_t fd) {
+    net_init(out); int error = 0; socklen_t n = sizeof(error);
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &n) < 0) { out->code = errno; return; }
+    if (error) { out->code = error; return; }
+    struct sockaddr_storage peer; n = sizeof(peer);
+    if (getpeername(fd, (struct sockaddr *)&peer, &n) < 0) out->code = errno == ENOTCONN ? EAGAIN : errno;
+}
+void tarn_rt_net_now(TarnNetRaw *out) {
+    net_init(out); struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) out->code = errno;
+    else out->value = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+void tarn_rt_net_poll_new(TarnNetRaw *out) {
+    net_init(out); int fd = epoll_create1(EPOLL_CLOEXEC);
+    if (fd < 0) { out->code = errno; return; }
+    TarnPoll *poll = malloc(sizeof(*poll));
+    if (!poll) { int error = ENOMEM; close(fd); out->code = error; return; }
+    poll->fd = fd; poll->head = NULL; out->value = (int64_t)(uintptr_t)poll;
+    net_trace("open", fd);
+}
+void tarn_rt_net_poll_ctl(TarnNetRaw *out, TarnPoll *poll, int32_t fd, int32_t operation, int32_t interest, uint64_t token) {
+    net_init(out); uint64_t cookie; socklen_t n = sizeof(cookie);
+    if (operation < 0 || operation > 2 || interest < 1 || interest > 3) { out->code = EINVAL; return; }
+    if (getsockopt(fd, SOL_SOCKET, SO_COOKIE, &cookie, &n) < 0) { out->code = errno; return; }
+    TarnRegistration **link = &poll->head;
+    while (*link && (*link)->fd != fd) link = &(*link)->next;
+    TarnRegistration *record = *link;
+    if (operation && (!record || record->token != token || record->cookie != cookie)) { out->code = ENOENT; return; }
+    if (!operation && record && record->cookie == cookie) { out->code = EEXIST; return; }
+    TarnRegistration *fresh = NULL;
+    if (!operation) {
+        fresh = malloc(sizeof(*fresh));
+        if (!fresh) { out->code = ENOMEM; return; }
+        /* Never wrap or reuse. Signed raw value preserves checked u64 conversion. */
+        token = atomic_load(&net_next_token);
+        for (;;) {
+            if (token >= INT64_MAX) { free(fresh); out->code = EOVERFLOW; return; }
+            if (atomic_compare_exchange_weak(&net_next_token, &token, token + 1)) break;
+        }
+    }
+    struct epoll_event event = {0};
+    event.events = EPOLLRDHUP | ((interest & 1) ? EPOLLIN : 0) | ((interest & 2) ? EPOLLOUT : 0);
+    event.data.u64 = token;
+    int op = operation == 0 ? EPOLL_CTL_ADD : operation == 1 ? EPOLL_CTL_MOD : EPOLL_CTL_DEL;
+    if (epoll_ctl(poll->fd, op, fd, &event) < 0) { out->code = errno; free(fresh); return; }
+    if (!operation) {
+        fresh->fd = fd; fresh->cookie = cookie; fresh->token = token;
+        fresh->next = record ? record->next : NULL; *link = fresh; free(record);
+    } else if (operation == 2) { *link = record->next; free(record); }
+    out->value = (int64_t)token;
+}
+void tarn_rt_net_poll_wait(TarnNetRaw *out, TarnPoll *poll, TarnEvent *events, uint64_t length, int32_t timeout) {
+    net_init(out);
+    if (!length || timeout < -1) { out->code = EINVAL; return; }
+    struct epoll_event native[64];
+    int count = epoll_wait(poll->fd, native, length < 64 ? (int)length : 64, timeout);
+    if (count < 0) { out->code = errno; return; }
+    for (int i = 0; i < count; ++i) {
+        memset(&events[i], 0, sizeof(events[i]));
+        events[i].token = native[i].data.u64;
+        events[i].readable = !!(native[i].events & EPOLLIN);
+        events[i].writable = !!(native[i].events & EPOLLOUT);
+        events[i].error = !!(native[i].events & EPOLLERR);
+        events[i].hangup = !!(native[i].events & (EPOLLHUP | EPOLLRDHUP));
+    }
+    out->value = count;
+}
+void tarn_rt_net_close_poll(TarnNetRaw *out, TarnPoll *poll) {
+    tarn_rt_net_close(out, poll->fd);
+    while (poll->head) { TarnRegistration *record = poll->head; poll->head = record->next; free(record); }
+    free(poll);
+}
+void tarn_rt_net_poll_drop(TarnPoll *poll) { TarnNetRaw out; tarn_rt_net_close_poll(&out, poll); }

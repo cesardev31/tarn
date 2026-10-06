@@ -1,7 +1,7 @@
-# Blocking networking (Phase 12A)
+# Native networking (Phases 12A and 12B)
 
 `import "net"` loads the embedded `stdlib/net/net.tarn`. The current target is
-Linux x86_64. All operations, including DNS, may block the calling native task.
+Linux x86_64. Blocking operations, including DNS, may block the calling native task.
 The API uses ordinary Tarn ownership, `Result`, `try` and borrowed byte slices.
 
 ```tarn
@@ -121,5 +121,81 @@ bootstrap compiler resources, not general user-defined destructors. See
 [`25_concurrency.tarn`](../examples/25_concurrency.tarn) moves an accepted
 connection into a native task and joins it. Both listen on loopback port 8080.
 
-12A includes no nonblocking flags, async, reactor, scheduler, thread pool,
-cancellation, HTTP, TLS, channels or sophisticated timeouts. 12B remains deferred.
+12A blocking behavior remains supported alongside the explicit 12B operations below.
+
+## Nonblocking and readiness (Phase 12B)
+
+`set_nonblocking(bool)` changes descriptor mode through an exclusive socket
+receiver without changing ownership. Existing constructors and accepted streams
+remain blocking; nonblocking mode is never enabled globally. `read`, `write`,
+`accept`, `recv_from` and `send_to` return WouldBlock when no operation completed.
+Successful partial counts remain successful counts. An empty UDP datagram is data.
+`write_all` rejects a nonblocking stream with WouldBlock **before any write**;
+use explicit partial writes and readiness instead. Switching back to blocking
+restores its existing behavior.
+
+**Readiness is evidence that an operation may make progress, not permission to
+bypass normal socket error handling.** A subsequent syscall can still return
+WouldBlock. Error/hangup events do not discard readable bytes or replace TCP EOF.
+
+`Poll.new()` creates an owned, non-Copy, Transfer/not-Share epoll resource.
+`register_listener`, `register_stream`, `register_udp` accept a shared socket
+reference and `Interest.Readable`, `.Writable` or `.ReadableWritable`. Registration
+returns a Copy `Token`; compare tokens using `same`. `modify_listener/stream/udp`
+and `deregister_listener/stream/udp` require the socket and token. All Poll methods
+mutate `&mut self`, preventing unsynchronized registry access.
+
+```tarn
+import "net"
+fn main() Result<void, net.Error> {
+    var socket = try net.UdpSocket.bind(&"127.0.0.1:8080")
+    try socket.set_nonblocking(true)
+    var poll = try net.Poll.new()
+    token := try poll.register_udp(&socket, net.Interest.Readable)
+    var events = [1]net.Event{net.Event.empty()}
+    var bytes = [2]u8{0, 0}
+    count := try poll.wait(&mut events, 5000)
+    if count > usize(0) && events[0].token.same(token) {
+        match socket.recv_from(&mut bytes) {
+            Ok(packet) => print(packet.count)
+            Err(error) => match error.kind {
+                net.ErrorKind.WouldBlock => {}
+                _ => { return Err(error) }
+            }
+        }
+    }
+    return Ok(())
+}
+```
+
+Events contain `token`, `readable`, `writable`, `error`, `hangup`. Event storage is
+caller-provided; `Event.empty()` initializes slots. Wait returns the number of
+written events (at most 64 per call) and allocates no event buffer. Timeout is i32
+milliseconds: -1 infinite, 0 immediate, positive finite; values below -1 and empty
+storage are invalid. Interrupted waits transparently retry against the original
+monotonic deadline. Linux scheduling can overrun finite deadlines.
+
+**Readiness registration never transfers ownership of a socket or application
+buffer to the kernel/runtime. Tarn must not keep borrowed application buffers
+pending across readiness waits in the Phase 12B model.** Registration retains no
+socket loan after returning, and wait retains no event-buffer pointer afterward.
+Read/write still require ordinary exclusive socket/buffer access. Tokens contain
+no pointers or public fds. Dropping Poll closes only epoll, not sockets. Socket
+close removes kernel interest; previously copied events are inert old tokens.
+Process-wide nonreused tokens and SO_COOKIE checks prevent an old token from
+modifying/deregistering a new socket at a recycled descriptor. Re-registering a
+new socket receives a new token. Closed bookkeeping can remain until fd reuse or
+Poll destruction; it never keeps socket resources alive.
+
+`TcpStream.connect_nonblocking(&string)` / `connect_nonblocking_addr(SocketAddr)`
+return an owned `Connecting`. DNS still blocks. Register it through
+`register_connecting(&connection)`, wait for writable/error readiness, then call
+`connection.poll_connected()`: false means pending, true means confirmed success,
+Err is a latched terminal error. SO_ERROR and peer status determine completion;
+writable alone is insufficient. `deregister_connecting` removes interest and
+`into_stream()` consumes a successfully completed connection. Consuming one before
+completion returns WouldBlock and closes it; repeated failure checks preserve the
+original failure. Dropping Connecting closes the incomplete stream normally.
+
+See [ADR 0035](adr/0035-nonblocking-readiness.md). No async syntax, pending kernel
+buffer I/O, scheduler, io_uring, HTTP, TLS or channels are implemented.

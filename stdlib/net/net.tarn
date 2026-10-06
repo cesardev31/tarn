@@ -1,4 +1,4 @@
-// Blocking Linux networking. Opaque descriptors are owned, Transfer, not Share.
+// Blocking and explicit nonblocking Linux networking. Opaque descriptors are owned, Transfer, not Share.
 pub struct TcpListener { fd i32 }
 pub struct TcpStream { fd i32 }
 pub struct UdpSocket { fd i32 }
@@ -124,6 +124,13 @@ pub fn TcpStream.connect_addr(address SocketAddr) Result<TcpStream, Error> {
     }
 }
 pub fn TcpStream.write_all(&mut self, buffer &[]u8) Result<void, Error> {
+    for {
+        mode := _mode(self.fd)
+        if mode.code == 4 && mode.domain == 0 { continue }
+        checked := try _check(mode)
+        if checked.value != 0 { return Err(Error{kind: ErrorKind.WouldBlock, code: 11, domain: 0}) }
+        break
+    }
     var offset = usize(0)
     for offset < buffer.len() {
         count := try self.write(&buffer[offset..])
@@ -253,4 +260,163 @@ fn _listening(fd i32) Result<void, Error> {
         try _check(raw)
         return Ok(())
     }
+}
+
+// Level-triggered readiness. Tokens are observations, never socket authority.
+pub struct Poll { handle usize }
+pub copy struct Token { value u64 }
+pub copy enum Interest {
+    Readable
+    Writable
+    ReadableWritable
+}
+pub copy struct Event {
+    pub token Token
+    pub readable bool
+    pub writable bool
+    pub error bool
+    pub hangup bool
+}
+pub struct Connecting {
+    stream TcpStream
+    status i32
+}
+extern "intrinsic" fn _nonblocking(fd i32, enabled bool) _Raw
+extern "intrinsic" fn _mode(fd i32) _Raw
+extern "intrinsic" fn _connected(fd i32) _Raw
+extern "intrinsic" fn _now() _Raw
+extern "intrinsic" fn _poll_new() _Raw
+extern "intrinsic" fn _poll_ctl(handle usize, fd i32, operation i32, interest i32, token u64) _Raw
+extern "intrinsic" fn _poll_wait(handle usize, events &mut []Event, timeout i32) _Raw
+extern "intrinsic" fn _close_poll(value Poll) _Raw
+
+pub fn Event.empty() Event {
+    return Event{token: Token{value: u64(0)}, readable: false, writable: false, error: false, hangup: false}
+}
+pub fn Token.same(self, other Token) bool { return self.value == other.value }
+fn _set_nonblocking(fd i32, enabled bool) Result<void, Error> {
+    for {
+        raw := _nonblocking(fd, enabled)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        try _check(raw)
+        return Ok(())
+    }
+}
+pub fn TcpListener.set_nonblocking(&mut self, enabled bool) Result<void, Error> { return _set_nonblocking(self.fd, enabled) }
+pub fn TcpStream.set_nonblocking(&mut self, enabled bool) Result<void, Error> { return _set_nonblocking(self.fd, enabled) }
+pub fn UdpSocket.set_nonblocking(&mut self, enabled bool) Result<void, Error> { return _set_nonblocking(self.fd, enabled) }
+pub fn TcpStream.connect_nonblocking(address &string) Result<Connecting, Error> { return TcpStream.connect_nonblocking_addr(try resolve(address)) }
+pub fn TcpStream.connect_nonblocking_addr(address SocketAddr) Result<Connecting, Error> {
+    raw := try _open(address, false)
+    var stream = TcpStream{fd: i32(raw.value)}
+    try stream.set_nonblocking(true)
+    status := _connect(stream.fd, address)
+    if status.domain == 0 && (status.code == 115 || status.code == 4) {
+        return Ok(Connecting{stream: stream, status: 115})
+    }
+    try _check(status)
+    return Ok(Connecting{stream: stream, status: 0})
+}
+pub fn Connecting.poll_connected(&mut self) Result<bool, Error> {
+    if self.status == 0 { return Ok(true) }
+    if self.status != 115 { return Err(_connection_error(self.status)) }
+    for {
+        raw := _connected(self.stream.fd)
+        if raw.domain == 0 && raw.code == 4 { continue }
+        if raw.domain == 0 && raw.code == 11 { return Ok(false) }
+        self.status = raw.code
+        try _check(raw)
+        return Ok(true)
+    }
+}
+pub fn Connecting.into_stream(self) Result<TcpStream, Error> {
+    if self.status != 0 { return Err(_connection_error(self.status)) }
+    return Ok(self.stream)
+}
+pub fn Poll.new() Result<Poll, Error> {
+    for {
+        raw := _poll_new()
+        if raw.domain == 0 && raw.code == 4 { continue }
+        checked := try _check(raw)
+        return Ok(Poll{handle: usize(checked.value)})
+    }
+}
+fn _interest(value Interest) i32 {
+    match value {
+        Interest.Readable => { return 1 }
+        Interest.Writable => { return 2 }
+        Interest.ReadableWritable => { return 3 }
+    }
+}
+fn _registration(handle usize, fd i32, op i32, interest Interest, token Token) Result<Token, Error> {
+    for {
+        raw := _poll_ctl(handle, fd, op, _interest(interest), token.value)
+        if raw.domain == 0 && raw.code == 4 { continue }
+        checked := try _check(raw)
+        return Ok(Token{value: u64(checked.value)})
+    }
+}
+pub fn Poll.register_listener(&mut self, socket &TcpListener, interest Interest) Result<Token, Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
+pub fn Poll.register_stream(&mut self, socket &TcpStream, interest Interest) Result<Token, Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
+pub fn Poll.register_udp(&mut self, socket &UdpSocket, interest Interest) Result<Token, Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
+pub fn Poll.register_connecting(&mut self, socket &Connecting) Result<Token, Error> { return _registration(self.handle, socket.stream.fd, 0, Interest.Writable, Token{value: u64(0)}) }
+pub fn Poll.modify_listener(&mut self, socket &TcpListener, token Token, interest Interest) Result<void, Error> {
+    try _registration(self.handle, socket.fd, 1, interest, token)
+    return Ok(())
+}
+pub fn Poll.modify_stream(&mut self, socket &TcpStream, token Token, interest Interest) Result<void, Error> {
+    try _registration(self.handle, socket.fd, 1, interest, token)
+    return Ok(())
+}
+pub fn Poll.modify_udp(&mut self, socket &UdpSocket, token Token, interest Interest) Result<void, Error> {
+    try _registration(self.handle, socket.fd, 1, interest, token)
+    return Ok(())
+}
+pub fn Poll.deregister_listener(&mut self, socket &TcpListener, token Token) Result<void, Error> {
+    try _registration(self.handle, socket.fd, 2, Interest.Readable, token)
+    return Ok(())
+}
+pub fn Poll.deregister_stream(&mut self, socket &TcpStream, token Token) Result<void, Error> {
+    try _registration(self.handle, socket.fd, 2, Interest.Readable, token)
+    return Ok(())
+}
+pub fn Poll.deregister_udp(&mut self, socket &UdpSocket, token Token) Result<void, Error> {
+    try _registration(self.handle, socket.fd, 2, Interest.Readable, token)
+    return Ok(())
+}
+pub fn Poll.deregister_connecting(&mut self, socket &Connecting, token Token) Result<void, Error> {
+    try _registration(self.handle, socket.stream.fd, 2, Interest.Readable, token)
+    return Ok(())
+}
+pub fn Poll.wait(&mut self, events &mut []Event, timeout i32) Result<usize, Error> {
+    if timeout < -1 || events.len() == usize(0) { return Err(Error{kind: ErrorKind.InvalidAddress, code: 22, domain: 0}) }
+    var remaining = timeout
+    var deadline = i64(0)
+    if timeout > 0 { deadline = (try _check(_now())).value + i64(timeout) }
+    for {
+        raw := _poll_wait(self.handle, events, remaining)
+        if raw.domain == 0 && raw.code == 4 {
+            if timeout > 0 {
+                now := (try _check(_now())).value
+                if now >= deadline { return Ok(usize(0)) }
+                remaining = i32(deadline - now)
+            }
+            continue
+        }
+        checked := try _check(raw)
+        return Ok(usize(checked.value))
+    }
+}
+pub fn Poll.close(self) Result<void, Error> {
+    try _check(_close_poll(self))
+    return Ok(())
+}
+
+fn _connection_error(code i32) Error {
+    var kind = ErrorKind.OtherOs
+    if code == 115 { kind = ErrorKind.WouldBlock }
+    if code == 111 { kind = ErrorKind.ConnectionRefused }
+    if code == 104 { kind = ErrorKind.ConnectionReset }
+    if code == 110 { kind = ErrorKind.TimedOut }
+    return Error{kind: kind, code: code, domain: 0}
 }

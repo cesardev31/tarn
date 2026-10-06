@@ -57,6 +57,8 @@ by [ADR 0030](docs/adr/0030-borrowed-dynamic-interfaces.md),
 [ADR 0031](docs/adr/0031-declaration-semantic-contracts.md) and the
 [phase report](docs/dynamic-interface-report.md).
 
-Blocking Linux TCP/UDP networking is available through `import "net"`, with owned
-sockets, safe borrowed slices and Result errors. See [the API](docs/networking.md)
-and [the echo example](examples/tcp_echo.tarn). Nonblocking and async I/O are deferred.
+Blocking and explicit nonblocking Linux TCP/UDP networking with level-triggered
+epoll is available through `import "net"`, with owned sockets, safe borrowed
+slices and Result errors. See [the API](docs/networking.md),
+[the Phase 12B report](docs/readiness-report.md) and
+[the echo example](examples/tcp_echo.tarn). Async I/O remains deferred.

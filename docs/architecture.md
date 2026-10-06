@@ -20,7 +20,7 @@ Source → Lexer → Parser → AST → Resolve → Types → Typed IR
 | `compiler/ir` | `tarn_ir` | typed CFG IR, lowering, verifier, printer (ADR 0023) | done (v0) |
 | `compiler/ownership` | `tarn_ownership` | 6A move/init + drop decisions (ADR 0024), 6B borrows + provenance (ADR 0025), 6C executable drop elaboration (ADR 0026) | done (v0) |
 | `compiler/backend` | `tarn_backend` | post-drop IR → Cranelift → ELF object/link | initial Linux x86_64 subset (ADR 0027) |
-| `stdlib/net` | — | blocking TCP/UDP, owned sockets, resolution and explicit errors (ADR 0034) | done (12A v0) |
+| `stdlib/net` | — | blocking/nonblocking TCP/UDP, owned sockets, level-triggered epoll and explicit errors (ADRs 0034/0035) | done (12A/12B Linux v0) |
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | — | embedded C runtime: primitive print, strings, panic/abort; libc startup | initial (ADR 0027) |
 | `tools/cli` | `tarn` | the single CLI | started |
@@ -156,3 +156,12 @@ destruction executes verified post-drop plans; the backend does not infer owner
 liveness. The IR verifier validates private signature, owner and outcome shapes.
 Slice pointers/lengths are explicit ABI lanes, never escaping runtime storage.
 See [ADR 0034](adr/0034-blocking-networking.md) and [networking](networking.md).
+
+## Readiness boundary (Phase 12B)
+
+The trusted net catalog adds Poll and exact Token/Event bridge shapes. Poll drop
+uses existing post-drop resource destruction; no ownership registry is added.
+C owns epoll bookkeeping with nonreused tokens and Linux socket cookies. Public
+Tarn code controls mode changes, connect progression, WouldBlock and monotonic
+EINTR retry policy. No application pointer remains pending after a syscall.
+See [ADR 0035](adr/0035-nonblocking-readiness.md).
