@@ -1,0 +1,4 @@
+extern "C" fn choose(left &string, right &string, first bool) &string borrows(left, right)
+interface View {
+    fn view(&self) &string borrows(self)
+}

@@ -15,8 +15,8 @@
 //! Not SSA: locals are mutable slots assigned many times; places (`x.f`,
 //! `(*r)[i]`) are first-class because borrow checking reasons about them.
 
-pub mod post_drop;
 mod lower;
+pub mod post_drop;
 mod pretty;
 mod verify;
 
@@ -244,7 +244,7 @@ pub enum Aggregate {
     Closure(FunctionId),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum CoerceKind {
     /// `&mut T → &T`.
     MutToShared,
@@ -252,6 +252,8 @@ pub enum CoerceKind {
     Unsize,
     /// `&T → &any I`.
     ToDyn(SymbolId),
+    /// Concrete executable table; emitted only by backend specialization.
+    DynTable { interface: SymbolId, concrete: Ty, methods: Vec<FunctionId> },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -260,7 +262,12 @@ pub enum Rvalue {
     /// `&place` / `&mut place`.
     Ref(bool, Place),
     /// `&place[start..end]` / `&mut …`: a slice reference into an array or slice place.
-    SliceRef { mutable: bool, base: Place, start: Option<Operand>, end: Option<Operand> },
+    SliceRef {
+        mutable: bool,
+        base: Place,
+        start: Option<Operand>,
+        end: Option<Operand>,
+    },
     /// Integer arithmetic is checked: overflow panics in every build profile.
     Binary(BinOp, Operand, Operand),
     Unary(UnOp, Operand),
@@ -289,7 +296,10 @@ pub enum Callee {
     Fn(FunctionId, Vec<Ty>),
     /// Interface method on a type parameter or `any I`: chosen at
     /// monomorphization (static dispatch) or at run time (`any`).
-    Virtual { method: SymbolId, type_args: Vec<Ty> },
+    Virtual {
+        method: SymbolId,
+        type_args: Vec<Ty>,
+    },
     /// `extern "intrinsic"` from `core`, or a compiler-known array/slice method.
     Intrinsic(String),
     Builtin(Builtin),
@@ -304,11 +314,22 @@ pub enum Terminator {
     Goto(BlockId),
     /// Jump to the block of the matching value, else `otherwise`. Booleans
     /// switch on 0 (`false`) / 1 (`true`); enums on `Discriminant`.
-    Switch { discr: Operand, cases: Vec<(i128, BlockId)>, otherwise: BlockId },
+    Switch {
+        discr: Operand,
+        cases: Vec<(i128, BlockId)>,
+        otherwise: BlockId,
+    },
     /// `next` is `None` when the callee never returns (`panic`).
     /// `spawn` runs the call as a concurrent task inside the current scope.
     /// `arg_spans[i]` is the source span of `args[i]` (for diagnostics).
-    Call { callee: Callee, args: Vec<Operand>, arg_spans: Vec<Span>, dest: Place, next: Option<BlockId>, spawn: bool },
+    Call {
+        callee: Callee,
+        args: Vec<Operand>,
+        arg_spans: Vec<Span>,
+        dest: Place,
+        next: Option<BlockId>,
+        spawn: bool,
+    },
     Return,
     /// Proven unreachable (e.g. after an exhaustive `match`).
     Unreachable,

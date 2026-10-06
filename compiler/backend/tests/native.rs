@@ -227,3 +227,81 @@ fn generic_owned_drops_match_interpreter() {
     assert_eq!(trace, expected);
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn dynamic_metadata_corruption_is_rejected() {
+    use tarn_ir::{Callee, CoerceKind, Rvalue, StatementKind, Terminator, post_drop as post};
+    let source = std::fs::read_to_string("../../tests/native/pass/dynamic.tarn").unwrap();
+    let (exe, res) = compile(&source, "dynamic-corruption");
+    let t = res.typed.as_ref().unwrap();
+    let p = tarn_backend::mono::specialize(res.drops.as_ref().unwrap(), t).unwrap();
+    tarn_backend::verify_dynamic(&p, t).unwrap();
+    for mutation in 0..6 {
+        let mut corrupt = post::Program { functions: p.functions.clone(), by_symbol: p.by_symbol.clone() };
+        let table = corrupt
+            .functions
+            .iter_mut()
+            .flat_map(|f| &mut f.blocks)
+            .flat_map(|b| &mut b.stmts)
+            .find_map(|s| match &mut s.op {
+                post::Op::Plain(StatementKind::Assign(_, Rvalue::Coerce(CoerceKind::DynTable { interface, concrete, methods }, _, ty))) => Some((interface, concrete, methods, ty)),
+                _ => None,
+            })
+            .unwrap();
+        match mutation {
+            0 => {
+                table.2.pop();
+            }
+            1 => table.2.swap(0, 1),
+            2 => *table.0 = tarn_resolve::SymbolId(u32::MAX),
+            3 => *table.1 = tarn_types::Ty::Bool,
+            4 => *table.3 = tarn_types::Ty::Bool,
+            _ => table.2[0] = tarn_ir::FunctionId(u32::MAX),
+        }
+        assert!(tarn_backend::verify_dynamic(&corrupt, t).is_err(), "mutation {mutation}");
+    }
+    let mut corrupt = post::Program { functions: p.functions.clone(), by_symbol: p.by_symbol.clone() };
+    let call = corrupt
+        .functions
+        .iter_mut()
+        .flat_map(|f| &mut f.blocks)
+        .find_map(|b| match &mut b.term {
+            Terminator::Call { callee: Callee::Virtual { method, .. }, .. } => Some(method),
+            _ => None,
+        })
+        .unwrap();
+    *call = tarn_resolve::SymbolId(u32::MAX);
+    assert!(tarn_backend::verify_dynamic(&corrupt, t).is_err());
+    let mut corrupt = post::Program { functions: p.functions.clone(), by_symbol: p.by_symbol.clone() };
+    for f in &mut corrupt.functions {
+        for b in &mut f.blocks {
+            b.stmts.retain(|s| !matches!(&s.op, post::Op::Plain(StatementKind::Assign(_, Rvalue::Coerce(CoerceKind::DynTable { .. }, _, _)))));
+        }
+    }
+    assert!(tarn_backend::verify_dynamic(&corrupt, t).is_err());
+    let mut corrupt = post::Program { functions: p.functions.clone(), by_symbol: p.by_symbol.clone() };
+    corrupt.functions[0].decl.locals[0].ty = tarn_types::Ty::Any(tarn_resolve::SymbolId(0));
+    assert!(tarn_backend::verify_dynamic(&corrupt, t).is_err());
+    let out = Command::new(&exe).env("TARN_TRACE_DROPS", "1").output().unwrap();
+    assert!(out.status.success());
+    let trace: Vec<_> = String::from_utf8_lossy(&out.stderr).lines().filter_map(|s| s.strip_prefix("drop:").map(str::to_owned)).collect();
+    assert_eq!(trace, ["second", "first"]);
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn static_bounds_do_not_instantiate_unused_interface_methods() {
+    let source = "interface I {\n fn used(&self) i64\n fn unused(&self)\n}\nstruct S { n i64 }\nimpl I for S {\n fn used(&self) i64 { return self.n }\n fn unused(&self) { spawn print(0) }\n}\nfn call<T:I>(x &T) i64 { return x.used() }\nfn main() { s := S{n:42}\n print(call(&s)) }\n";
+    let (exe, res) = compile(source, "static-reachability");
+    let p = tarn_backend::mono::specialize(res.drops.as_ref().unwrap(), res.typed.as_ref().unwrap()).unwrap();
+    assert!(p.functions.iter().all(|f| !f.decl.name.contains("unused")));
+    assert!(
+        p.functions
+            .iter()
+            .flat_map(|f| &f.blocks)
+            .flat_map(|b| &b.stmts)
+            .all(|s| !matches!(&s.op, tarn_ir::post_drop::Op::Plain(tarn_ir::StatementKind::Assign(_, tarn_ir::Rvalue::Coerce(tarn_ir::CoerceKind::DynTable { .. }, _, _)))))
+    );
+    assert_eq!(Command::new(&exe).output().unwrap().stdout, b"42\n");
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}

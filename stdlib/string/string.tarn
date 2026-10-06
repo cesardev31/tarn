@@ -1,0 +1,8 @@
+// Standard string helpers implemented in Tarn over declared core operations.
+pub fn len(value &string) usize { return value.len() }
+pub fn is_empty(value &string) bool { return value.is_empty() }
+pub fn clone(value &string) string { return value.clone() }
+pub fn view(value &string) &string { return value.view() }
+pub fn choose(left &string, right &string, first bool) &string {
+    return left.choose(right, first)
+}

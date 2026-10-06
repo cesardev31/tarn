@@ -1,0 +1,2 @@
+interface Writer { fn write(&self) }
+fn consume(value any Writer) {}

@@ -132,3 +132,16 @@ generic arguments in expressions are a v0 restriction (ADR 0012). Not yet
 designed or parsed: attributes, `const`/statics, type aliases, raw pointer
 types `*T`, guards beyond a single expression, labeled breaks, numeric literal
 suffixes, char literals, doc-comment attachment to items.
+
+## Phase 9 declaration provenance extension
+
+After the optional return type, a function/interface declaration may contain:
+
+```
+borrow_clause = "borrows" "(" identifier { "," identifier } [ "," ] ")"
+```
+
+`borrows` is contextual here, not a globally reserved keyword. Semantics require a
+bodyless borrowed-result declaration and distinct reference inputs (`self` is
+allowed for a borrowed receiver). A clause on a body is rejected, and normal
+body provenance remains inferred. ADR 0031 defines validation and source indices.

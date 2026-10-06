@@ -1346,6 +1346,9 @@ impl<'a, 'l> Builder<'a, 'l> {
         let sym = self.lx.r.symbol(s);
         match &sym.kind {
             SymbolKind::Method { owner } => format!("{}.{}", self.lx.r.symbol(*owner).name, sym.name),
+            SymbolKind::Function if self.lx.t.decls.fns.get(&s).is_some_and(|sig| sig.abi.as_deref() == Some("intrinsic")) => {
+                sym.module.map(|m| format!("{}.{}", self.lx.r.modules[m.0 as usize].name, sym.name)).unwrap_or_else(|| sym.name.clone())
+            }
             _ => sym.name.clone(),
         }
     }

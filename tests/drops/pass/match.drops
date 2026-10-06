@@ -96,3 +96,28 @@ fn main [post-drop] {
     goto bb7
 }
 
+fn string.view [post-drop] {
+    _0: &string
+    _1: &string
+  bb0:
+    _0 = copy _1
+    return
+}
+
+fn string.choose [post-drop] {
+    _0: &string
+    _1: &string
+    _2: &string
+    _3: bool
+  bb0:
+    switch copy _3 [0 => bb2, _ => bb1]
+  bb1:
+    _0 = copy _1
+    return
+  bb2:
+    goto bb3
+  bb3:
+    _0 = copy _2
+    return
+}
+

@@ -1,0 +1,10 @@
+interface View { fn view(&self) &string }
+struct Value { name string }
+impl View for Value { fn view(&self) &string { return &self.name } }
+fn get(v &any View) &string { return v.view() }
+fn main() {
+    var v = Value{name: "old"}
+    r := get(&v)
+    v = Value{name: "new"}
+    print(r)
+}

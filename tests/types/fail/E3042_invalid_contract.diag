@@ -1,0 +1,12 @@
+error[E3042]: invalid borrowed-result contract
+ --> tests/types/fail/E3042_invalid_contract.tarn:1:8
+  |
+1 | extern "C" fn invalid(x i64) &i64 borrows(x)
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ use distinct reference inputs on a bodyless borrowed-result declaration
+
+error[E3042]: invalid borrowed-result contract
+ --> tests/types/fail/E3042_invalid_contract.tarn:2:8
+  |
+2 | extern "C" fn unknown(x &i64) &i64 borrows(missing)
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ use distinct reference inputs on a bodyless borrowed-result declaration
+

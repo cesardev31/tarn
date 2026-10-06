@@ -1,0 +1,12 @@
+import "string"
+fn borrowed(x &string) &string { return string.view(x) }
+fn main() {
+    a := "left"
+    b := "right"
+    print(borrowed(&a))
+    print(string.choose(&a, &b, false))
+    c := string.clone(&a)
+    print(c)
+    print(string.len(&b))
+    print(string.is_empty(&a))
+}

@@ -1,0 +1,7 @@
+interface Consume { fn consume(self) usize }
+struct Value { text string }
+impl Consume for Value {
+    fn consume(self) usize { return self.text.len() }
+}
+fn call<T: Consume>(value T) usize { return value.consume() }
+fn main() { print(call(Value{text: "owned"})) }

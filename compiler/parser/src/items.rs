@@ -40,8 +40,7 @@ impl Parser {
                         let found = crate::describe(self.peek());
                         let span = self.span();
                         self.error(
-                            Diagnostic::error("E1001", "unexpected_token", format!("expected end of line after item, found {found}"))
-                                .primary(span, "expected a line break"),
+                            Diagnostic::error("E1001", "unexpected_token", format!("expected end of line after item, found {found}")).primary(span, "expected a line break"),
                         );
                     }
                     self.recover_item();
@@ -154,6 +153,21 @@ impl Parser {
         let (receiver, params) = self.parse_params(allow_receiver);
         let ret = if crate::types::starts_type(self.peek()) { Some(self.parse_type()) } else { None };
 
+        let borrows = if matches!(self.peek(), TokenKind::Ident(n) if n == "borrows") {
+            self.bump();
+            self.expect(&TokenKind::LParen);
+            let mut names = Vec::new();
+            while !self.at(&TokenKind::RParen) && !self.at(&TokenKind::Eof) {
+                names.push(self.expect_ident("borrow source parameter"));
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(&TokenKind::RParen);
+            Some(names)
+        } else {
+            None
+        };
         let body = if self.at(&TokenKind::LBrace) {
             let b = self.parse_block();
             if ctx == FnContext::Interface {
@@ -177,12 +191,12 @@ impl Parser {
                 if *self.peek() == TokenKind::Newline && *self.peek_past_newlines() == TokenKind::LBrace {
                     self.skip_newlines();
                     let b = self.parse_block();
-                    return FnDecl { id, span: self.since(start), abi, owner, name, generics, receiver, params, ret, body: Some(b) };
+                    return FnDecl { id, span: self.since(start), abi, owner, name, generics, receiver, params, ret, borrows, body: Some(b) };
                 }
             }
             None
         };
-        FnDecl { id, span: self.since(start), abi, owner, name, generics, receiver, params, ret, body }
+        FnDecl { id, span: self.since(start), abi, owner, name, generics, receiver, params, ret, borrows, body }
     }
 
     /// `(` [receiver] {`,` param} [`,`] `)`
@@ -203,16 +217,8 @@ impl Parser {
                     }
                     let span = p.since(start);
                     if !allow_receiver || index != 0 {
-                        let msg = if allow_receiver {
-                            "`self` must be the first parameter"
-                        } else {
-                            "`self` is only allowed in methods"
-                        };
-                        p.error(
-                            Diagnostic::error("E1014", "misplaced_receiver", msg)
-                                .primary(span, "")
-                                .help("declare methods as `fn Type.name(&self, ...)`"),
-                        );
+                        let msg = if allow_receiver { "`self` must be the first parameter" } else { "`self` is only allowed in methods" };
+                        p.error(Diagnostic::error("E1014", "misplaced_receiver", msg).primary(span, "").help("declare methods as `fn Type.name(&self, ...)`"));
                     } else {
                         receiver = Some(Receiver { id: p.id(), kind, span });
                     }
@@ -369,9 +375,7 @@ impl Parser {
     fn expected_member(&mut self, what: &str) {
         let found = crate::describe(self.peek());
         let span = self.span();
-        self.error(
-            Diagnostic::error("E1001", "unexpected_token", format!("expected {what}, found {found}")).primary(span, ""),
-        );
+        self.error(Diagnostic::error("E1001", "unexpected_token", format!("expected {what}, found {found}")).primary(span, ""));
         self.recover_stmt();
     }
 
@@ -414,14 +418,7 @@ impl Parser {
                     }
                     k => {
                         let span = p.span();
-                        p.error(
-                            Diagnostic::error(
-                                "E1001",
-                                "unexpected_token",
-                                format!("expected end of line after {member}, found {}", crate::describe(&k)),
-                            )
-                            .primary(span, ""),
-                        );
+                        p.error(Diagnostic::error("E1001", "unexpected_token", format!("expected end of line after {member}, found {}", crate::describe(&k))).primary(span, ""));
                         p.recover_stmt();
                     }
                 }
@@ -434,11 +431,7 @@ impl Parser {
 
     pub(crate) fn unclosed(&mut self, open: tarn_diagnostics::Span) {
         let span = self.span();
-        self.error(
-            Diagnostic::error("E1010", "unclosed_delimiter", "unclosed delimiter `{`")
-                .primary(span, "expected `}` before end of file")
-                .secondary(open, "opened here"),
-        );
+        self.error(Diagnostic::error("E1010", "unclosed_delimiter", "unclosed delimiter `{`").primary(span, "expected `}` before end of file").secondary(open, "opened here"));
     }
 }
 

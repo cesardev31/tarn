@@ -153,6 +153,11 @@ impl Dumper {
             self.s(" -> ");
             self.ty(r);
         }
+        if let Some(sources) = &f.borrows {
+            self.s(" borrows(");
+            self.s(&sources.iter().map(|s| s.name.clone()).collect::<Vec<_>>().join(", "));
+            self.s(")");
+        }
         if let Some(b) = &f.body {
             self.nl(ind + 1);
             self.block(b, ind + 1);

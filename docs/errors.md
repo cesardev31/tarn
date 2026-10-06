@@ -148,6 +148,8 @@ stream them:
 | W3002 | `unreachable_code` | unreachable code |
 | E3039 | `slice_by_value` | a slice can only be used through a reference |
 | E3040 | `unmodeled_std_api` | stdlib API/type lacks an ownership and provenance contract; use explicit Tarn declarations |
+| E3041 | `owned_dynamic_interface` | dynamic interfaces are borrowed only; use `&any I` or `&mut any I` |
+| E3042 | `invalid_semantic_contract` | invalid borrowed-result source clause on a declaration |
 | E4001 | `use_after_move` | use of (possibly) moved value `x` |
 | E4002 | `use_of_partially_moved` | use of (possibly) partially moved value `p` |
 | E4003 | `move_out_of_reference` | cannot move a value out from behind a reference |

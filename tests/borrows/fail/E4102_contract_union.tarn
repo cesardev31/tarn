@@ -1,0 +1,8 @@
+import "string"
+fn main() {
+    var a = "left"
+    var b = "right"
+    r := string.choose(&a, &b, true)
+    b = "changed"
+    print(r)
+}

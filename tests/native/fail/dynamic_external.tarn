@@ -1,0 +1,8 @@
+interface View { fn value(&self) i64 }
+struct Value { n i64 }
+extern "C" fn external(v &Value) &any View
+fn read(v &any View) i64 { return v.value() }
+fn main() {
+    v := Value{n: 42}
+    unsafe { print(read(external(&v))) }
+}

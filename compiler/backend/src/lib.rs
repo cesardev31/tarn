@@ -30,6 +30,15 @@ impl std::error::Error for Error {}
 pub type Result<T> = std::result::Result<T, Error>;
 const RUNTIME: &str = include_str!("../../../runtime/native.c");
 
+/// Check executable dynamic metadata on a specialized post-drop program.
+pub fn verify_dynamic(p: &post_drop::Program, t: &Typed) -> Result<()> {
+    let bugs = post_drop::verify(p, t);
+    if !bugs.is_empty() {
+        return Err(Error::bug(bugs.join("\n")));
+    }
+    codegen::verify_dynamic(p, t)
+}
+
 pub fn emit_object(p: &post_drop::Program, t: &Typed) -> Result<Vec<u8>> {
     if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         return Err(Error::unsupported("target must be Linux x86_64"));

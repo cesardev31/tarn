@@ -24,6 +24,23 @@ The goal is to combine strong static guarantees and low-level control with a sim
 
 ---
 
+## Application-level ergonomics
+
+Tarn is not only a systems programming language.
+
+High-level application code should not be forced to expose low-level
+memory-management details unless those details are semantically necessary.
+
+HTTP servers, JSON processing, database access, CLI applications and similar
+software should remain concise and predictable.
+
+Low-level control is an available capability, not a tax imposed on every program.
+
+If a common application task requires significantly more ownership ceremony
+
+than an equivalent Go program, treat that as a design problem unless the extra
+ceremony is required for a concrete safety guarantee.
+
 ## Language Policy
 
 All compiler code, internal documentation, ADRs, test names, diagnostic source text, commit messages, tooling code, and agent instructions should be written in English.

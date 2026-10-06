@@ -17,8 +17,8 @@ tested and documented.
 | 6C | Drop elaboration (ADR 0026) | **done** |
 | 7 | Cranelift backend, `tarn build`/`run` (ADR 0027) | **done for the initial Linux x86_64 subset** |
 | 7A | Native feature completeness (ADRs 0028–0029) | **done within documented subset; dynamic dispatch deferred** |
-| 8 | Structs | |
-| 9 | Ownership (moves) | |
+| 8 | Native feature completeness (ADRs 0028–0029) | **done within documented subset** |
+| 9 | Borrowed dynamic interfaces and semantic contracts (ADRs 0030–0031) | **done within documented subset** |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
 | 19 | Formatter (basic) | |
 | 20 | VS Code extension (TextMate) | **started**: language + highlighting |
@@ -53,5 +53,5 @@ Native feature completion after phase 7 adds reachable generic specialization,
 concrete generic ADTs, borrowed fat slices, nonescaping borrowed closures and
 checked shifts/float-to-int casts. Unknown bootstrap stdlib APIs now fail with
 E3040. See [ADR 0028](adr/0028-native-feature-completeness.md) and
-[ADR 0029](adr/0029-checked-shifts-and-float-casts.md). Dynamic dispatch and
-optimization remain deferred; callable locals retain current consuming semantics.
+[ADR 0029](adr/0029-checked-shifts-and-float-casts.md). Borrowed dynamic dispatch now executes (ADR 0030); owned dynamic objects remain
+rejected. Optimization remains deferred and callable consumption is unchanged.

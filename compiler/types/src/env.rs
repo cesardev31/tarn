@@ -32,6 +32,28 @@ pub struct EnumDef {
     pub is_copy: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum PassingMode {
+    Copy,
+    Move,
+    SharedBorrow,
+    MutableBorrow,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum ResultContract {
+    Copy,
+    Owned,
+    Borrowed(Vec<usize>),
+    InferredBorrow,
+    Ambiguous(usize),
+    NoSource,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct SemanticContract {
+    /// Receiver (if present) is parameter zero.
+    pub parameters: Vec<PassingMode>,
+    pub result: ResultContract,
+}
 #[derive(Clone)]
 pub struct FnSig {
     /// Owner binders, then the function's own generics.
@@ -45,6 +67,7 @@ pub struct FnSig {
     pub abi: Option<String>,
     pub module: ModuleId,
     pub span: Span,
+    pub contract: SemanticContract,
 }
 
 /// Prelude symbols the checker needs by identity.
@@ -65,6 +88,10 @@ pub struct Prelude {
 /// phases (IR lowering) so they never re-derive layouts or signatures.
 #[derive(Default)]
 pub struct Decls {
+    /// Interface declaration order, plus resolved implementation IDs.
+    pub interfaces: HashMap<SymbolId, Vec<SymbolId>>,
+    pub interface_methods: HashMap<SymbolId, (SymbolId, usize)>,
+    pub implementations: HashMap<(SymbolId, SymbolId), Vec<SymbolId>>,
     pub structs: HashMap<SymbolId, StructDef>,
     pub enums: HashMap<SymbolId, EnumDef>,
     pub fns: HashMap<SymbolId, FnSig>,
@@ -113,6 +140,14 @@ impl<'a> Env<'a> {
         let decls = Decls { copy: prelude.copy, ..Decls::default() };
         let mut env = Env { inputs, r, decls, prelude, diags: Vec::new() };
         env.collect();
+        for imp in &r.impls {
+            if let (Some(interface), Some(target)) = (imp.interface, imp.target) {
+                if let Some(order) = env.decls.interfaces.get(&interface) {
+                    let methods = order.iter().filter_map(|decl| imp.methods.iter().find(|m| r.symbol(**m).name == r.symbol(*decl).name).copied()).collect();
+                    env.decls.implementations.insert((interface, target), methods);
+                }
+            }
+        }
         env
     }
 
@@ -185,6 +220,13 @@ impl<'a> Env<'a> {
                         self.fn_sig(m, f, &[], None, owner)
                     }
                     ItemKind::Interface(i) => {
+                        if let Some(sym) = self.def(m, item.id) {
+                            let methods: Vec<_> = i.methods.iter().filter_map(|f| self.def(m, f.id)).collect();
+                            for (index, method) in methods.iter().enumerate() {
+                                self.decls.interface_methods.insert(*method, (sym, index));
+                            }
+                            self.decls.interfaces.insert(sym, methods);
+                        }
                         self.params_of(m, &i.generics);
                         for f in &i.methods {
                             self.fn_sig(m, f, &[], None, None);
@@ -225,15 +267,82 @@ impl<'a> Env<'a> {
         if let Some(o) = &f.owner {
             let binders = self.params_of(m, &o.params);
             if let Some(owner) = owner {
-                self_ty = Some(Ty::Adt(owner, binders.iter().map(|b| Ty::Param(*b)).collect()));
+                self_ty = Some(if matches!(self.r.symbol(owner).kind, SymbolKind::Primitive) {
+                    primitive(&self.r.symbol(owner).name)
+                } else {
+                    Ty::Adt(owner, binders.iter().map(|b| Ty::Param(*b)).collect())
+                });
                 self.inherit_bounds(owner, &binders);
             }
             generics.extend(binders);
         }
         generics.extend(self.params_of(m, &f.generics));
-        let params = f.params.iter().map(|p| self.lower(m, &p.ty)).collect();
+        let params: Vec<Ty> = f.params.iter().map(|p| self.lower(m, &p.ty)).collect();
         let ret = f.ret.as_ref().map(|t| self.lower(m, t)).unwrap_or(Ty::Void);
-        let sig = FnSig { generics, receiver: f.receiver.as_ref().map(|r| r.kind), self_ty, params, ret, abi: f.abi.clone(), module: m, span: f.name.span };
+        let receiver = f.receiver.as_ref().map(|r| r.kind);
+        let passing = |ty: &Ty| match ty {
+            Ty::Ref(false, _) => PassingMode::SharedBorrow,
+            Ty::Ref(true, _) => PassingMode::MutableBorrow,
+            _ if self.decls.is_copy(ty) => PassingMode::Copy,
+            _ => PassingMode::Move,
+        };
+        let mut parameter_modes = Vec::new();
+        if let Some(receiver) = receiver {
+            parameter_modes.push(match receiver {
+                ReceiverKind::Ref => PassingMode::SharedBorrow,
+                ReceiverKind::RefMut => PassingMode::MutableBorrow,
+                ReceiverKind::Value => self_ty.as_ref().map(&passing).unwrap_or(PassingMode::Move),
+            });
+        }
+        parameter_modes.extend(params.iter().map(&passing));
+        let offset = usize::from(receiver.is_some());
+        let mut sources = Vec::new();
+        let holds = |ty: &Ty| ty_holds_references(ty);
+        let result = if !holds(&ret) {
+            if self.decls.is_copy(&ret) { ResultContract::Copy } else { ResultContract::Owned }
+        } else if f.body.is_some() {
+            ResultContract::InferredBorrow
+        } else if matches!(receiver, Some(ReceiverKind::Ref | ReceiverKind::RefMut)) {
+            ResultContract::Borrowed(vec![0])
+        } else {
+            sources.extend(params.iter().enumerate().filter(|(_, t)| holds(t)).map(|(i, _)| i + offset));
+            match sources.len() {
+                0 => ResultContract::NoSource,
+                1 => ResultContract::Borrowed(sources.clone()),
+                n => ResultContract::Ambiguous(n),
+            }
+        };
+        let mut contract = SemanticContract { parameters: parameter_modes, result };
+        if let Some(names) = &f.borrows {
+            let mut explicit = Vec::new();
+            let mut invalid = f.body.is_some() || !holds(&ret) || names.is_empty();
+            for name in names {
+                let pos = if name.name == "self" && matches!(receiver, Some(ReceiverKind::Ref | ReceiverKind::RefMut)) {
+                    Some(0)
+                } else {
+                    f.params.iter().enumerate().find(|(i, p)| p.name.name == name.name && matches!(params[*i], Ty::Ref(..))).map(|(i, _)| i + offset)
+                };
+                if let Some(pos) = pos {
+                    if explicit.contains(&pos) {
+                        invalid = true;
+                    } else {
+                        explicit.push(pos);
+                    }
+                } else {
+                    invalid = true;
+                }
+            }
+            if invalid {
+                self.diags.push(
+                    Diagnostic::error("E3042", "invalid_semantic_contract", "invalid borrowed-result contract")
+                        .primary(f.span, "use distinct reference inputs on a bodyless borrowed-result declaration"),
+                );
+            } else {
+                explicit.sort();
+                contract.result = ResultContract::Borrowed(explicit);
+            }
+        }
+        let sig = FnSig { generics, receiver, self_ty, params, ret, abi: f.abi.clone(), module: m, span: f.name.span, contract };
         self.decls.fns.insert(sym, sig);
     }
 
@@ -290,7 +399,17 @@ impl<'a> Env<'a> {
                 }
                 _ => Ty::Error,
             },
-            TypeKind::Ref { mutable, inner } => Ty::Ref(*mutable, Box::new(self.lower_with(m, inner, diags))),
+            TypeKind::Ref { mutable, inner } => {
+                let inner_ty = if matches!(inner.kind, TypeKind::Any(_)) {
+                    match uses.get(&inner.id).map(|u| &u.res) {
+                        Some(Res::Symbol(i)) => Ty::Any(*i),
+                        _ => Ty::Error,
+                    }
+                } else {
+                    self.lower_with(m, inner, diags)
+                };
+                Ty::Ref(*mutable, Box::new(inner_ty))
+            }
             TypeKind::Slice(inner) => Ty::Slice(Box::new(self.lower_with(m, inner, diags))),
             TypeKind::Array { len, elem } => {
                 let elem = self.lower_with(m, elem, diags);
@@ -309,10 +428,13 @@ impl<'a> Env<'a> {
             TypeKind::Fn { params, ret } => {
                 Ty::Fn(params.iter().map(|p| self.lower_with(m, p, diags)).collect(), Box::new(ret.as_ref().map(|r| self.lower_with(m, r, diags)).unwrap_or(Ty::Void)))
             }
-            TypeKind::Any(_) => match uses.get(&t.id).map(|u| &u.res) {
-                Some(Res::Symbol(i)) => Ty::Any(*i),
-                _ => Ty::Error,
-            },
+            TypeKind::Any(_) => {
+                diags.push(
+                    Diagnostic::error("E3041", "owned_dynamic_interface", "dynamic interfaces are only supported through references")
+                        .primary(t.span, "use `&any I` or `&mut any I`"),
+                );
+                Ty::Error
+            }
             TypeKind::Error => Ty::Error,
         }
     }
@@ -355,5 +477,14 @@ pub fn primitive(name: &str) -> Ty {
         "void" => Ty::Void,
         "never" => Ty::Never,
         _ => Ty::Error,
+    }
+}
+
+fn ty_holds_references(ty: &Ty) -> bool {
+    match ty {
+        Ty::Ref(..) | Ty::Fn(..) | Ty::Param(_) | Ty::Any(_) | Ty::Opaque => true,
+        Ty::Adt(_, args) => args.iter().any(ty_holds_references),
+        Ty::Array(elem, _) | Ty::Slice(elem) => ty_holds_references(elem),
+        _ => false,
     }
 }

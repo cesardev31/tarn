@@ -392,3 +392,16 @@ These move into `core` once the stdlib exists.
   prefix/type position (`&&x` is a reference to a reference).
 - Compound assignment (`+=`) does not exist: `x = x + 1` is the one form.
 - The grammar actually implemented by the parser is in `docs/grammar.md`.
+
+### Borrowed dynamic interfaces and bodyless contracts
+
+Native dynamic interfaces support `&any I` / `&mut any I`; owned `any I` annotations
+reject E3041. Method slots follow interface declaration order and use resolved
+concrete implementations. Static generic bounds remain direct dispatch.
+
+A bodyless declaration may specify borrowed-result sources after its return type:
+`extern "C" fn choose(a &string, b &string) &string borrows(a, b)`.
+Only distinct reference inputs or a borrowed `self` may be listed. Bodies infer
+provenance and cannot override it with a clause. Missing ambiguous contracts still
+reject E4202; malformed clauses reject E3042. External C calls still need unsafe,
+and native C reference/aggregate ABI support remains deferred. See ADRs 0030–0031.

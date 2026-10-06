@@ -1,0 +1,14 @@
+extern "C" fn first(a &string, b &string) &string borrows(a)
+extern "C" fn owned(a &string) string
+fn check() {
+    unsafe {
+    var a = "left"
+    var b = "right"
+    r := first(&a, &b)
+    b = "changed"
+    print(r)
+    c := owned(&a)
+    a = "changed"
+    print(c)
+    }
+}

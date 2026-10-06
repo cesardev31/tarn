@@ -37,10 +37,11 @@ fn layout_inner(t: &Typed, ty: &Ty, seen: &mut Vec<Ty>) -> Result<Layout> {
         Ty::Float(_) => scalar(8),
         Ty::Str => scalar(8),
         Ty::Ref(_, inner) => {
-            if matches!(inner.as_ref(), Ty::Any(_)) {
-                return Err(Error::unsupported("dynamic references"));
+            if matches!(inner.as_ref(), Ty::Slice(_) | Ty::Any(_)) {
+                Layout { size: 16, align: 8, fields: Vec::new(), variants: Vec::new() }
+            } else {
+                scalar(8)
             }
-            if matches!(inner.as_ref(), Ty::Slice(_)) { Layout { size: 16, align: 8, fields: Vec::new(), variants: Vec::new() } } else { scalar(8) }
         }
         Ty::Fn(..) => Layout { size: 16, align: 8, fields: Vec::new(), variants: Vec::new() },
         Ty::Array(elem, n) => {

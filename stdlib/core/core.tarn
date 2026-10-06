@@ -32,6 +32,14 @@ pub extern "intrinsic" fn string.len(&self) usize
 pub extern "intrinsic" fn string.is_empty(&self) bool
 pub extern "intrinsic" fn string.clone(&self) string
 
+/// Observe the same string; the result borrows the receiver.
+pub fn string.view(&self) &string { return self }
+/// Select a borrowed string; either input may supply the result.
+pub fn string.choose(&self, other &string, first bool) &string {
+    if first { return self }
+    return other
+}
+
 // ---------------------------------------------------------------- floats
 
 pub extern "intrinsic" fn f32.sqrt(self) f32

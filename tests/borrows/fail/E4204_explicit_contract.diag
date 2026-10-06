@@ -1,0 +1,10 @@
+error[E4204]: `view` returns a borrow its interface declaration does not allow
+ --> tests/borrows/fail/E4204_explicit_contract.tarn:6:8
+  |
+2 |     fn view(&self, other &string) &string borrows(other)
+  |        ---- the interface restricts which inputs may supply the result
+6 |     fn view(&self, other &string) &string { return &self.text }
+  |        ^^^^
+  |
+  = help: return a reference derived only from the declared allowed inputs
+

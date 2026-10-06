@@ -5,7 +5,7 @@ use std::{process::Command, time::Instant};
 fn native_baseline() {
     let dir = std::env::temp_dir().join(format!("tarn-baseline-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    for name in ["arithmetic", "calls", "slices"] {
+    for name in ["arithmetic", "calls", "slices", "dynamic"] {
         let res = tarn_driver::check(std::path::Path::new(&format!("../../benchmarks/native/{name}.tarn"))).unwrap();
         assert!(!res.has_errors(), "{name}: {:?}", res.diagnostics);
         let start = Instant::now();
@@ -31,7 +31,13 @@ fn native_baseline() {
             let start = Instant::now();
             let out = Command::new(&exe).env_remove("TARN_TRACE_DROPS").output().unwrap();
             assert!(out.status.success());
-            let expected = if name == "slices" { b"1000000\n".as_slice() } else { b"499999500000\n".as_slice() };
+            let expected = if name == "slices" {
+                b"1000000\n".as_slice()
+            } else if name == "dynamic" {
+                b"42000000\n".as_slice()
+            } else {
+                b"499999500000\n".as_slice()
+            };
             assert_eq!(out.stdout, expected);
             times.push(start.elapsed().as_secs_f64() * 1000.0);
         }

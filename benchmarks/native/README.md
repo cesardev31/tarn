@@ -28,3 +28,19 @@ ignored in normal CI and asserts results without timing thresholds.
 
 Expected outputs are checked during measurement. Repeat on an idle, controlled
 host before drawing conclusions. These baselines do not authorize optimization.
+
+## Phase 9 dynamic dispatch baseline
+
+The collector now also executes `dynamic.tarn`: one million shared-receiver
+interface calls through a function parameter, producing 42,000,000. Observation
+on the same Linux debug-toolchain host, with other compiler tests running:
+
+| Fixture | Codegen ms | Runtime compile + link ms | Object bytes | ELF bytes | Runtime median ms |
+|---|---:|---:|---:|---:|---:|
+| dynamic (1M interface calls) | 48.290 | 151.875 | 2936 | 17232 | 35.060 |
+
+Five executions; median includes startup and one print. This is a baseline for
+the full existing pair-copy/reborrow/indirect-call path, not an isolated instruction
+latency or a controlled comparison with static dispatch. No devirtualization,
+inline cache or optimization was used. Command remains the ignored baseline test
+above. Repeat on an idle host before attributing cost to a specific operation.

@@ -1,0 +1,6 @@
+error[E3041]: dynamic interfaces are only supported through references
+ --> tests/types/fail/E3041_owned_dynamic.tarn:2:18
+  |
+2 | fn consume(value any Writer) {}
+  |                  ^^^^^^^^^^ use `&any I` or `&mut any I`
+

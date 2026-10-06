@@ -1,0 +1,4 @@
+interface Writer { fn write(&self) }
+struct Value { x i64 }
+fn use_writer(w &any Writer) {}
+fn main() { use_writer(&Value{x: 1}) }

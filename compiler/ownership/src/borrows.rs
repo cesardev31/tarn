@@ -18,7 +18,6 @@
 
 use crate::util::{BitSet, may_hold_refs, place_name};
 use std::collections::{HashMap, HashSet, VecDeque};
-use tarn_ast::ReceiverKind;
 use tarn_diagnostics::{Diagnostic, Span};
 use tarn_ir::{BlockId, Callee, Function, FunctionId, LocalId, Operand, Place, Program, Proj, RETURN, Rvalue, StatementKind, Terminator};
 use tarn_resolve::{Resolved, SymbolKind};
@@ -93,26 +92,11 @@ pub(crate) enum Elided {
 }
 
 pub(crate) fn elide(sig: &FnSig) -> Elided {
-    if !may_hold_refs(&sig.ret) {
-        return Elided::None;
-    }
-    let mut cands = Vec::new();
-    let mut pos = 0;
-    if let Some(r) = sig.receiver {
-        if matches!(r, ReceiverKind::Ref | ReceiverKind::RefMut) {
-            return Elided::Prov(vec![0]);
-        }
-        pos = 1;
-    }
-    for (i, p) in sig.params.iter().enumerate() {
-        if may_hold_refs(p) {
-            cands.push(pos + i);
-        }
-    }
-    match cands.len() {
-        0 => Elided::NoSource,
-        1 => Elided::Prov(cands),
-        n => Elided::Ambiguous(n),
+    match &sig.contract.result {
+        tarn_types::ResultContract::Copy | tarn_types::ResultContract::Owned | tarn_types::ResultContract::InferredBorrow => Elided::None,
+        tarn_types::ResultContract::Borrowed(sources) => Elided::Prov(sources.clone()),
+        tarn_types::ResultContract::Ambiguous(n) => Elided::Ambiguous(*n),
+        tarn_types::ResultContract::NoSource => Elided::NoSource,
     }
 }
 
@@ -846,8 +830,8 @@ fn check_declarations(r: &Resolved, t: &Typed, diags: &mut Vec<Diagnostic>) {
             Elided::Ambiguous(n) => diags.push(
                 Diagnostic::error("E4202", "ambiguous_provenance", format!("cannot infer where the reference returned by `{}` comes from", sym.name))
                     .primary(sig.span, format!("{n} reference parameters could be the source"))
-                    .note("without a body, only a `&self` receiver or a single reference parameter determines it (ADR 0010)")
-                    .help("return an owned value, or split the function so only one reference parameter remains"),
+                    .note("without an explicit borrows(...) clause, only a borrowed receiver or a single reference parameter determines it")
+                    .help("declare borrows(input, ...), return an owned value, or keep only one reference input"),
             ),
             Elided::NoSource => diags.push(
                 Diagnostic::error("E4201", "reference_escapes", format!("`{}` returns a reference but has no reference parameter to borrow from", sym.name))
@@ -872,8 +856,8 @@ fn check_impl_provenance(p: &Program, r: &Resolved, t: &Typed, prov: &HashMap<Fu
             diags.push(
                 Diagnostic::error("E4204", "provenance_mismatch", format!("`{}` returns a borrow its interface declaration does not allow", r.symbol(sym).name))
                     .primary(t.decls.fns[&sym].span, "")
-                    .secondary(dsig.span, "the interface's result can only borrow from `self` here")
-                    .help("return a reference derived from `self`"),
+                    .secondary(dsig.span, "the interface restricts which inputs may supply the result")
+                    .help("return a reference derived only from the declared allowed inputs"),
             );
         }
     }

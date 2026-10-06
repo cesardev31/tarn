@@ -1,0 +1,7 @@
+interface View {
+    fn view(&self, other &string) &string borrows(other)
+}
+struct Value { text string }
+impl View for Value {
+    fn view(&self, other &string) &string { return &self.text }
+}

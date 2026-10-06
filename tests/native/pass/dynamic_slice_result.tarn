@@ -1,0 +1,15 @@
+interface SliceView {
+    fn slice(&self, data &[]i64) &[]i64 borrows(data)
+}
+copy struct Value { n i64 }
+impl SliceView for Value {
+    fn slice(&self, data &[]i64) &[]i64 { return data }
+}
+fn view(v &any SliceView, data &[]i64) &[]i64 { return v.slice(data) }
+fn main() {
+    v := Value{n: 1}
+    a := [3]i64{10, 20, 30}
+    s := view(&v, &a[1..3])
+    print(s.len())
+    print(s[0])
+}

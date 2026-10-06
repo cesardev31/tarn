@@ -55,6 +55,9 @@ fn concrete_inner(ty: &Ty, depth: usize, nodes: &mut usize) -> Result<()> {
         }
         Ty::Array(ty, _) => concrete_inner(ty, depth + 1, nodes)?,
         Ty::Ref(_, ty) => {
+            if matches!(ty.as_ref(), Ty::Any(_)) {
+                return Ok(());
+            }
             if let Ty::Slice(elem) = ty.as_ref() {
                 concrete_inner(elem, depth + 1, nodes)?;
             } else {
@@ -99,6 +102,16 @@ pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
                             operand(a, &map, &mut cx)?;
                             operand(b, &map, &mut cx)?;
                         }
+                        Rvalue::Coerce(CoerceKind::ToDyn(interface), o, ty) => {
+                            let source = operand_ty(&f.decl, t, o)?;
+                            let Ty::Ref(_, concrete) = source else {
+                                return Err(Error::bug("dynamic coercion source is not a reference"));
+                            };
+                            let methods = table(&concrete, *interface, t, p, &mut cx)?;
+                            let interface = *interface;
+                            let ty = tarn_types::subst(ty, &map);
+                            *rv = Rvalue::Coerce(CoerceKind::DynTable { interface, concrete: *concrete, methods }, o.clone(), ty);
+                        }
                         Rvalue::Cast(o, ty) | Rvalue::Coerce(_, o, ty) => {
                             operand(o, &map, &mut cx)?;
                             *ty = tarn_types::subst(ty, &map);
@@ -141,9 +154,28 @@ pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
                             ts.clear();
                         }
                         Callee::Value(o) => operand(o, &map, &mut cx)?,
-                        Callee::Virtual { type_args, .. } => {
-                            for ty in type_args {
-                                *ty = tarn_types::subst(ty, &map);
+                        Callee::Virtual { method, type_args } => {
+                            let source = operand_ty(&f.decl, t, args.first().ok_or_else(|| Error::bug("virtual call missing receiver"))?)?;
+                            let receiver_type = match source {
+                                Ty::Ref(_, inner) => *inner,
+                                ty => ty,
+                            };
+                            if let Ty::Adt(target, concrete_args) = &receiver_type {
+                                let (interface, index) = t.decls.interface_methods.get(method).copied().ok_or_else(|| Error::bug("unregistered interface method"))?;
+                                let symbol = t
+                                    .decls
+                                    .implementations
+                                    .get(&(interface, *target))
+                                    .and_then(|ms| ms.get(index))
+                                    .ok_or_else(|| Error::bug("missing resolved static implementation"))?;
+                                let id = p.by_symbol.get(symbol).copied().ok_or_else(|| Error::bug("missing static implementation function"))?;
+                                let mut instance_args = concrete_args.clone();
+                                instance_args.extend(type_args.iter().map(|ty| tarn_types::subst(ty, &map)));
+                                *callee = Callee::Fn(cx.intern(id, instance_args)?, Vec::new());
+                            } else {
+                                for ty in type_args {
+                                    *ty = tarn_types::subst(ty, &map);
+                                }
                             }
                         }
                         _ => {}
@@ -193,4 +225,31 @@ fn prune(d: &mut post::Drop, f: &tarn_ir::Function, t: &Typed) -> bool {
         }
         post::Drop::Remaining { place, .. } => post::place_ty(f, t, place).is_none_or(|ty| !t.decls.is_copy(&ty)),
     }
+}
+
+fn operand_ty(f: &Function, t: &Typed, o: &Operand) -> Result<Ty> {
+    match o {
+        Operand::Copy(p) | Operand::Move(p) => post::place_ty(f, t, p).ok_or_else(|| Error::bug("invalid dynamic operand")),
+        _ => Err(Error::bug("dynamic receiver must be a place")),
+    }
+}
+fn table(concrete: &Ty, interface: tarn_resolve::SymbolId, t: &Typed, p: &post::Program, cx: &mut Instances<'_>) -> Result<Vec<FunctionId>> {
+    let Ty::Adt(target, args) = concrete else {
+        return Err(Error::unsupported("dynamic coercion of non-ADT"));
+    };
+    let declarations = t.decls.interfaces.get(&interface).ok_or_else(|| Error::bug("missing interface table"))?;
+    let methods = t.decls.implementations.get(&(interface, *target)).ok_or_else(|| Error::bug("missing resolved implementation"))?;
+    if declarations.len() != methods.len() {
+        return Err(Error::bug("incomplete interface table"));
+    }
+    methods
+        .iter()
+        .map(|symbol| {
+            let id = p.by_symbol.get(symbol).copied().ok_or_else(|| Error::bug("missing implementation function"))?;
+            if p.functions[id.0 as usize].decl.generics.len() != args.len() {
+                return Err(Error::unsupported("generic dynamic methods"));
+            }
+            cx.intern(id, args.clone())
+        })
+        .collect()
 }

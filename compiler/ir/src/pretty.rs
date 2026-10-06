@@ -81,11 +81,7 @@ impl P<'_> {
     }
 
     fn targs(&self, ts: &[Ty]) -> String {
-        if ts.is_empty() {
-            String::new()
-        } else {
-            format!("<{}>", ts.iter().map(|t| self.ty(t)).collect::<Vec<_>>().join(", "))
-        }
+        if ts.is_empty() { String::new() } else { format!("<{}>", ts.iter().map(|t| self.ty(t)).collect::<Vec<_>>().join(", ")) }
     }
 
     pub(crate) fn ops(&self, os: &[Operand]) -> String {
@@ -120,7 +116,7 @@ impl P<'_> {
                 let k = match k {
                     CoerceKind::MutToShared => "mut_to_shared",
                     CoerceKind::Unsize => "unsize",
-                    CoerceKind::ToDyn(_) => "to_dyn",
+                    CoerceKind::ToDyn(_) | CoerceKind::DynTable { .. } => "to_dyn",
                 };
                 format!("coerce.{k}({}) as {}", self.operand(o), self.ty(t))
             }

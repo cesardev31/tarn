@@ -10,7 +10,8 @@ mod exhaust;
 mod ty;
 
 pub use check::subst;
-pub use env::{Decls, EnumDef, Env, FieldDef, FnSig, Prelude, StructDef, VariantDef};
+pub use env::{Decls, EnumDef, Env, FieldDef, FnSig, PassingMode, Prelude, ResultContract, SemanticContract, StructDef, VariantDef};
+pub use tarn_ast::ReceiverKind;
 pub use ty::{FloatTy, IntTy, ParamId, Ty};
 
 use std::collections::HashMap;

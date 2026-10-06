@@ -9,6 +9,8 @@ use tarn_ast::{ItemKind, Module};
 use tarn_diagnostics::{Diagnostic, Severity, SourceMap};
 use tarn_resolve::{ModuleInput, Resolved};
 
+const STRING_SOURCE: &str = include_str!("../../../stdlib/string/string.tarn");
+
 const CORE_SOURCE: &str = include_str!("../../../stdlib/core/core.tarn");
 
 pub struct Program {
@@ -60,6 +62,7 @@ pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pat
         }
         let text = match overlays.get(&path) {
             Some(text) => text.clone(),
+            None if name == "string" && !path.is_file() => STRING_SOURCE.to_string(),
             None => std::fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?,
         };
         let display = path.strip_prefix(".").unwrap_or(&path).display().to_string();
@@ -70,7 +73,7 @@ pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pat
             if let ItemKind::Import(imp) = &item.kind {
                 let file = root.join(format!("{}.tarn", imp.path));
                 let valid = imp.path.split('/').all(|s| !s.is_empty() && s != "." && s != "..");
-                if valid && (file.is_file() || overlays.contains_key(&file)) {
+                if valid && (file.is_file() || overlays.contains_key(&file) || imp.path == "string") {
                     queue.push((imp.path.clone(), file));
                 }
             }
@@ -120,8 +123,7 @@ pub fn check_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pa
                 let (bo, d) = tarn_ownership::check_borrows(&p, &r, &t, &m.failed());
                 diagnostics.extend(d);
                 if !errors(&diagnostics) {
-                    drops = Some(tarn_ownership::elaborate_drops(&p, &t, &m)
-                        .map_err(|bugs| format!("compiler bug in drop elaboration:\n{}", bugs.join("\n")))?);
+                    drops = Some(tarn_ownership::elaborate_drops(&p, &t, &m).map_err(|bugs| format!("compiler bug in drop elaboration:\n{}", bugs.join("\n")))?);
                 }
                 borrows = Some(bo);
                 moves = Some(m);

@@ -110,16 +110,8 @@ impl<'c, 'a> Walker<'c, 'a> {
     fn declare_local(&mut self, name: &Ident, kind: SymbolKind, def: NodeId) -> SymbolId {
         let outer = self.cx.r.scope(self.scope).parent.and_then(|p| self.cx.r.lookup(p, &name.name));
         let same_scope = self.cx.r.scope(self.scope).get(&name.name).is_some();
-        let sym = Symbol {
-            name: name.name.clone(),
-            kind,
-            module: Some(self.m),
-            def: Some(def),
-            span: Some(name.span),
-            scope: self.scope,
-            is_pub: false,
-            body: self.current_body(),
-        };
+        let sym =
+            Symbol { name: name.name.clone(), kind, module: Some(self.m), def: Some(def), span: Some(name.span), scope: self.scope, is_pub: false, body: self.current_body() };
         let id = self.cx.declare(self.scope, sym, self.m, "E2003");
         // Remove from "declared later" once declared.
         if let Some((s, names)) = self.pending.last_mut()
@@ -147,9 +139,7 @@ impl<'c, 'a> Walker<'c, 'a> {
             }
         } else if outer_sym.module.is_some() || matches!(outer_sym.kind, SymbolKind::Builtin | SymbolKind::PreludeType) {
             let what = kind_name(&outer_sym.kind);
-            let mut d = warning("W2002", "shadows_item", format!("`{}` shadows the {what} `{}`", name.name, name.name))
-                .primary(name.span, "")
-                .help("use a different name");
+            let mut d = warning("W2002", "shadows_item", format!("`{}` shadows the {what} `{}`", name.name, name.name)).primary(name.span, "").help("use a different name");
             if let Some(s) = outer_sym.span {
                 d = d.secondary(s, "declared here");
             }
@@ -183,10 +173,7 @@ impl<'c, 'a> Walker<'c, 'a> {
                     break;
                 }
                 if b.is_closure {
-                    let caps = self.cx.r.tables[self.m.0 as usize]
-                        .captures
-                        .entry(b.id)
-                        .or_insert_with(|| Captures { span: b.span, symbols: Vec::new() });
+                    let caps = self.cx.r.tables[self.m.0 as usize].captures.entry(b.id).or_insert_with(|| Captures { span: b.span, symbols: Vec::new() });
                     if !caps.symbols.contains(&id) {
                         caps.symbols.push(id);
                     }
@@ -267,13 +254,11 @@ impl<'c, 'a> Walker<'c, 'a> {
                     SymbolKind::Module(ModuleTarget::Local(target)) => {
                         let scope = self.cx.r.modules[target.0 as usize].scope;
                         match self.cx.r.scope(scope).get(&name.name) {
-                            Some(mid) if self.cx.sym(mid).is_pub && !matches!(self.cx.sym(mid).kind, SymbolKind::Module(_)) => {
-                                Ok(Some(Res::Symbol(mid)))
-                            }
+                            Some(mid) if self.cx.sym(mid).is_pub && !matches!(self.cx.sym(mid).kind, SymbolKind::Module(_)) => Ok(Some(Res::Symbol(mid))),
                             Some(mid) => {
                                 let def = self.cx.sym(mid).span;
-                                let mut d = Diagnostic::error("E2006", "private_item", format!("`{}` is private to module `{}`", name.name, sym.name))
-                                    .primary(name.span, "not `pub`");
+                                let mut d =
+                                    Diagnostic::error("E2006", "private_item", format!("`{}` is private to module `{}`", name.name, sym.name)).primary(name.span, "not `pub`");
                                 if let Some(def) = def {
                                     d = d.secondary(def, "declared here");
                                 }
@@ -311,25 +296,14 @@ impl<'c, 'a> Walker<'c, 'a> {
         if let Some(m) = self.cx.r.member(ty, &name.name) {
             return Some(Res::Symbol(m));
         }
-        let found: Vec<SymbolId> = self
-            .cx
-            .r
-            .impls
-            .iter()
-            .filter(|i| i.target == Some(ty))
-            .flat_map(|i| i.methods.iter().copied())
-            .filter(|&mid| self.cx.sym(mid).name == name.name)
-            .collect();
+        let found: Vec<SymbolId> =
+            self.cx.r.impls.iter().filter(|i| i.target == Some(ty)).flat_map(|i| i.methods.iter().copied()).filter(|&mid| self.cx.sym(mid).name == name.name).collect();
         match found.as_slice() {
             [] => None,
             [one] => Some(Res::Symbol(*one)),
             many => {
-                let mut d = Diagnostic::error(
-                    "E2010",
-                    "ambiguous_method",
-                    format!("`{}` is implemented by more than one interface for this type", name.name),
-                )
-                .primary(name.span, "ambiguous");
+                let mut d = Diagnostic::error("E2010", "ambiguous_method", format!("`{}` is implemented by more than one interface for this type", name.name))
+                    .primary(name.span, "ambiguous");
                 for &m in many {
                     if let Some(s) = self.cx.sym(m).span {
                         d = d.secondary(s, "candidate");
@@ -475,8 +449,7 @@ impl<'c, 'a> Walker<'c, 'a> {
             Res::Symbol(id) => {
                 let k = kind_name(&self.cx.sym(id).kind);
                 self.cx.diags.push(
-                    Diagnostic::error("E2012", "not_an_interface", format!("expected an interface in {what}, found {k} `{}`", path_text(p)))
-                        .primary(p.span, "not an interface"),
+                    Diagnostic::error("E2012", "not_an_interface", format!("expected an interface in {what}, found {k} `{}`", path_text(p))).primary(p.span, "not an interface"),
                 );
                 None
             }
@@ -535,13 +508,9 @@ impl<'c, 'a> Walker<'c, 'a> {
         let Res::Symbol(id) = res else { return None };
         let kind = self.cx.sym(id).kind.clone();
         if !matches!(kind, SymbolKind::Struct | SymbolKind::Enum) {
-            let mut d = Diagnostic::error(
-                "E2024",
-                "invalid_impl_target",
-                format!("cannot implement an interface for {} `{}`", kind_name(&kind), path_text(p)),
-            )
-            .primary(p.span, "")
-            .note("only structs and enums can implement interfaces in v0 (ADR 0016)");
+            let mut d = Diagnostic::error("E2024", "invalid_impl_target", format!("cannot implement an interface for {} `{}`", kind_name(&kind), path_text(p)))
+                .primary(p.span, "")
+                .note("only structs and enums can implement interfaces in v0 (ADR 0016)");
             if matches!(kind, SymbolKind::Primitive) {
                 d = d.help("wrap the value in a struct you define: `struct Meters { value f64 }`");
             }
@@ -609,8 +578,7 @@ impl<'c, 'a> Walker<'c, 'a> {
             let tname = self.cx.sym(target).name.clone();
             let _ = prev;
             self.cx.diags.push(
-                Diagnostic::error("E2020", "duplicate_impl", format!("`{iname}` is implemented more than once for `{tname}`"))
-                    .primary(i.interface.span, "second implementation"),
+                Diagnostic::error("E2020", "duplicate_impl", format!("`{iname}` is implemented more than once for `{tname}`")).primary(i.interface.span, "second implementation"),
             );
         }
     }
@@ -651,17 +619,12 @@ impl<'c, 'a> Walker<'c, 'a> {
         }
         if let Some(iface) = iface {
             let required: Vec<SymbolId> = self.cx.r.members.get(&iface).cloned().unwrap_or_default();
-            let missing: Vec<String> = required
-                .iter()
-                .map(|&m| self.cx.sym(m).name.clone())
-                .filter(|n| !seen.contains_key(n))
-                .collect();
+            let missing: Vec<String> = required.iter().map(|&m| self.cx.sym(m).name.clone()).filter(|n| !seen.contains_key(n)).collect();
             if !missing.is_empty() {
                 let iname = self.cx.sym(iface).name.clone();
                 let list = missing.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
                 self.cx.diags.push(
-                    Diagnostic::error("E2014", "missing_interface_method", format!("`impl {iname}` is missing {list}"))
-                        .primary(i.interface.span, "incomplete implementation"),
+                    Diagnostic::error("E2014", "missing_interface_method", format!("`impl {iname}` is missing {list}")).primary(i.interface.span, "incomplete implementation"),
                 );
             }
         }
@@ -679,7 +642,15 @@ impl<'c, 'a> Walker<'c, 'a> {
                 for a in &p.args {
                     self.ty(a);
                 }
-                let Some(res) = self.path_res(p) else { return };
+                let Some(mut res) = self.path_res(p) else { return };
+                // An imported module may share a primitive's spelling (`string`).
+                // In a single-component type path, retain the primitive type;
+                // expression/member paths continue to name the module.
+                if p.segments.len() == 1 && matches!(&res,Res::Symbol(id) if matches!(self.cx.sym(*id).kind,SymbolKind::Module(_))) {
+                    if let Some((index, _)) = self.cx.r.symbols.iter().enumerate().find(|(_, s)| s.name == p.segments[0].name && matches!(s.kind, SymbolKind::Primitive)) {
+                        res = Res::Symbol(SymbolId(index as u32));
+                    }
+                }
                 if let Res::Symbol(id) = res
                     && let Some(&arity) = self.cx.r.type_arity.get(&id)
                     && arity != p.args.len()
@@ -689,7 +660,12 @@ impl<'c, 'a> Walker<'c, 'a> {
                         Diagnostic::error(
                             "E2025",
                             "type_arity",
-                            format!("`{name}` takes {arity} type argument{}, but {} {} given", if arity == 1 { "" } else { "s" }, p.args.len(), if p.args.len() == 1 { "was" } else { "were" }),
+                            format!(
+                                "`{name}` takes {arity} type argument{}, but {} {} given",
+                                if arity == 1 { "" } else { "s" },
+                                p.args.len(),
+                                if p.args.len() == 1 { "was" } else { "were" }
+                            ),
                         )
                         .primary(p.span, ""),
                     );
@@ -698,10 +674,7 @@ impl<'c, 'a> Walker<'c, 'a> {
                     && !self.cx.sym(id).kind.is_type()
                 {
                     let k = kind_name(&self.cx.sym(id).kind);
-                    self.cx.diags.push(
-                        Diagnostic::error("E2008", "not_a_type", format!("expected a type, found {k} `{}`", path_text(p)))
-                            .primary(p.span, "not a type"),
-                    );
+                    self.cx.diags.push(Diagnostic::error("E2008", "not_a_type", format!("expected a type, found {k} `{}`", path_text(p))).primary(p.span, "not a type"));
                     return;
                 }
                 self.use_(p.id, p.span, res.clone());
@@ -879,8 +852,8 @@ impl<'c, 'a> Walker<'c, 'a> {
                     match res {
                         Res::Symbol(id) if !matches!(self.cx.sym(id).kind, SymbolKind::Struct) => {
                             let k = kind_name(&self.cx.sym(id).kind);
-                            let mut d = Diagnostic::error("E2016", "not_a_struct", format!("expected a struct, found {k} `{}`", path_text(path)))
-                                .primary(path.span, "not a struct");
+                            let mut d =
+                                Diagnostic::error("E2016", "not_a_struct", format!("expected a struct, found {k} `{}`", path_text(path))).primary(path.span, "not a struct");
                             if matches!(self.cx.sym(id).kind, SymbolKind::Variant { .. }) {
                                 d = d.help("variants take positional values: `Shape.Rect(1.0, 2.0)`");
                             }
@@ -972,10 +945,9 @@ impl<'c, 'a> Walker<'c, 'a> {
                     match res {
                         Res::Symbol(id) if !matches!(self.cx.sym(id).kind, SymbolKind::Variant { .. }) => {
                             let k = kind_name(&self.cx.sym(id).kind);
-                            self.cx.diags.push(
-                                Diagnostic::error("E2018", "expected_variant", format!("expected a variant, found {k} `{}`", path_text(path)))
-                                    .primary(path.span, ""),
-                            );
+                            self.cx
+                                .diags
+                                .push(Diagnostic::error("E2018", "expected_variant", format!("expected a variant, found {k} `{}`", path_text(path))).primary(path.span, ""));
                         }
                         r => {
                             self.use_(path.id, path.span, r.clone());
@@ -993,10 +965,7 @@ impl<'c, 'a> Walker<'c, 'a> {
                         && !matches!(self.cx.sym(id).kind, SymbolKind::Struct)
                     {
                         let k = kind_name(&self.cx.sym(id).kind);
-                        self.cx.diags.push(
-                            Diagnostic::error("E2016", "not_a_struct", format!("expected a struct, found {k} `{}`", path_text(path)))
-                                .primary(path.span, ""),
-                        );
+                        self.cx.diags.push(Diagnostic::error("E2016", "not_a_struct", format!("expected a struct, found {k} `{}`", path_text(path))).primary(path.span, ""));
                     } else {
                         self.use_(path.id, path.span, res.clone());
                         self.use_(p.id, p.span, res);

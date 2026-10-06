@@ -69,6 +69,8 @@ pub struct FnDecl {
     pub receiver: Option<Receiver>,
     pub params: Vec<Param>,
     pub ret: Option<Type>,
+    /// Explicit result provenance for bodyless declarations: `borrows(a, self)`.
+    pub borrows: Option<Vec<Ident>>,
     /// `None` for interface methods and extern declarations.
     pub body: Option<Block>,
 }
@@ -176,13 +178,22 @@ pub enum TypeKind {
     /// `i32`, `User`, `fs.Error`, `Option<T>`.
     Path(Path),
     /// `&T` / `&mut T`
-    Ref { mutable: bool, inner: Box<Type> },
+    Ref {
+        mutable: bool,
+        inner: Box<Type>,
+    },
     /// `[]T`
     Slice(Box<Type>),
     /// `[N]T`
-    Array { len: Box<Expr>, elem: Box<Type> },
+    Array {
+        len: Box<Expr>,
+        elem: Box<Type>,
+    },
     /// `fn(A, B) R`
-    Fn { params: Vec<Type>, ret: Option<Box<Type>> },
+    Fn {
+        params: Vec<Type>,
+        ret: Option<Box<Type>>,
+    },
     /// `any Writer` — dynamic dispatch.
     Any(Path),
     Error,
@@ -218,9 +229,17 @@ pub struct Stmt {
 pub enum StmtKind {
     /// `x := e`, `x: T := e`, `var x = e`, `var x: T = e`, and the
     /// uninitialized `var x: T` (`value` is `None`; ADR 0024).
-    Let { mutable: bool, name: Ident, ty: Option<Type>, value: Option<Expr> },
+    Let {
+        mutable: bool,
+        name: Ident,
+        ty: Option<Type>,
+        value: Option<Expr>,
+    },
     /// `place = e`
-    Assign { target: Expr, value: Expr },
+    Assign {
+        target: Expr,
+        value: Expr,
+    },
     Expr(Expr),
     Return(Option<Expr>),
     Break,
@@ -306,21 +325,51 @@ pub enum ExprKind {
     Paren(Box<Expr>),
     /// `base.name` — field access, method selection or module member;
     /// name resolution decides which.
-    Field { base: Box<Expr>, name: Ident },
-    Call { callee: Box<Expr>, args: Vec<Expr> },
-    Index { base: Box<Expr>, index: Box<Expr> },
-    Unary { op: UnaryOp, operand: Box<Expr> },
-    Binary { op: BinaryOp, lhs: Box<Expr>, rhs: Box<Expr> },
+    Field {
+        base: Box<Expr>,
+        name: Ident,
+    },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+    },
+    Unary {
+        op: UnaryOp,
+        operand: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+    },
     /// `a..b`, `a..=b`, `..b`, `a..`
-    Range { start: Option<Box<Expr>>, end: Option<Box<Expr>>, inclusive: bool },
+    Range {
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+        inclusive: bool,
+    },
     /// `try e`
     Try(Box<Expr>),
     /// `Name{field: e, other}`
-    StructLit { path: Path, fields: Vec<FieldInit> },
+    StructLit {
+        path: Path,
+        fields: Vec<FieldInit>,
+    },
     /// `[N]T{a, b}`
-    ArrayLit { ty: Type, elems: Vec<Expr> },
+    ArrayLit {
+        ty: Type,
+        elems: Vec<Expr>,
+    },
     /// `fn(x, y i32) R { ... }`
-    Closure { params: Vec<ClosureParam>, ret: Option<Type>, body: Block },
+    Closure {
+        params: Vec<ClosureParam>,
+        ret: Option<Type>,
+        body: Block,
+    },
     Error,
 }
 
@@ -426,11 +475,21 @@ pub enum PatternKind {
     /// `0`, `-1`, `"s"`, `true`
     Literal(Expr),
     /// `0..=9`, `'a'..'z'`
-    Range { start: Expr, end: Expr, inclusive: bool },
+    Range {
+        start: Expr,
+        end: Expr,
+        inclusive: bool,
+    },
     /// `Circle(r)`, `Shape.Rect(w, h)`
-    Variant { path: Path, args: Vec<Pattern> },
+    Variant {
+        path: Path,
+        args: Vec<Pattern>,
+    },
     /// `User{name, age: 0}`
-    Struct { path: Path, fields: Vec<FieldPattern> },
+    Struct {
+        path: Path,
+        fields: Vec<FieldPattern>,
+    },
     Error,
 }
 

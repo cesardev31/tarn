@@ -2,6 +2,11 @@
 
 Status: accepted (2026-10-05). Formalizes ADR 0007.
 
+ADR 0031 extends the bodyless rules with a checked `borrows(...)` clause.
+Body provenance and lifetimes remain inferred; the historical explicit-provenance
+deferral below is superseded for declarations without bodies. Native extern C
+reference/aggregate execution remains unimplemented.
+
 Lifetimes remain an internal concept with **no public syntax**. Instead of
 lifetime parameters, every function that returns a reference has a
 **provenance**: the set of its reference parameters the returned reference may

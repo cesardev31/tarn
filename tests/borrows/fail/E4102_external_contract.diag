@@ -1,0 +1,12 @@
+error[E4102]: cannot assign to `a` because it is borrowed
+ --> tests/borrows/fail/E4102_external_contract.tarn:7:5
+  |
+6 |     r := choose(&a, &b, true)
+  |                 -- shared borrow of `a` starts here
+7 |     a = "changed"
+  |     ^^^^^^^^^^^^^ assigned here while borrowed
+8 |     print(r)
+  |           - the borrow is still used here
+  |
+  = note: a borrow lasts until the last use of the reference that holds it
+

@@ -1,0 +1,16 @@
+interface Count { fn count(&self) i64 }
+copy struct Value { n i64 }
+impl Count for Value { fn count(&self) i64 { return self.n } }
+fn run(v &any Count) i64 {
+    var i: i64 = 0
+    var total: i64 = 0
+    for i < 1000000 {
+        total = total + v.count()
+        i = i + 1
+    }
+    return total
+}
+fn main() {
+    v := Value{n: 42}
+    print(run(&v))
+}

@@ -214,11 +214,7 @@ impl FnCx<'_, '_> {
             Pat::Ctor(Ctor::Struct(s), _) => format!("{}{{..}}", self.env.r.symbol(*s).name),
             Pat::Ctor(Ctor::Variant(v), args) => {
                 let name = self.env.r.symbol(*v).name.clone();
-                if args.is_empty() {
-                    name
-                } else {
-                    format!("{name}({})", args.iter().map(|a| self.show_pat(a)).collect::<Vec<_>>().join(", "))
-                }
+                if args.is_empty() { name } else { format!("{name}({})", args.iter().map(|a| self.show_pat(a)).collect::<Vec<_>>().join(", ")) }
             }
         }
     }

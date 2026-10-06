@@ -2,9 +2,9 @@ error[E4204]: `name` returns a borrow its interface declaration does not allow
   --> tests/borrows/fail/E4204_impl_returns_other_borrow.tarn:36:8
    |
 28 |     fn name(&self, other &string) &string
-   |        ---- the interface's result can only borrow from `self` here
+   |        ---- the interface restricts which inputs may supply the result
 36 |     fn name(&self, other &string) &string {
    |        ^^^^
    |
-   = help: return a reference derived from `self`
+   = help: return a reference derived only from the declared allowed inputs
 

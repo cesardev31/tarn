@@ -236,15 +236,11 @@ impl Infer {
             (Ty::Var(x), _) => self.bind(*x, b.clone()),
             (_, Ty::Var(y)) => self.bind(*y, a.clone()),
             (Ty::Never, _) | (_, Ty::Never) => true,
-            (Ty::Adt(s1, a1), Ty::Adt(s2, a2)) => {
-                s1 == s2 && a1.len() == a2.len() && a1.iter().zip(a2).all(|(x, y)| self.unify_inner(x, y))
-            }
+            (Ty::Adt(s1, a1), Ty::Adt(s2, a2)) => s1 == s2 && a1.len() == a2.len() && a1.iter().zip(a2).all(|(x, y)| self.unify_inner(x, y)),
             (Ty::Ref(m1, x), Ty::Ref(m2, y)) => m1 == m2 && self.unify_inner(x, y),
             (Ty::Array(x, n1), Ty::Array(y, n2)) => n1 == n2 && self.unify_inner(x, y),
             (Ty::Slice(x), Ty::Slice(y)) => self.unify_inner(x, y),
-            (Ty::Fn(p1, r1), Ty::Fn(p2, r2)) => {
-                p1.len() == p2.len() && p1.iter().zip(p2).all(|(x, y)| self.unify_inner(x, y)) && self.unify_inner(r1, r2)
-            }
+            (Ty::Fn(p1, r1), Ty::Fn(p2, r2)) => p1.len() == p2.len() && p1.iter().zip(p2).all(|(x, y)| self.unify_inner(x, y)) && self.unify_inner(r1, r2),
             _ => a == b,
         }
     }

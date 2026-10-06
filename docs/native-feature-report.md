@@ -1,5 +1,8 @@
 # Native feature completion report
 
+Historical phase-8 report. Borrowed dynamic dispatch and declaration contracts
+are now documented in [the phase-9 report](dynamic-interface-report.md).
+
 ## What was implemented
 
 Reachable generic specialization, concrete generic structs/enums including nested

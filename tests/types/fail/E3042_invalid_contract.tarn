@@ -1,0 +1,2 @@
+extern "C" fn invalid(x i64) &i64 borrows(x)
+extern "C" fn unknown(x &i64) &i64 borrows(missing)

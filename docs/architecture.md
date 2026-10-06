@@ -71,5 +71,8 @@ Native feature completion after phase 7 adds reachable generic specialization,
 concrete generic ADTs, borrowed fat slices, nonescaping borrowed closures and
 checked shifts/float-to-int casts. Unknown bootstrap stdlib APIs now fail with
 E3040. See [ADR 0028](adr/0028-native-feature-completeness.md) and
-[ADR 0029](adr/0029-checked-shifts-and-float-casts.md). Dynamic dispatch and
-optimization remain deferred; callable locals retain current consuming semantics.
+[ADR 0029](adr/0029-checked-shifts-and-float-casts.md). Optimization remains deferred; callable locals retain current consuming semantics.
+Borrowed dynamic references use private `(data, vtable)` pairs and resolved
+frontend implementation IDs (ADR 0030). Declaration-derived passing/result
+contracts and `borrows(...)` clauses expose invisible implementation promises
+(ADR 0031); the backend still receives no move/borrow results.

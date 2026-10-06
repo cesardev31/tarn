@@ -1,0 +1,16 @@
+interface Count { fn count(&self) i64 }
+copy struct Box<T: Copy> { value T }
+impl Count for Box<T> {
+    fn count(&self) i64 { return 42 }
+}
+fn dynamic(x &any Count) i64 { return x.count() }
+fn static_call<T: Count>(x &T) i64 { return x.count() }
+fn from_generic<T: Count>(x &T) i64 { return dynamic(x) }
+fn main() {
+    a := Box{value: 7}
+    b := Box{value: true}
+    print(dynamic(&a))
+    print(dynamic(&b))
+    print(static_call(&a))
+    print(from_generic(&b))
+}

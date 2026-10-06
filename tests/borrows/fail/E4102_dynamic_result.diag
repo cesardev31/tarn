@@ -1,0 +1,12 @@
+error[E4102]: cannot assign to `v` because it is borrowed
+ --> tests/borrows/fail/E4102_dynamic_result.tarn:8:5
+  |
+7 |     r := get(&v)
+  |              -- shared borrow of `v` starts here
+8 |     v = Value{name: "new"}
+  |     ^^^^^^^^^^^^^^^^^^^^^^ assigned here while borrowed
+9 |     print(r)
+  |           - the borrow is still used here
+  |
+  = note: a borrow lasts until the last use of the reference that holds it
+

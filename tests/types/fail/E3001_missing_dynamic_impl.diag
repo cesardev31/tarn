@@ -1,0 +1,6 @@
+error[E3001]: expected `&any Writer`, found `&Value`
+ --> tests/types/fail/E3001_missing_dynamic_impl.tarn:4:24
+  |
+4 | fn main() { use_writer(&Value{x: 1}) }
+  |                        ^^^^^^^^^^^^ this is `&Value`
+

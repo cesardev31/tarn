@@ -56,3 +56,26 @@ fn fundamental_cases_hold_together() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[test]
+fn semantic_contracts_expose_passing_and_result_modes() {
+    use tarn_types::{PassingMode as P, ResultContract as R};
+    let dir = std::env::temp_dir().join(format!("tarn-contract-metadata-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.tarn");
+    std::fs::write(&path, "extern \"C\" fn select(a &string, b &string, choose bool) &string borrows(a, b)\nextern \"C\" fn consume(x string, y &mut i64) string\nfn main() {}\n")
+        .unwrap();
+    let res = tarn_driver::check(&path).unwrap();
+    assert!(!res.has_errors(), "{:?}", res.diagnostics);
+    let r = res.resolved.as_ref().unwrap();
+    let t = res.typed.as_ref().unwrap();
+    let select = t.decls.fns.iter().find(|(s, _)| r.symbol(**s).name == "select").unwrap().1;
+    assert_eq!(select.contract.parameters, [P::SharedBorrow, P::SharedBorrow, P::Copy]);
+    assert_eq!(select.contract.result, R::Borrowed(vec![0, 1]));
+    let consume = t.decls.fns.iter().find(|(s, _)| r.symbol(**s).name == "consume").unwrap().1;
+    assert_eq!(consume.contract.parameters, [P::Move, P::MutableBorrow]);
+    assert_eq!(consume.contract.result, R::Owned);
+    let sqrt = t.decls.fns.values().find(|f| f.self_ty == Some(tarn_types::Ty::Float(tarn_types::FloatTy::F32))).unwrap();
+    assert_eq!(sqrt.contract.parameters, [P::Copy]);
+    std::fs::remove_dir_all(dir).unwrap();
+}

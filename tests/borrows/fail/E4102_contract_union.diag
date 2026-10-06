@@ -1,0 +1,12 @@
+error[E4102]: cannot assign to `b` because it is borrowed
+ --> tests/borrows/fail/E4102_contract_union.tarn:6:5
+  |
+5 |     r := string.choose(&a, &b, true)
+  |                            -- shared borrow of `b` starts here
+6 |     b = "changed"
+  |     ^^^^^^^^^^^^^ assigned here while borrowed
+7 |     print(r)
+  |           - the borrow is still used here
+  |
+  = note: a borrow lasts until the last use of the reference that holds it
+

@@ -1,0 +1,37 @@
+interface Writer {
+    fn write(&self, data &[]u8) usize
+    fn label(&self) &string borrows(self)
+    fn bump(&mut self, n i64)
+}
+struct First { name string
+    count i64
+}
+struct Second { name string
+    count i64
+}
+impl Writer for First {
+    fn write(&self, data &[]u8) usize { return data.len() }
+    fn label(&self) &string { return &self.name }
+    fn bump(&mut self, n i64) { self.count = self.count + n }
+}
+impl Writer for Second {
+    fn write(&self, data &[]u8) usize { return data.len() + 10 }
+    fn label(&self) &string { return &self.name }
+    fn bump(&mut self, n i64) { self.count = self.count + n + 1 }
+}
+fn use_writer(w &any Writer, data &[]u8) usize { return w.write(data) }
+fn label(w &any Writer) &string { return w.label() }
+fn update(w &mut any Writer) { w.bump(2) }
+fn main() {
+    var a = First{name: "first", count: 0}
+    var b = Second{name: "second", count: 0}
+    data := [2]u8{1, 2}
+    print(use_writer(&a, &data))
+    print(use_writer(&b, &data))
+    print(label(&a))
+    print(label(&b))
+    update(&mut a)
+    update(&mut b)
+    print(a.count)
+    print(b.count)
+}

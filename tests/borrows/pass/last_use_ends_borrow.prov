@@ -1,0 +1,2 @@
+string.choose -> borrows from {self, other}
+string.view -> borrows from {self}

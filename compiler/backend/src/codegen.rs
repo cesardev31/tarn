@@ -10,7 +10,7 @@ use cranelift_codegen::{
     settings::{self, Configurable},
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
-use cranelift_module::{DataDescription, FuncId, Linkage, Module};
+use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use std::collections::{HashMap, HashSet};
 use tarn_ir::{self as ir, post_drop as post, *};
@@ -87,6 +87,62 @@ fn closure_signature(module: &ObjectModule, t: &Typed, f: &ir::Function) -> Resu
     sig.params.splice(sret..sret + capture_lanes, [cl::AbiParam::new(types::I64)]);
     Ok(sig)
 }
+pub(crate) fn verify_dynamic(p: &post::Program, t: &Typed) -> Result<()> {
+    for f in &p.functions {
+        if f.decl.locals.iter().any(|local| matches!(local.ty, Ty::Any(_))) {
+            return Err(Error::unsupported("owned dynamic interface"));
+        }
+        for b in &f.blocks {
+            for stmt in &b.stmts {
+                if let post::Op::Plain(StatementKind::Assign(_, Rvalue::Coerce(CoerceKind::DynTable { interface, concrete, methods }, source, ty))) = &stmt.op {
+                    let source_place = match source {
+                        Operand::Copy(place) | Operand::Move(place) => place,
+                        _ => return Err(Error::bug("invalid dynamic source")),
+                    };
+                    let source_ty = post::place_ty(&f.decl, t, source_place).ok_or_else(|| Error::bug("invalid dynamic source place"))?;
+                    if !matches!((&source_ty,ty),(Ty::Ref(sm,inner),Ty::Ref(dm,_)) if inner.as_ref()==concrete && (*sm || !*dm)) {
+                        return Err(Error::bug("invalid dynamic source/mutability"));
+                    }
+                    validate_table(p, t, *interface, concrete, methods, ty)?;
+                }
+            }
+            if let Terminator::Call { callee: Callee::Virtual { method, .. }, args, dest, .. } = &b.term {
+                let receiver = args.first().ok_or_else(|| Error::bug("missing virtual receiver"))?;
+                let place = match receiver {
+                    Operand::Copy(p) | Operand::Move(p) => p,
+                    _ => return Err(Error::bug("invalid dynamic representation")),
+                };
+                let ty = post::place_ty(&f.decl, t, place).ok_or_else(|| Error::bug("invalid dynamic place"))?;
+                let Ty::Ref(mutable, inner) = ty else {
+                    return Err(Error::bug("invalid dynamic representation"));
+                };
+                let Ty::Any(interface) = *inner else {
+                    return Err(Error::bug("virtual receiver is not dynamic"));
+                };
+                if !p
+                    .functions
+                    .iter()
+                    .flat_map(|f| &f.blocks)
+                    .flat_map(|b| &b.stmts)
+                    .any(|s| matches!(&s.op,post::Op::Plain(StatementKind::Assign(_,Rvalue::Coerce(CoerceKind::DynTable{interface:i,..},_,_))) if *i==interface))
+                {
+                    return Err(Error::bug("missing reachable vtable"));
+                }
+                if !t.decls.interfaces.get(&interface).is_some_and(|order| order.contains(method)) {
+                    return Err(Error::bug("method outside vtable"));
+                }
+                let sig = t.decls.fns.get(method).ok_or_else(|| Error::bug("missing virtual signature"))?;
+                if sig.receiver == Some(tarn_types::ReceiverKind::RefMut) && !mutable {
+                    return Err(Error::bug("invalid mutable dynamic receiver"));
+                }
+                if post::place_ty(&f.decl, t, dest).as_ref() != Some(&sig.ret) {
+                    return Err(Error::bug("dynamic result mismatch"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
 pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     let main = p.functions.iter().find(|f| f.decl.name == "main").ok_or_else(|| Error::unsupported("program requires fn main()"))?;
     if main.decl.param_count != 0 || main.decl.ret != Ty::Void {
@@ -102,6 +158,7 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
             return Err(Error::unsupported(format!("function {} has no native body", f.decl.name)));
         }
     }
+    verify_dynamic(p, t)?;
     let mut settings = settings::builder();
     settings.set("opt_level", "none").map_err(|e| Error::bug(e.to_string()))?;
     settings.set("is_pic", "false").map_err(|e| Error::bug(e.to_string()))?;
@@ -116,6 +173,30 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         let sig = signature(&module, t, f)?;
         let fid = module.declare_function(&format!("tarn_fn_{}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?;
         ids.insert(*id, fid);
+    }
+    let mut tables = Vec::<(tarn_resolve::SymbolId, Ty, Vec<FunctionId>, DataId)>::new();
+    for f in &p.functions {
+        for b in &f.blocks {
+            for stmt in &b.stmts {
+                if let post::Op::Plain(StatementKind::Assign(_, Rvalue::Coerce(CoerceKind::DynTable { interface, concrete, methods }, _, ty))) = &stmt.op {
+                    validate_table(p, t, *interface, concrete, methods, ty)?;
+                    if !tables.iter().any(|(i, c, _, _)| i == interface && c == concrete) {
+                        let data = module.declare_data(&format!("tarn_vtable_{}", tables.len()), Linkage::Local, false, false).map_err(|e| Error::bug(e.to_string()))?;
+                        let mut description = DataDescription::new();
+                        description.define(vec![0u8; (methods.len() * 8).max(1)].into_boxed_slice());
+                        description.set_align(8);
+                        for (n, method) in methods.iter().enumerate() {
+                            let func = module.declare_func_in_data(*ids.get(method).ok_or_else(|| Error::bug("missing vtable method"))?, &mut description);
+                            description.write_function_addr((n * 8) as u32, func);
+                        }
+                        module.define_data(data, &description).map_err(|e| Error::bug(e.to_string()))?;
+                        tables.push((*interface, concrete.clone(), methods.clone(), data));
+                    } else if tables.iter().any(|(i, c, ms, _)| i == interface && c == concrete && ms != methods) {
+                        return Err(Error::bug("conflicting vtable"));
+                    }
+                }
+            }
+        }
     }
     let mut thunks = HashMap::new();
     for id in &ordered {
@@ -151,8 +232,21 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         let mut fb = FunctionBuilderContext::new();
         {
             let b = FunctionBuilder::new(&mut ctx.func, &mut fb);
-            let mut cx =
-                Cx { b, module: &mut module, p, t, f, ids: &ids, thunks: &thunks, runtime: &runtime, locals: Vec::new(), flags: Vec::new(), blocks: Vec::new(), sret: None };
+            let mut cx = Cx {
+                b,
+                module: &mut module,
+                p,
+                t,
+                f,
+                ids: &ids,
+                thunks: &thunks,
+                runtime: &runtime,
+                tables: &tables,
+                locals: Vec::new(),
+                flags: Vec::new(),
+                blocks: Vec::new(),
+                sret: None,
+            };
             cx.function()?;
             cx.b.finalize();
         }
@@ -246,6 +340,7 @@ struct Cx<'a, 'b> {
     ids: &'b HashMap<FunctionId, FuncId>,
     thunks: &'b HashMap<FunctionId, FuncId>,
     runtime: &'b HashMap<&'static str, FuncId>,
+    tables: &'b [(tarn_resolve::SymbolId, Ty, Vec<FunctionId>, DataId)],
     locals: Vec<Slot>,
     flags: Vec<Flag>,
     blocks: Vec<cl::Block>,
@@ -533,7 +628,14 @@ impl Cx<'_, '_> {
             Rvalue::Use(o) => self.operand(o),
             Rvalue::Ref(m, p) => {
                 let inner = self.place_ty(p)?;
-                let value = if matches!(inner, Ty::Slice(_)) {
+                let value = if matches!(inner, Ty::Any(_)) {
+                    if !matches!(p.proj.last(), Some(Proj::Deref)) {
+                        return Err(Error::bug("dynamic reborrow projection"));
+                    }
+                    let mut owner = p.clone();
+                    owner.proj.pop();
+                    self.read(&owner)?.value.ok_or_else(|| Error::bug("empty dynamic reborrow"))?
+                } else if matches!(inner, Ty::Slice(_)) {
                     let (ptr, len, _) = self.collection(p)?;
                     self.pair(ptr, len)
                 } else {
@@ -659,6 +761,17 @@ impl Cx<'_, '_> {
                 let len = self.b.ins().isub(end, start);
                 let pair = self.pair(ptr, len);
                 Ok(Val { value: Some(pair), ty: dest.clone() })
+            }
+            Rvalue::Coerce(CoerceKind::DynTable { interface, concrete, methods }, o, ty) => {
+                let source = self.operand(o)?;
+                if !matches!(&source.ty, Ty::Ref(_, inner) if inner.as_ref() == concrete) {
+                    return Err(Error::bug("dynamic concrete mismatch"));
+                }
+                let (_, _, _, id) = self.tables.iter().find(|(i, c, ms, _)| i == interface && c == concrete && ms == methods).ok_or_else(|| Error::bug("missing vtable"))?;
+                let gv = self.module.declare_data_in_func(*id, self.b.func);
+                let table = self.b.ins().global_value(types::I64, gv);
+                let pair = self.pair(source.value.ok_or_else(|| Error::bug("empty dynamic source"))?, table);
+                Ok(Val { value: Some(pair), ty: ty.clone() })
             }
             Rvalue::Coerce(CoerceKind::Unsize, o, ty) => {
                 let v = self.operand(o)?;
@@ -952,6 +1065,59 @@ impl Cx<'_, '_> {
                         let call = self.b.ins().call(target, &values);
                         if aggregate { Val { value: ptr, ty: dest_ty.clone() } } else { Val { value: self.b.inst_results(call).first().copied(), ty: dest_ty.clone() } }
                     }
+                    Callee::Virtual { method, type_args } => {
+                        if !type_args.is_empty() {
+                            return Err(Error::unsupported("generic dynamic method"));
+                        }
+                        let receiver = args.first().ok_or_else(|| Error::bug("dynamic receiver missing"))?;
+                        let Ty::Ref(mutable, inner) = &receiver.ty else {
+                            return Err(Error::bug("dynamic receiver representation"));
+                        };
+                        let Ty::Any(interface) = inner.as_ref() else {
+                            return Err(Error::bug("dynamic receiver interface"));
+                        };
+                        let order = self.t.decls.interfaces.get(interface).ok_or_else(|| Error::bug("missing dynamic interface"))?;
+                        let index = order.iter().position(|m| m == method).ok_or_else(|| Error::bug("method outside vtable"))?;
+                        let declared = self.t.decls.fns.get(method).ok_or_else(|| Error::bug("missing dynamic signature"))?;
+                        if declared.receiver == Some(tarn_types::ReceiverKind::RefMut) && !mutable {
+                            return Err(Error::bug("mutable dynamic receiver mismatch"));
+                        }
+                        if !matches!(declared.receiver, Some(tarn_types::ReceiverKind::Ref | tarn_types::ReceiverKind::RefMut)) {
+                            return Err(Error::unsupported("dynamic by-value receiver"));
+                        }
+                        if declared.params.len() + 1 != args.len() || declared.ret != dest_ty || declared.params.iter().zip(&args[1..]).any(|(t, v)| *t != v.ty) {
+                            return Err(Error::bug("dynamic method ABI mismatch"));
+                        }
+                        let pair = receiver.value.ok_or_else(|| Error::bug("empty dynamic pair"))?;
+                        let data = self.b.ins().load(types::I64, cl::MemFlags::new(), pair, 0);
+                        let table = self.b.ins().load(types::I64, cl::MemFlags::new(), pair, 8);
+                        let code = self.b.ins().load(types::I64, cl::MemFlags::new(), table, (index * 8) as i32);
+                        let mut sig = self.module.make_signature();
+                        let mut values = Vec::new();
+                        let aggregate = layout::layout(self.t, &dest_ty)?.size > 0 && scalar(&dest_ty).is_none();
+                        let result = if aggregate {
+                            let ptr = self.addr(dest)?;
+                            sig.params.push(cl::AbiParam::new(types::I64));
+                            values.push(ptr);
+                            Some(ptr)
+                        } else {
+                            None
+                        };
+                        sig.params.push(cl::AbiParam::new(types::I64));
+                        values.push(data);
+                        for v in &args[1..] {
+                            if let Some(ty) = abi_type(self.t, &v.ty)? {
+                                sig.params.push(cl::AbiParam::new(ty));
+                                values.push(v.value.unwrap());
+                            }
+                        }
+                        if let Some(ty) = scalar(&dest_ty) {
+                            sig.returns.push(cl::AbiParam::new(ty));
+                        }
+                        let sig = self.b.import_signature(sig);
+                        let call = self.b.ins().call_indirect(sig, code, &values);
+                        Val { value: if aggregate { result } else { self.b.inst_results(call).first().copied() }, ty: dest_ty.clone() }
+                    }
                     Callee::Value(o) => {
                         let closure = self.operand(o)?;
                         let Ty::Fn(params, ret) = &closure.ty else {
@@ -1205,4 +1371,39 @@ impl Cx<'_, '_> {
         }
         Ok(())
     }
+}
+
+fn validate_table(p: &post::Program, t: &Typed, interface: tarn_resolve::SymbolId, concrete: &Ty, methods: &[FunctionId], ty: &Ty) -> Result<()> {
+    if !matches!(ty,Ty::Ref(_,inner) if **inner==Ty::Any(interface)) {
+        return Err(Error::bug("invalid dynamic destination"));
+    }
+    let order = t.decls.interfaces.get(&interface).ok_or_else(|| Error::bug("missing vtable declaration"))?;
+    if order.len() != methods.len() {
+        return Err(Error::bug("vtable length mismatch"));
+    }
+    let Ty::Adt(target, _) = concrete else {
+        return Err(Error::bug("invalid vtable concrete type"));
+    };
+    let resolved = t.decls.implementations.get(&(interface, *target)).ok_or_else(|| Error::bug("concrete/interface mismatch"))?;
+    if resolved.len() != methods.len() {
+        return Err(Error::bug("incomplete resolved vtable"));
+    }
+    for (n, id) in methods.iter().enumerate() {
+        let f = &p.functions.get(id.0 as usize).ok_or_else(|| Error::bug("vtable function outside program"))?.decl;
+        let sig = t.decls.fns.get(&order[n]).ok_or_else(|| Error::bug("missing interface method signature"))?;
+        if f.symbol != Some(resolved[n]) {
+            return Err(Error::bug("wrong vtable implementation"));
+        }
+        let mutable = match sig.receiver {
+            Some(tarn_types::ReceiverKind::Ref) => false,
+            Some(tarn_types::ReceiverKind::RefMut) => true,
+            _ => return Err(Error::unsupported("dynamic by-value receiver")),
+        };
+        let params: Vec<_> = f.params().map(|p| f.local(p).ty.clone()).collect();
+        let expected: Vec<_> = std::iter::once(Ty::Ref(mutable, Box::new(concrete.clone()))).chain(sig.params.clone()).collect();
+        if params != expected || f.ret != sig.ret {
+            return Err(Error::bug("vtable signature mismatch"));
+        }
+    }
+    Ok(())
 }

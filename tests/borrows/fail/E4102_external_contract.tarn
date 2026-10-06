@@ -1,0 +1,10 @@
+extern "C" fn choose(a &string, b &string, first bool) &string borrows(a, b)
+fn main() {
+    unsafe {
+    var a = "left"
+    var b = "right"
+    r := choose(&a, &b, true)
+    a = "changed"
+    print(r)
+    }
+}
