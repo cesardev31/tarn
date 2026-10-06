@@ -40,6 +40,10 @@ pub fn verify(p: &Program) -> Vec<String> {
                                 Rvalue::Ref(_, pl) | Rvalue::Discriminant(pl) | Rvalue::Len(pl) => place_ok(pl),
                                 Rvalue::SliceRef { base, start, end, .. } => place_ok(base) && start.iter().chain(end.iter()).all(&op_ok),
                                 Rvalue::Binary(_, a, b) => op_ok(a) && op_ok(b),
+                                Rvalue::Aggregate(Aggregate::Closure(id, storage), os) => {
+                                    p.functions.get(id.0 as usize).is_some_and(|f| matches!(f.kind, FnKind::Closure { .. }))
+                                    && storage.as_ref().is_none_or(&place_ok) && os.iter().all(&op_ok)
+                                },
                                 Rvalue::Aggregate(_, os) => os.iter().all(&op_ok),
                             }
                     }

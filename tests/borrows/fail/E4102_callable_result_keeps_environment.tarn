@@ -1,0 +1,8 @@
+fn main() {
+    s := "owned"
+    var f = move fn() &string { return &s }
+    r := f()
+    next := "next"
+    f = move fn() &string { return &next }
+    print(r)
+}

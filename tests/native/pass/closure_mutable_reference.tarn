@@ -1,0 +1,10 @@
+struct Counter { count i64 }
+fn increment(c &mut Counter) { c.count = c.count + 1 }
+fn main() {
+    var c = Counter{count: 0}
+    r := &mut c
+    f := move fn() { increment(r) }
+    f()
+    f()
+    print(c.count)
+}

@@ -1,0 +1,6 @@
+fn main() {
+    var count: i64 = 0
+    f := fn() { count = count + 1 }
+    r := &f
+    r()
+}

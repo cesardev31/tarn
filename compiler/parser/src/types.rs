@@ -6,12 +6,21 @@ use tarn_diagnostics::Diagnostic;
 use tarn_lexer::TokenKind;
 
 pub(crate) fn starts_type(k: &TokenKind) -> bool {
-    matches!(k, TokenKind::Ident(_) | TokenKind::Amp | TokenKind::AmpAmp | TokenKind::LBracket | TokenKind::Fn)
+    matches!(k, TokenKind::Ident(_) | TokenKind::Amp | TokenKind::AmpAmp | TokenKind::LBracket | TokenKind::Fn | TokenKind::Mut)
 }
 
 impl Parser {
     pub(crate) fn parse_type(&mut self) -> Type {
         let start = self.span();
+        let mode = if self.at(&TokenKind::Mut) && self.nth(1) == &TokenKind::Fn {
+            self.bump();
+            CallMode::Mutable
+        } else if matches!(self.peek(), TokenKind::Ident(n) if n == "once") && self.nth(1) == &TokenKind::Fn {
+            self.bump();
+            CallMode::Once
+        } else {
+            CallMode::Shared
+        };
         let kind = match self.peek().clone() {
             TokenKind::Amp => {
                 self.bump();
@@ -54,7 +63,7 @@ impl Parser {
                     });
                 }
                 let ret = starts_type(self.peek()).then(|| Box::new(self.parse_type()));
-                TypeKind::Fn { params, ret }
+                TypeKind::Fn { mode, params, ret }
             }
             TokenKind::Ident(name) if name == "any" && matches!(self.nth(1), TokenKind::Ident(_)) => {
                 self.bump();

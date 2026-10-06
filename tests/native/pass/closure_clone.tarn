@@ -1,0 +1,9 @@
+fn make() fn() string {
+    s := "clone"
+    return move fn() string { return s.clone() }
+}
+fn main() {
+    f := make()
+    print(f())
+    print(f())
+}

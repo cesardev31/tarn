@@ -73,7 +73,9 @@ pub fn overlap(a: &Place, b: &Place) -> bool {
     }
     for (x, y) in a.proj.iter().zip(&b.proj) {
         match (x, y) {
-            (Proj::Field(i), Proj::Field(j)) | (Proj::Downcast(i), Proj::Downcast(j)) if i != j => return false,
+            (Proj::Field(i), Proj::Field(j)) | (Proj::Downcast(i), Proj::Downcast(j)) if i != j => {
+                return false;
+            }
             _ => {}
         }
     }
@@ -144,6 +146,7 @@ impl<'a> Fx<'a> {
                     let (kind, place) = match rv {
                         Rvalue::Ref(m, p) => (*m, p),
                         Rvalue::SliceRef { mutable, base, .. } => (*mutable, base),
+                        Rvalue::Aggregate(tarn_ir::Aggregate::Closure(_, Some(storage)), _) => (false, storage),
                         _ => continue,
                     };
                     let kind = if kind { LoanKind::Mutable } else { LoanKind::Shared };
@@ -186,7 +189,10 @@ impl<'a> Fx<'a> {
                 op(a, live);
                 op(b, live);
             }
-            Rvalue::Aggregate(_, os) => os.iter().for_each(|o| op(o, live)),
+            Rvalue::Aggregate(kind, os) => {
+                os.iter().for_each(|o| op(o, live));
+                if let tarn_ir::Aggregate::Closure(_, Some(storage)) = kind { Self::read_uses(storage, live); }
+            },
             Rvalue::Ref(_, p) | Rvalue::Discriminant(p) | Rvalue::Len(p) => Self::read_uses(p, live),
             Rvalue::SliceRef { base, start, end, .. } => {
                 Self::read_uses(base, live);
@@ -312,7 +318,10 @@ impl<'a> Fx<'a> {
         match rv {
             Rvalue::Use(o) | Rvalue::Unary(_, o) | Rvalue::Cast(o, _) | Rvalue::Coerce(_, o, _) => self.holds_of(h, o, &mut inflow),
             Rvalue::Binary(..) | Rvalue::Discriminant(_) | Rvalue::Len(_) => {}
-            Rvalue::Aggregate(_, os) => os.iter().for_each(|o| self.holds_of(h, o, &mut inflow)),
+            Rvalue::Aggregate(_, os) => {
+                os.iter().for_each(|o| self.holds_of(h, o, &mut inflow));
+                if let Some(&l) = self.loan_at.get(&(b, si)) { inflow.insert(l); }
+            },
             Rvalue::Ref(_, p) | Rvalue::SliceRef { base: p, .. } => {
                 if let Some(&l) = self.loan_at.get(&(b, si)) {
                     inflow.insert(l);
@@ -549,7 +558,10 @@ impl<'a> Fx<'a> {
                 accs.extend(op(a));
                 accs.extend(op(c));
             }
-            Rvalue::Aggregate(_, os) => accs.extend(os.iter().filter_map(op)),
+            Rvalue::Aggregate(kind, os) => {
+                accs.extend(os.iter().filter_map(op));
+                if let tarn_ir::Aggregate::Closure(_, Some(storage)) = kind { accs.push((storage.clone(), Access::BorrowShared)); }
+            },
             Rvalue::Ref(m, p) | Rvalue::SliceRef { mutable: m, base: p, .. } => {
                 accs.push((p.clone(), if *m { Access::BorrowMut } else { Access::BorrowShared }));
                 if let Rvalue::SliceRef { start, end, .. } = rv {
@@ -608,18 +620,29 @@ impl<'a> Fx<'a> {
     /// A returned value may only carry loans of the caller's memory: loans
     /// through a reference parameter (`*p…`) or the parameters' own placeholders.
     fn check_return(&mut self, h: &Holds, span: Span) {
+        let storage_loan = |ln: &Loan| self.f.local(ln.place.local).name.as_deref() == Some("closure environment");
+        let capture_error = h[RETURN.0 as usize].iter().any(|l| {
+            let ln = &self.loans[l];
+            ln.param.is_none() && !ln.place.proj.contains(&Proj::Deref) && !storage_loan(ln)
+        });
         for l in h[RETURN.0 as usize].iter() {
             let ln = &self.loans[l];
             if ln.param.is_some() || ln.place.proj.contains(&Proj::Deref) || !self.reported.insert(l) {
                 continue;
             }
+            if storage_loan(ln) && capture_error { continue; }
             let name = place_name(self.f, self.t, &ln.place);
-            let d = if matches!(self.f.ret, Ty::Fn(..)) {
+            let d = if storage_loan(ln) {
+                Diagnostic::error("E4205", "closure_escapes_borrow", "borrowed closure cannot escape its stack environment")
+                    .primary(span, "the closure escapes here")
+                    .secondary(ln.span, "this environment ends when its creating scope exits")
+                    .help("use `move fn` to create an owned environment; moved references must still remain valid")
+            } else if matches!(self.f.ret, Ty::Fn(..)) {
                 Diagnostic::error("E4205", "closure_escapes_borrow", format!("returned closure captures `{name}` by reference, but `{name}` is dropped when the function returns"))
                     .primary(span, "the closure escapes here")
                     .secondary(ln.span, format!("`{name}` is captured by reference here"))
-                    .note("closures capture by reference in v0; capture by value is not supported yet")
-                    .help("pass the value to the closure as a parameter instead of capturing it")
+                    .note("captured references must remain valid for the entire returned closure lifetime")
+                    .help("capture an owned value with `move fn`, or borrow from a parameter")
             } else {
                 Diagnostic::error("E4201", "reference_escapes", format!("cannot return a reference to `{name}`"))
                     .primary(span, "returned here")
@@ -692,9 +715,7 @@ impl<'a> Fx<'a> {
             (Access::BorrowMut, LoanKind::Shared) => {
                 ("E4101", "conflicting_borrow", format!("cannot borrow `{acc}` as mutable because it is also borrowed as shared"), "mutable borrow conflicts here")
             }
-            (Access::BorrowMut, LoanKind::Mutable) => {
-                ("E4101", "conflicting_borrow", format!("cannot borrow `{acc}` as mutable more than once at a time"), "second mutable borrow here")
-            }
+            (Access::BorrowMut, LoanKind::Mutable) => ("E4101", "conflicting_borrow", format!("cannot borrow `{acc}` as mutable more than once at a time"), "second mutable borrow here"),
             (Access::BorrowShared, _) => ("E4101", "conflicting_borrow", format!("cannot borrow `{acc}` as shared because it is mutably borrowed"), "shared borrow conflicts here"),
             (Access::Read, _) => ("E4104", "use_while_mutably_borrowed", format!("cannot use `{acc}` while it is mutably borrowed"), "used here"),
             (Access::Write, _) => ("E4102", "assign_while_borrowed", format!("cannot assign to `{acc}` because it is borrowed"), "assigned here while borrowed"),

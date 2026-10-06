@@ -1,0 +1,17 @@
+struct Pair { first string
+    second string
+}
+fn make(flag bool) once fn() string {
+    p := Pair{first: "first-field", second: "second-field"}
+    return move fn() string {
+        if flag { return p.first }
+        return "fallback"
+    }
+}
+fn main() {
+    first := make(true)
+    print(first())
+    second := make(false)
+    print(second())
+    untouched := make(true)
+}

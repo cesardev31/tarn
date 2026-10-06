@@ -1,0 +1,5 @@
+main::closure#2 -> borrows from {k}
+make -> borrows from {x}
+make::closure#0 -> borrows from {x}
+string.choose -> borrows from {self, other}
+string.view -> borrows from {self}

@@ -109,7 +109,7 @@ impl P<'_> {
                     format!("{}{}.{name}({})", self.r.symbol(*e).name, self.targs(targs), self.ops(os))
                 }
                 Aggregate::Array(_) => format!("[{}]", self.ops(os)),
-                Aggregate::Closure(id) => format!("closure {}[{}]", self.p.function(*id).name, self.ops(os)),
+                Aggregate::Closure(id, storage) => format!("closure {}[{}]{}", self.p.function(*id).name, self.ops(os), storage.as_ref().map(|p| format!(" borrowing {}", self.place(p))).unwrap_or_default()),
             },
             Rvalue::Cast(o, t) => format!("cast({}) as {}", self.operand(o), self.ty(t)),
             Rvalue::Coerce(k, o, t) => {

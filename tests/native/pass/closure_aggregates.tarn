@@ -1,0 +1,34 @@
+struct Pair { text string
+    number i64
+}
+struct Holder { callback fn() usize }
+fn make() Holder {
+    s := "field"
+    return Holder{callback: move fn() usize { return s.len() }}
+}
+fn main() {
+    p := Pair{text: "copy-field", number: 7}
+    f := move fn() i64 { return p.number }
+    print(f())
+    print(f())
+    holder := make()
+    print(holder.callback())
+    print(holder.callback())
+    var choice: fn() usize
+    if true {
+        s := "conditional"
+        choice = move fn() usize { return s.len() }
+    } else {
+        s := "other"
+        choice = move fn() usize { return s.len() }
+    }
+    print(choice())
+    borrowed := "shared"
+    owned := "inside"
+    r := &borrowed
+    mixed := move fn() { print(r)
+        print(owned)
+    }
+    mixed()
+    mixed()
+}

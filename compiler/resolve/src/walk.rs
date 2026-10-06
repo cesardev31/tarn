@@ -685,7 +685,7 @@ impl<'c, 'a> Walker<'c, 'a> {
                 self.expr(len);
                 self.ty(elem);
             }
-            TypeKind::Fn { params, ret } => {
+            TypeKind::Fn { params, ret, .. } => {
                 for p in params {
                     self.ty(p);
                 }
@@ -885,7 +885,7 @@ impl<'c, 'a> Walker<'c, 'a> {
                 }
                 None
             }
-            ExprKind::Closure { params, ret, body } => {
+            ExprKind::Closure { params, ret, body, .. } => {
                 self.bodies.push(BodyCx { id: e.id, span: e.span, is_closure: true });
                 self.in_scope(ScopeKind::Closure, e.span, |w| {
                     for p in params {

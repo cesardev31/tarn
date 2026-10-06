@@ -1,0 +1,3 @@
+struct Inner { callback mut fn() }
+struct Outer { inner Inner }
+fn call(o &Outer) { o.inner.callback() }

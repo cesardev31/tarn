@@ -134,6 +134,39 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
         if !f.decl.blocks.is_empty() {
             err("post-drop metadata contains a second CFG".into());
         }
+        if let FnKind::Closure { captures, environment, owned, consumes, destructor, destructor_body, .. } = &f.decl.kind {
+            if captures.len() != environment.len() || captures.len() > f.decl.param_count as usize || captures.len() >= f.decl.locals.len() {
+                err("invalid closure environment arity".into());
+            } else {
+                for ((mode, ty), param) in captures.iter().zip(environment).zip(f.decl.params()) {
+                    let actual = &f.decl.local(param).ty;
+                    let valid = if *owned {
+                        *mode == CaptureMode::Move && if *consumes { actual == ty } else { matches!(actual, Ty::Ref(_, inner) if inner.as_ref() == ty) }
+                    } else {
+                        actual == ty && matches!((mode, ty), (CaptureMode::SharedBorrow, Ty::Ref(false, _)) | (CaptureMode::MutableBorrow, Ty::Ref(true, _)))
+                    };
+                    if !valid {
+                        err("invalid closure capture representation".into());
+                    }
+                }
+            }
+            if *destructor_body && (!*owned || !*consumes || destructor.is_some() || f.decl.ret != Ty::Void || f.decl.param_count as usize != captures.len()) {
+                err("invalid environment destruction body".into());
+            }
+            if let Some(id) = destructor {
+                let valid = *owned
+                    && p.functions.get(id.0 as usize).is_some_and(|d| {
+                        d.decl.ret == Ty::Void
+                            && d.decl.param_count as usize == environment.len()
+                            && matches!(&d.decl.kind, FnKind::Closure { owned: true, consumes: true, destructor: None, destructor_body: true, environment: fields, .. } if fields == environment)
+                    });
+                if !valid {
+                    err("invalid closure environment destruction plan".into());
+                }
+            } else if *owned && !*destructor_body {
+                err("owned environment lacks destruction plan".into());
+            }
+        }
         for flag in &f.flags {
             let place = match flag {
                 FlagKind::Value(p) | FlagKind::Elements(p, _) => p,
@@ -153,6 +186,11 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
             for s in &b.stmts {
                 match &s.op {
                     Op::Plain(StatementKind::Drop(_)) => err("abstract Drop remains".into()),
+                    Op::Plain(StatementKind::Assign(_, Rvalue::Aggregate(Aggregate::Closure(id, storage), ops))) => {
+                        if let Some(target) = p.functions.get(id.0 as usize) && let FnKind::Closure { owned, environment, .. } = &target.decl.kind {
+                            if *owned == storage.is_some() || ops.len() != environment.len() || storage.as_ref().is_some_and(|p| place_ty(&f.decl,t,p) != Some(Ty::Bool)) { err("invalid closure storage or capture arity".into()); }
+                        }
+                    },
                     Op::Destroy(d) => check_drop(d, f, t, &mut err),
                     Op::Set(id, _) | Op::ClearElement(id, _) if id.0 as usize >= f.flags.len() => err("nonexistent drop flag".into()),
                     Op::ClearElement(id, idx) => {
@@ -329,7 +367,9 @@ pub fn print_program(p: &Program, r: &Resolved, t: &Typed) -> String {
             let _ = writeln!(out, "  bb{bi}:");
             for s in &b.stmts {
                 let text = match &s.op {
-                    Op::Plain(StatementKind::Assign(p, rv)) => format!("{} = {}", pp.place(p), pp.rvalue(rv)),
+                    Op::Plain(StatementKind::Assign(p, rv)) => {
+                        format!("{} = {}", pp.place(p), pp.rvalue(rv))
+                    }
                     Op::Plain(StatementKind::StorageLive(l)) => format!("live _{}", l.0),
                     Op::Plain(StatementKind::StorageDead(l)) => format!("dead _{}", l.0),
                     Op::Plain(StatementKind::Drop(_)) => "INVALID abstract drop".into(),
@@ -374,6 +414,8 @@ fn print_drop(d: &Drop, pp: &crate::pretty::P<'_>) -> String {
             pp.place(place),
             variants.iter().enumerate().map(|(v, fs)| format!("#{v}: {}", fs.iter().map(|(_, d)| print_drop(d, pp)).collect::<Vec<_>>().join("; "))).collect::<Vec<_>>().join(", ")
         ),
-        Drop::Remaining { place, flag } => format!("destroy_remaining {} using df{}", pp.place(place), flag.0),
+        Drop::Remaining { place, flag } => {
+            format!("destroy_remaining {} using df{}", pp.place(place), flag.0)
+        }
     }
 }

@@ -33,3 +33,19 @@ _Noreturn void tarn_rt_fault(void) { fputs("panic: checked arithmetic or bounds 
 
 float tarn_rt_rem_f32(float a, float b) { return fmodf(a, b); }
 double tarn_rt_rem_f64(double a, double b) { return fmod(a, b); }
+
+/* A closure environment header holds an internal, compiler-generated thunk.
+ * Borrowed stack environments use a null thunk. Destruction and consumption
+ * bodies are post-drop functions; their thunk releases owned storage. */
+void *tarn_rt_env_alloc(uint64_t size) {
+    void *p = malloc((size_t)size);
+    if (!p) abort();
+    return p;
+}
+void tarn_rt_env_free(void *p) { free(p); }
+void tarn_rt_env_drop(void *p) {
+    if (!p) return;
+    void (*drop)(void *);
+    memcpy(&drop, p, sizeof(drop));
+    if (drop) drop(p);
+}

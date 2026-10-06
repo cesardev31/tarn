@@ -1,0 +1,12 @@
+error[E4101]: cannot borrow `f` as mutable more than once at a time
+ --> tests/borrows/fail/E4101_mutable_callable_result.tarn:5:14
+  |
+4 |     r := f()
+  |          - mutable borrow of `f` starts here
+5 |     again := f()
+  |              ^ second mutable borrow here
+6 |     print(r)
+  |           - the borrow is still used here
+  |
+  = note: a borrow lasts until the last use of the reference that holds it
+

@@ -1,0 +1,12 @@
+error[E4102]: cannot assign to `f` because it is borrowed
+ --> tests/borrows/fail/E4102_callable_result_keeps_environment.tarn:6:5
+  |
+4 |     r := f()
+  |          - shared borrow of `f` starts here
+6 |     f = move fn() &string { return &next }
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ assigned here while borrowed
+7 |     print(r)
+  |           - the borrow is still used here
+  |
+  = note: a borrow lasts until the last use of the reference that holds it
+

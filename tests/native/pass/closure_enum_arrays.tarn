@@ -1,0 +1,26 @@
+enum Choice { Text(string)
+    Empty
+}
+fn main() {
+    e := Choice.Text("enum")
+    f := move fn() bool {
+        match e {
+            Choice.Text(_) => return true
+            Choice.Empty => return false
+        }
+    }
+    print(f())
+    print(f())
+    values := [2]string{"array-first", "array-second"}
+    a := move fn() usize { return values[0].len() }
+    print(a())
+    print(a())
+    consuming := Choice.Text("enum-consuming")
+    once := move fn() string {
+        match consuming {
+            Choice.Text(s) => return s
+            Choice.Empty => return "empty"
+        }
+    }
+    print(once())
+}

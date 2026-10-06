@@ -1,0 +1,9 @@
+fn make(r &i64) fn() &i64 {
+    return move fn() &i64 { return r }
+}
+fn main() {
+    x: i64 := 42
+    f := make(&x)
+    print(f())
+    print(f())
+}

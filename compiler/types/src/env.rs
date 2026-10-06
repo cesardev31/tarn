@@ -425,8 +425,8 @@ impl<'a> Env<'a> {
                     }
                 }
             }
-            TypeKind::Fn { params, ret } => {
-                Ty::Fn(params.iter().map(|p| self.lower_with(m, p, diags)).collect(), Box::new(ret.as_ref().map(|r| self.lower_with(m, r, diags)).unwrap_or(Ty::Void)))
+            TypeKind::Fn { mode, params, ret } => {
+                Ty::Fn(*mode, params.iter().map(|p| self.lower_with(m, p, diags)).collect(), Box::new(ret.as_ref().map(|r| self.lower_with(m, r, diags)).unwrap_or(Ty::Void)))
             }
             TypeKind::Any(_) => {
                 diags.push(

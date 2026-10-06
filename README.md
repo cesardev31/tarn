@@ -43,7 +43,7 @@ cargo run -p tarn -- build tests/native/pass/milestone.tarn -o /tmp/tarn-milesto
 `tarn build file.tarn` writes `file` beside the source; `tarn run` uses a temporary
 executable and removes it. Scalars, concrete structs/enums/arrays, thin references,
 direct calls and executable drops are supported. Reachable generic instances, borrowed
-slices and borrowed nonescaping closures also execute. Borrowed dynamic interface calls also execute. Spawn and unmodeled external ABI
+slices, borrowed nonescaping closures and escaping owned `move fn` closures also execute. Stored callables support shared, mutable and consuming invocation (ADR 0032). Borrowed dynamic interface calls also execute. Spawn and unmodeled external ABI
 execution remain unsupported; unknown std APIs reject semantically with E3040.
 See [ADR 0027](docs/adr/0027-native-backend.md) for exact ABI, layout and restrictions.
 

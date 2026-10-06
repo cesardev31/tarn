@@ -213,7 +213,8 @@ impl Cx<'_> {
                 self.operand(a, st, at_k(0));
                 self.operand(b, st, at_k(1));
             }
-            Rvalue::Aggregate(_, os) => {
+            Rvalue::Aggregate(kind, os) => {
+                if let tarn_ir::Aggregate::Closure(_, Some(storage)) = kind { self.read(storage, st, span, true); }
                 for (i, o) in os.iter().enumerate() {
                     self.operand(o, st, at_k(i as u32));
                 }

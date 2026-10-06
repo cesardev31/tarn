@@ -64,7 +64,7 @@ fn concrete_inner(ty: &Ty, depth: usize, nodes: &mut usize) -> Result<()> {
                 concrete_inner(ty, depth + 1, nodes)?;
             }
         }
-        Ty::Fn(args, ret) => {
+        Ty::Fn(_, args, ret) => {
             for ty in args {
                 concrete_inner(ty, depth + 1, nodes)?;
             }
@@ -88,6 +88,16 @@ pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
         f.decl.ret = tarn_types::subst(&f.decl.ret, &map);
         for l in &mut f.decl.locals {
             l.ty = tarn_types::subst(&l.ty, &map);
+        }
+        if let FnKind::Closure { environment, destructor, .. } = &mut f.decl.kind {
+            for ty in environment {
+                *ty = tarn_types::subst(ty, &map);
+            }
+            if let Some(id) = destructor {
+                let def = &p.functions[id.0 as usize].decl;
+                let args = def.generics.iter().map(|p| map.get(p).cloned().unwrap_or(Ty::Param(*p))).collect();
+                *id = cx.intern(*id, args)?;
+            }
         }
         // IDs follow deterministic FIFO traversal, never hash iteration.
         if i != 0 {
@@ -124,7 +134,7 @@ pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
                                     }
                                 }
                                 Aggregate::Array(ty) => *ty = tarn_types::subst(ty, &map),
-                                Aggregate::Closure(id) => {
+                                Aggregate::Closure(id, _) => {
                                     let def = &p.functions[id.0 as usize].decl;
                                     let args = def.generics.iter().map(|p| map.get(p).cloned().unwrap_or(Ty::Param(*p))).collect();
                                     *id = cx.intern(*id, args)?;
@@ -211,7 +221,7 @@ fn operand(o: &mut Operand, map: &HashMap<tarn_types::ParamId, Ty>, cx: &mut Ins
 }
 fn prune(d: &mut post::Drop, f: &tarn_ir::Function, t: &Typed) -> bool {
     match d {
-        post::Drop::Value(p) => post::place_ty(f, t, p).is_none_or(|ty| !t.decls.is_copy(&ty) && !matches!(ty, Ty::Fn(..) | Ty::Ref(..))),
+        post::Drop::Value(p) => post::place_ty(f, t, p).is_none_or(|ty| !t.decls.is_copy(&ty) && !matches!(ty, Ty::Ref(..))),
         post::Drop::Guard(_, d) => prune(d, f, t),
         post::Drop::Fields { fields, .. } => {
             fields.retain_mut(|(_, d)| prune(d, f, t));

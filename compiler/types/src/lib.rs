@@ -4,6 +4,7 @@
 //! by `NodeId` / `SymbolId` (expression types, local types, method targets,
 //! pattern variants) — the AST stays untouched. Rules: `docs/types.md`.
 
+mod captures;
 mod check;
 mod env;
 mod exhaust;
@@ -11,7 +12,7 @@ mod ty;
 
 pub use check::subst;
 pub use env::{Decls, EnumDef, Env, FieldDef, FnSig, PassingMode, Prelude, ResultContract, SemanticContract, StructDef, VariantDef};
-pub use tarn_ast::ReceiverKind;
+pub use tarn_ast::{CallMode, ReceiverKind};
 pub use ty::{FloatTy, IntTy, ParamId, Ty};
 
 use std::collections::HashMap;
@@ -67,6 +68,16 @@ pub struct Receiver {
 #[derive(Default, Debug)]
 pub struct TypeTables {
     pub expr_types: HashMap<NodeId, Ty>,
+    /// Calls whose argument is observed rather than consumed.
+    pub borrowed_builtin_calls: std::collections::HashSet<NodeId>,
+    /// Declaration-ordered inferred capture ownership.
+    pub closure_captures: HashMap<NodeId, Vec<(SymbolId, CaptureMode)>>,
+    /// Calls through values, including callable struct fields.
+    pub callable_calls: std::collections::HashSet<NodeId>,
+    /// Owned environment fields for nested capture-use inference.
+    pub owned_captures: HashMap<NodeId, Vec<(SymbolId, Ty)>>,
+    /// Captures requiring exclusive body access, even in owned environments.
+    pub mutable_captures: HashMap<NodeId, std::collections::HashSet<SymbolId>>,
     /// Method-call expression → method.
     pub method_calls: HashMap<NodeId, MethodTarget>,
     /// Method-call expression → receiver adjustment.
@@ -81,6 +92,11 @@ pub struct TypeTables {
     /// Binding node (pattern, field shorthand, `for` statement) → mode.
     pub binding_modes: HashMap<NodeId, BindingMode>,
 }
+
+/// Inferred ownership of a captured binding; its invocation access is encoded
+/// separately in the callable type and mutable-capture table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureMode { SharedBorrow, MutableBorrow, Move }
 
 pub struct Typed {
     pub tables: Vec<TypeTables>,
@@ -126,6 +142,11 @@ pub fn check(inputs: &[ModuleInput], r: &Resolved) -> (Typed, Vec<Diagnostic>) {
             locals.extend(cx.locals);
             let t = &mut tables[mi];
             t.expr_types.extend(cx.tables.expr_types);
+            t.mutable_captures.extend(cx.tables.mutable_captures);
+            t.owned_captures.extend(cx.tables.owned_captures);
+            t.callable_calls.extend(cx.tables.callable_calls);
+            t.borrowed_builtin_calls.extend(cx.tables.borrowed_builtin_calls);
+            t.closure_captures.extend(cx.tables.closure_captures);
             t.method_calls.extend(cx.tables.method_calls);
             t.pattern_variants.extend(cx.tables.pattern_variants);
             t.receivers.extend(cx.tables.receivers);
@@ -310,12 +331,12 @@ fn show(t: &Ty, r: &Resolved, names: &HashMap<ParamId, String>, var: &dyn Fn(u32
         Ty::Ref(m, x) => format!("&{}{}", if *m { "mut " } else { "" }, show(x)),
         Ty::Array(x, n) => format!("[{n}]{}", show(x)),
         Ty::Slice(x) => format!("[]{}", show(x)),
-        Ty::Fn(ps, ret) => {
+        Ty::Fn(mode, ps, ret) => {
             let ret = match &**ret {
                 Ty::Void => String::new(),
                 x => format!(" {}", show(x)),
             };
-            format!("fn({}){ret}", list(ps))
+            format!("{}fn({}){ret}", mode.prefix(), list(ps))
         }
         Ty::Param(p) => names.get(p).cloned().unwrap_or_else(|| "?".into()),
         Ty::Any(i) => format!("any {}", r.symbol(*i).name),

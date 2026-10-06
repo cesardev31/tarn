@@ -1,0 +1,11 @@
+error[E4001]: use of moved value `f`
+ --> tests/moves/fail/E4001_once_closure_twice.tarn:5:15
+  |
+4 |     first := f()
+  |              --- value moved here
+5 |     second := f()
+  |               ^^^ value used here after move
+  |
+  = note: `once fn() string` is not a copy type, so assigning or passing it moves it
+  = help: to keep using `f`, borrow it where it is moved (`&f`) instead of moving it
+

@@ -347,6 +347,10 @@ impl Parser {
                 self.bump();
                 ExprKind::Bool(false)
             }
+            TokenKind::Ident(n) if n == "move" && self.nth(1) == &TokenKind::Fn => {
+                self.bump();
+                self.parse_closure(true)
+            }
             TokenKind::Ident(n) => {
                 self.bump();
                 ExprKind::Ident(n)
@@ -373,7 +377,7 @@ impl Parser {
                 let elems = self.with_mode(true, |p| p.expr_list(&TokenKind::RBrace));
                 ExprKind::ArrayLit { ty, elems }
             }
-            TokenKind::Fn => self.parse_closure(),
+            TokenKind::Fn => self.parse_closure(false),
             k => {
                 let found = crate::describe(&k);
                 let span = self.span();
@@ -390,7 +394,7 @@ impl Parser {
     }
 
     /// `fn(a, b i32) R { ... }`
-    fn parse_closure(&mut self) -> ExprKind {
+    fn parse_closure(&mut self, owned: bool) -> ExprKind {
         self.bump();
         let mut params = Vec::new();
         if self.expect(&TokenKind::LParen) {
@@ -409,6 +413,6 @@ impl Parser {
         }
         let ret = crate::types::starts_type(self.peek()).then(|| self.parse_type());
         let body = self.parse_block();
-        ExprKind::Closure { params, ret, body }
+        ExprKind::Closure { owned, params, ret, body }
     }
 }

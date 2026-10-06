@@ -1056,6 +1056,12 @@ Finish the current abstraction boundary first.
 
 ---
 
+## Application Ergonomics
+
+Tarn is high-level by default and low-level when needed. Low-level control is a
+capability, not a tax imposed on ordinary application code. Keep common callbacks
+and handlers simple; expose ownership details only when safety requires them.
+
 ## Design Philosophy
 
 Tarn should grow from evidence gathered through:

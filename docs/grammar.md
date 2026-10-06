@@ -33,7 +33,7 @@ type        = path
             | "&" [ "mut" ] type
             | "[" "]" type                       (* slice *)
             | "[" expr "]" type                  (* array *)
-            | "fn" "(" [ type { "," type } ] ")" [ type ]
+            | [ "mut" | "once" ] "fn" "(" [ type { "," type } ] ")" [ type ]
             | "any" path ;                       (* dynamic interface *)
 path        = IDENT { "." IDENT } [ "<" type { "," type } ">" ] ;
 
@@ -63,7 +63,7 @@ postfix     = primary { "." IDENT | "(" [ args ] ")" | "[" expr "]"
 primary     = INT | FLOAT | STRING | "true" | "false" | IDENT
             | "(" ")" | "(" expr ")"
             | ( "[" "]" type | "[" expr "]" type ) "{" [ args ] "}"   (* array literal *)
-            | "fn" "(" [ cparam { "," cparam } ] ")" [ type ] block ;  (* closure *)
+            | [ "move" ] "fn" "(" [ cparam { "," cparam } ] ")" [ type ] block ;  (* closure *)
 cparam      = IDENT [ type ] ;
 args        = expr { "," expr } [ "," ] ;
 field_inits = field_init { "," field_init } [ "," ] ;
@@ -145,3 +145,5 @@ borrow_clause = "borrows" "(" identifier { "," identifier } [ "," ] ")"
 bodyless borrowed-result declaration and distinct reference inputs (`self` is
 allowed for a borrowed receiver). A clause on a body is rejected, and normal
 body provenance remains inferred. ADR 0031 defines validation and source indices.
+
+`move` and `once` are contextual before `fn`; `mut` remains reserved syntax.

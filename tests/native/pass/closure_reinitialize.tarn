@@ -1,0 +1,15 @@
+struct Empty {}
+fn observe(x &Empty) {}
+fn main() {
+    var s = "old"
+    f := move fn() {
+        print(s)
+        s = "new"
+    }
+    f()
+    f()
+    e := Empty{}
+    empty := move fn() { observe(&e) }
+    empty()
+    empty()
+}

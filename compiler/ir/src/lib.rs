@@ -62,21 +62,19 @@ pub enum FnKind {
     /// `extern "intrinsic"` in `core`: implemented by the compiler/backend.
     Intrinsic,
     /// A closure; its captures are its first `captures.len()` parameters.
-    Closure { parent: FunctionId, captures: Vec<CaptureMode> },
+    Closure {
+        parent: FunctionId,
+        captures: Vec<CaptureMode>,
+        environment: Vec<Ty>,
+        owned: bool,
+        consumes: bool,
+        /// Generated ordinary function: its post-drop body destroys captures.
+        destructor: Option<FunctionId>,
+        destructor_body: bool,
+    },
 }
 
-/// How a closure holds a captured variable. Lowering produces only borrows
-/// today; `Move` exists so that `spawn` and returned closures do not require
-/// a new representation (no public syntax yet).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CaptureMode {
-    /// The capture parameter is `&T`.
-    SharedBorrow,
-    /// The capture parameter is `&mut T`.
-    MutableBorrow,
-    /// The capture parameter is `T`, moved into the closure.
-    Move,
-}
+pub use tarn_types::CaptureMode;
 
 #[derive(Clone, Debug)]
 pub struct Function {
@@ -241,7 +239,9 @@ pub enum Aggregate {
     Variant(SymbolId, u32, Vec<Ty>),
     Array(Ty),
     /// A closure value; operands are its captures.
-    Closure(FunctionId),
+    /// A borrowed stack environment carries an ordinary loan of `storage`.
+    /// Owned environments have no storage loan and use the destruction body.
+    Closure(FunctionId, Option<Place>),
 }
 
 #[derive(Clone, Debug, PartialEq)]

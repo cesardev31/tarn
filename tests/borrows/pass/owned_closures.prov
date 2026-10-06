@@ -1,0 +1,7 @@
+generic -> borrows from {x}
+generic::closure#0 -> borrows from {x}
+make -> borrows from {}
+nested -> borrows from {}
+nested::closure#0 -> borrows from {}
+string.choose -> borrows from {self, other}
+string.view -> borrows from {self}

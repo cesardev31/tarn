@@ -1,0 +1,51 @@
+struct Box<T> { value T }
+fn apply(f fn() usize) usize {
+    a := f()
+    return a + f()
+}
+fn make() fn() usize {
+    s := "hello"
+    return move fn() usize { return s.len() }
+}
+fn generic<T>(x Box<T>) once fn() Box<T> {
+    return move fn() Box<T> { return x }
+}
+fn nested() once fn() fn() usize {
+    s := "nested"
+    return move fn() fn() usize {
+        return move fn() usize { return s.len() }
+    }
+}
+fn main() {
+    f := make()
+    print(f())
+    print(f())
+    print(apply(f))
+    var count = 0
+    inc := fn() { count = count + 1 }
+    inc()
+    inc()
+    print(count)
+    var state: i64 = 40
+    owned := move fn() i64 { state = state + 1
+        return state
+    }
+    print(owned())
+    print(owned())
+    consume := generic(Box{value: "generic"})
+    value := consume()
+    print(value.value)
+    outer := nested()
+    inner := outer()
+    print(inner())
+    print(inner())
+    first := "first"
+    second := "second"
+    partial := move fn() string {
+        print(second)
+        return first
+    }
+    print(partial())
+    unused := "unused"
+    never_called := move fn() { print(unused) }
+}

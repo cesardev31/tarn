@@ -1,0 +1,24 @@
+fn identity(x i64) i64 { return x }
+fn borrow(r &string) fn() &string {
+    return move fn() &string { return r }
+}
+fn main() {
+    k: i64 := 1
+    f := fn(x i64) i64 { return x + k }
+    print(f(1))
+    print(f(2))
+    item := identity
+    print(item(4))
+    print(item(5))
+    s := "borrow"
+    g := borrow(&s)
+    print(g())
+    print(g())
+    var owned: fn() usize = move fn() usize {
+        return s.len()
+    }
+    print(owned())
+    next := "replacement"
+    owned = move fn() usize { return next.len() }
+    print(owned())
+}

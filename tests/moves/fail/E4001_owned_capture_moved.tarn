@@ -1,0 +1,6 @@
+fn main() {
+    s := "owned"
+    f := move fn() { print(s) }
+    print(s)
+    f()
+}

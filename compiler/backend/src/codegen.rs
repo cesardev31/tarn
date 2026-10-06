@@ -69,14 +69,17 @@ fn capture_count(f: &ir::Function) -> usize {
     }
 }
 fn environment(t: &Typed, f: &ir::Function) -> Result<(u32, Vec<(u32, Ty)>)> {
-    let mut offset = 0;
+    let mut offset = 8;
     let mut fields = Vec::new();
-    for l in f.params().take(capture_count(f)) {
-        let ty = f.local(l).ty.clone();
+    let env = match &f.kind {
+        FnKind::Closure { environment, .. } => environment.clone(),
+        _ => Vec::new(),
+    };
+    for ty in env {
         let layout = layout::layout(t, &ty)?;
         offset = (offset + layout.align - 1) & !(layout.align - 1);
         fields.push((offset, ty));
-        offset += layout.size;
+        offset = offset.checked_add(layout.size).filter(|n| *n <= 65536).ok_or_else(|| Error::unsupported("closure environment exceeds 64 KiB"))?;
     }
     Ok((offset.max(1), fields))
 }
@@ -211,6 +214,9 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         ("tarn_rt_rem_f64", vec![types::F64, types::F64], vec![types::F64]),
         ("tarn_rt_string", vec![types::I64, types::I64], vec![types::I64]),
         ("tarn_rt_drop_string", vec![types::I64], vec![]),
+        ("tarn_rt_env_alloc", vec![types::I64], vec![types::I64]),
+        ("tarn_rt_env_free", vec![types::I64], vec![]),
+        ("tarn_rt_env_drop", vec![types::I64], vec![]),
         ("tarn_rt_print_i64", vec![types::I64], vec![]),
         ("tarn_rt_print_u64", vec![types::I64], vec![]),
         ("tarn_rt_print_f64", vec![types::F64], vec![]),
@@ -274,18 +280,29 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
                 values.push(params[0]);
             }
             let (_, fields) = environment(t, f)?;
-            for (offset, ty) in fields {
-                if layout::layout(t, &ty)?.size == 0 {
+            for ((offset, _ty), param) in fields.into_iter().zip(f.params().take(n)) {
+                if layout::layout(t, &f.local(param).ty)?.size == 0 {
                     continue;
                 }
                 let ptr = b.ins().iadd_imm(env, i64::from(offset));
-                let value = if let Some(ty) = scalar(&ty) { b.ins().load(ty, cl::MemFlags::new(), ptr, 0) } else { ptr };
+                let borrowed_owned = matches!(f.kind, FnKind::Closure { owned: true, consumes: false, .. });
+                let value = if borrowed_owned {
+                    ptr
+                } else if let Some(ty) = scalar(&f.local(param).ty) {
+                    b.ins().load(ty, cl::MemFlags::new(), ptr, 0)
+                } else {
+                    ptr
+                };
                 values.push(value);
             }
             values.extend_from_slice(&params[usize::from(aggregate) + 1..]);
             let target = module.declare_func_in_func(ids[id], b.func);
             let call = b.ins().call(target, &values);
             let results = b.inst_results(call).to_vec();
+            if matches!(f.kind, FnKind::Closure { owned: true, consumes: true, .. }) {
+                let free = module.declare_func_in_func(runtime["tarn_rt_env_free"], b.func);
+                b.ins().call(free, &[env]);
+            }
             b.ins().return_(&results);
             b.seal_all_blocks();
             b.finalize();
@@ -577,7 +594,7 @@ impl Cx<'_, '_> {
                 }
                 Const::Fn(id, _) => {
                     let f = &self.p.functions[id.0 as usize].decl;
-                    let ty = Ty::Fn(f.params().map(|l| f.local(l).ty.clone()).collect(), Box::new(f.ret.clone()));
+                    let ty = Ty::Fn(tarn_types::CallMode::Shared, f.params().map(|l| f.local(l).ty.clone()).collect(), Box::new(f.ret.clone()));
                     let target = self.module.declare_func_in_func(self.thunks[id], self.b.func);
                     let code = self.b.ins().func_addr(types::I64, target);
                     let env = self.b.ins().iconst(types::I64, 0);
@@ -665,14 +682,30 @@ impl Cx<'_, '_> {
                 };
                 Ok(Val { value: Some(value), ty: v.ty })
             }
-            Rvalue::Aggregate(Aggregate::Closure(id), ops) => {
+            Rvalue::Aggregate(Aggregate::Closure(id, _), ops) => {
                 let f = &self.p.functions[id.0 as usize].decl;
                 let (size, fields) = environment(self.t, f)?;
                 if fields.len() != ops.len() {
                     return Err(Error::bug("closure capture arity"));
                 }
-                let slot = self.stack(size, 8);
-                let env = self.b.ins().stack_addr(types::I64, slot, 0);
+                let (owned, destructor) = match f.kind {
+                    FnKind::Closure { owned, destructor, .. } => (owned, destructor),
+                    _ => return Err(Error::bug("closure kind")),
+                };
+                let env = if owned {
+                    let size = self.b.ins().iconst(types::I64, i64::from(size));
+                    self.runtime("tarn_rt_env_alloc", &[size])[0]
+                } else {
+                    let slot = self.stack(size, 8);
+                    self.b.ins().stack_addr(types::I64, slot, 0)
+                };
+                let drop_code = if let Some(id) = destructor {
+                    let target = self.module.declare_func_in_func(self.thunks[&id], self.b.func);
+                    self.b.ins().func_addr(types::I64, target)
+                } else {
+                    self.b.ins().iconst(types::I64, 0)
+                };
+                self.b.ins().store(cl::MemFlags::new(), drop_code, env, 0);
                 for ((offset, ty), o) in fields.into_iter().zip(ops) {
                     let v = self.operand(o)?;
                     if v.ty != ty {
@@ -899,7 +932,9 @@ impl Cx<'_, '_> {
                         BinOp::BitAnd => self.b.ins().band(x, y),
                         BinOp::BitOr => self.b.ins().bor(x, y),
                         BinOp::BitXor => self.b.ins().bxor(x, y),
-                        BinOp::Shl | BinOp::Shr => return Err(Error::unsupported("shift semantics pending native validation")),
+                        BinOp::Shl | BinOp::Shr => {
+                            return Err(Error::unsupported("shift semantics pending native validation"));
+                        }
                         _ => return Err(Error::unsupported("integer operation")),
                     }
                 }
@@ -995,7 +1030,9 @@ impl Cx<'_, '_> {
                     self.b.ins().fdemote(target, value)
                 }
             }
-            _ => return Err(Error::unsupported("float-to-integer or nonnumeric checked cast")),
+            _ => {
+                return Err(Error::unsupported("float-to-integer or nonnumeric checked cast"));
+            }
         };
         Ok(Val { value: Some(out), ty: ty.clone() })
     }
@@ -1120,7 +1157,8 @@ impl Cx<'_, '_> {
                     }
                     Callee::Value(o) => {
                         let closure = self.operand(o)?;
-                        let Ty::Fn(params, ret) = &closure.ty else {
+                        let callable_ty = if let Ty::Ref(_, inner) = &closure.ty { inner.as_ref() } else { &closure.ty };
+                        let Ty::Fn(_, params, ret) = callable_ty else {
                             return Err(Error::bug("indirect nonfunction"));
                         };
                         if params.len() != args.len() || **ret != dest_ty || params.iter().zip(&args).any(|(t, v)| *t != v.ty) {
@@ -1317,7 +1355,7 @@ impl Cx<'_, '_> {
             self.runtime("tarn_rt_drop_string", &[ptr]);
             return Ok(());
         }
-        if matches!(ty, Ty::Ref(..) | Ty::Fn(..)) || self.t.decls.is_copy(&ty) {
+        if matches!(ty, Ty::Ref(..)) || self.t.decls.is_copy(&ty) {
             return Ok(());
         }
         let addr = self.addr(p)?;
@@ -1328,6 +1366,10 @@ impl Cx<'_, '_> {
             return Ok(());
         }
         match ty {
+            Ty::Fn(..) => {
+                let env = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 8);
+                self.runtime("tarn_rt_env_drop", &[env]);
+            }
             Ty::Str => {
                 let ptr = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
                 self.runtime("tarn_rt_drop_string", &[ptr]);

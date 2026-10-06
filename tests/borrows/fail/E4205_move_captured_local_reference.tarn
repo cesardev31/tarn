@@ -1,0 +1,5 @@
+fn bad() fn() &i64 {
+    x: i64 := 1
+    r := &x
+    return move fn() &i64 { return r }
+}

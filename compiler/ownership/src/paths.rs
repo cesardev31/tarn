@@ -71,7 +71,10 @@ impl MovePaths {
                                 op(a, &mut places);
                                 op(b, &mut places);
                             }
-                            Rvalue::Aggregate(_, os) => os.iter().for_each(|o| op(o, &mut places)),
+                            Rvalue::Aggregate(kind, os) => {
+                                os.iter().for_each(|o| op(o, &mut places));
+                                if let tarn_ir::Aggregate::Closure(_, Some(storage)) = kind { places.push(storage); }
+                            },
                             Rvalue::Ref(_, p) | Rvalue::Discriminant(p) | Rvalue::Len(p) => places.push(p),
                             Rvalue::SliceRef { base, start, end, .. } => {
                                 places.push(base);

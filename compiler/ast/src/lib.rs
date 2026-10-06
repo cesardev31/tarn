@@ -173,6 +173,24 @@ pub struct Type {
     pub kind: TypeKind,
 }
 
+/// The access required to invoke a callable, independent of value ownership.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CallMode {
+    Shared,
+    Mutable,
+    Once,
+}
+
+impl CallMode {
+    pub fn prefix(self) -> &'static str {
+        match self {
+            Self::Shared => "",
+            Self::Mutable => "mut ",
+            Self::Once => "once ",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum TypeKind {
     /// `i32`, `User`, `fs.Error`, `Option<T>`.
@@ -191,6 +209,7 @@ pub enum TypeKind {
     },
     /// `fn(A, B) R`
     Fn {
+        mode: CallMode,
         params: Vec<Type>,
         ret: Option<Box<Type>>,
     },
@@ -366,6 +385,7 @@ pub enum ExprKind {
     },
     /// `fn(x, y i32) R { ... }`
     Closure {
+        owned: bool,
         params: Vec<ClosureParam>,
         ret: Option<Type>,
         body: Block,

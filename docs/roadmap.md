@@ -54,4 +54,4 @@ concrete generic ADTs, borrowed fat slices, nonescaping borrowed closures and
 checked shifts/float-to-int casts. Unknown bootstrap stdlib APIs now fail with
 E3040. See [ADR 0028](adr/0028-native-feature-completeness.md) and
 [ADR 0029](adr/0029-checked-shifts-and-float-casts.md). Borrowed dynamic dispatch now executes (ADR 0030); owned dynamic objects remain
-rejected. Optimization remains deferred and callable consumption is unchanged.
+rejected. Optimization remains deferred. Phase 10 adds shared, mutable and consuming callable modes, `move fn` ownership captures and safe returned owned closures (ADR 0032).

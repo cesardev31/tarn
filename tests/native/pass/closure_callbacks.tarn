@@ -1,0 +1,29 @@
+struct Box<T> { value T }
+fn make<T>(x Box<T>) fn() &Box<T> {
+    return move fn() &Box<T> { return &x }
+}
+fn twice(f mut fn() i64) i64 { a := f()
+    return a + f()
+}
+fn run(f once fn() string) string { return f() }
+fn main() {
+    f := make(Box{value: "generic-environment"})
+    print(f().value)
+    print(f().value)
+    var count: i64 = 1
+    inc := move fn() i64 { count = count + 1
+        return count
+    }
+    print(twice(inc))
+    s := "callback"
+    consume := move fn() string { return s }
+    print(run(consume))
+    k: i64 := 42
+    outer := move fn() fn() i64 {
+        return move fn() i64 { return k }
+    }
+    first := outer()
+    second := outer()
+    print(first())
+    print(second())
+}

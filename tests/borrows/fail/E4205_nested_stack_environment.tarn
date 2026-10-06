@@ -1,0 +1,11 @@
+fn make() fn() fn() usize {
+    s := "environment"
+    return move fn() fn() usize {
+        return fn() usize { return s.len() }
+    }
+}
+fn main() {
+    f := make()
+    inner := f()
+    print(inner())
+}

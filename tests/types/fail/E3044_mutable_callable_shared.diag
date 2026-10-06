@@ -1,0 +1,6 @@
+error[E3044]: callable cannot be invoked through this reference
+ --> tests/types/fail/E3044_mutable_callable_shared.tarn:5:5
+  |
+5 |     r()
+  |     ^ invocation requires exclusive access or ownership
+

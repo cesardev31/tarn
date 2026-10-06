@@ -1,0 +1,11 @@
+error[E4205]: returned closure captures `x` by reference, but `x` is dropped when the function returns
+ --> tests/borrows/fail/E4205_move_captured_local_reference.tarn:4:5
+  |
+3 |     r := &x
+  |          -- `x` is captured by reference here
+4 |     return move fn() &i64 { return r }
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the closure escapes here
+  |
+  = note: captured references must remain valid for the entire returned closure lifetime
+  = help: capture an owned value with `move fn`, or borrow from a parameter
+

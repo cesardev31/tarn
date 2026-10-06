@@ -305,3 +305,49 @@ fn static_bounds_do_not_instantiate_unused_interface_methods() {
     assert_eq!(Command::new(&exe).output().unwrap().stdout, b"42\n");
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn owned_closure_environments_destroy_each_capture_once() {
+    for (name, trace) in [
+        ("owned_closures", "drop:hello\ndrop:second\ndrop:first\ndrop:unused\ndrop:nested\ndrop:generic\n"),
+        ("closure_lifetimes", "drop:borrow\ndrop:replacement\n"),
+        ("closure_aggregates", "drop:inside\ndrop:shared\ndrop:conditional\ndrop:field\ndrop:copy-field\n"),
+        ("closure_reinitialize", "drop:old\ndrop:new\ndrop:new\n"),
+        ("closure_callbacks", "drop:callback\ndrop:generic-environment\n"),
+        ("closure_clone", "drop:clone\ndrop:clone\ndrop:clone\n"),
+        ("closure_partial", "drop:second-field\ndrop:first-field\ndrop:first-field\ndrop:second-field\ndrop:fallback\ndrop:first-field\ndrop:second-field\n"),
+        ("closure_enum_arrays", "drop:enum-consuming\ndrop:array-first\ndrop:array-second\ndrop:enum\n"),
+    ] {
+        let path = Path::new("../../tests/native/pass").join(format!("{name}.tarn"));
+        let (exe, _) = compile(&std::fs::read_to_string(&path).unwrap(), &format!("trace-{name}"));
+        let output = Command::new(&exe).env("TARN_TRACE_DROPS", "1").output().unwrap();
+        assert!(output.status.success(), "{name}");
+        assert_eq!(String::from_utf8(output.stderr).unwrap(), trace, "{name}");
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), std::fs::read_to_string(path.with_extension("stdout")).unwrap());
+        std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn invalid_closure_environment_metadata_is_rejected() {
+    let path = Path::new("../../tests/native/pass/owned_closures.tarn");
+    let result = tarn_driver::check(path).unwrap();
+    assert!(!result.has_errors());
+    let source = result.drops.as_ref().unwrap();
+    let t = result.typed.as_ref().unwrap();
+    for mutation in 0..5 {
+        let mut p = tarn_ir::post_drop::Program { functions: source.functions.clone(), by_symbol: source.by_symbol.clone() };
+        let f = p.functions.iter_mut().find(|f| matches!(f.decl.kind, tarn_ir::FnKind::Closure { owned: true, consumes: false, .. })).unwrap();
+        let tarn_ir::FnKind::Closure { environment, captures, destructor, owned, .. } = &mut f.decl.kind else { unreachable!() };
+        match mutation {
+            0 => environment.clear(),
+            1 => captures[0] = tarn_ir::CaptureMode::SharedBorrow,
+            2 => *destructor = None,
+            3 => *destructor = Some(tarn_ir::FunctionId(u32::MAX)),
+            4 => *owned = false,
+            _ => unreachable!(),
+        }
+        assert!(!tarn_ir::post_drop::verify(&p, t).is_empty(), "mutation {mutation}");
+        assert!(tarn_backend::emit_object(&p, t).is_err(), "mutation {mutation}");
+    }
+}

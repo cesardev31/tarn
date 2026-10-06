@@ -1,0 +1,8 @@
+fn main() {
+    s := "owned"
+    f := move fn() string { return s }
+    first := f()
+    second := f()
+    print(first)
+    print(second)
+}

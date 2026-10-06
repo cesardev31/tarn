@@ -201,7 +201,8 @@ impl Dumper {
                 self.s("]");
                 self.ty(elem);
             }
-            TypeKind::Fn { params, ret } => {
+            TypeKind::Fn { mode, params, ret } => {
+                self.s(mode.prefix());
                 self.s("fn(");
                 for (i, p) in params.iter().enumerate() {
                     if i > 0 {
@@ -436,8 +437,8 @@ impl Dumper {
                 self.exprs(elems, ind);
                 self.s(")");
             }
-            ExprKind::Closure { params, ret, body } => {
-                self.s("(closure (");
+            ExprKind::Closure { owned, params, ret, body } => {
+                self.s(if *owned { "(move-closure (" } else { "(closure (" });
                 for (i, p) in params.iter().enumerate() {
                     if i > 0 {
                         self.s(" ");

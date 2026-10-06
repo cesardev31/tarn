@@ -1,4 +1,4 @@
-fn apply(f fn(i64) i64, x i64) i64 {
+fn apply(f mut fn(i64) i64, x i64) i64 {
     return f(x)
 }
 

@@ -1,0 +1,6 @@
+fn main() {
+    s := "owned"
+    f := move fn() string { return s }
+    r := &f
+    r()
+}

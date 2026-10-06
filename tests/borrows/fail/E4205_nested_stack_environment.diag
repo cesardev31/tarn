@@ -1,0 +1,9 @@
+error[E4205]: borrowed closure cannot escape its stack environment
+ --> tests/borrows/fail/E4205_nested_stack_environment.tarn:4:9
+  |
+4 |         return fn() usize { return s.len() }
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the closure escapes here
+  |                ----------------------------- this environment ends when its creating scope exits
+  |
+  = help: use `move fn` to create an owned environment; moved references must still remain valid
+

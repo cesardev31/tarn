@@ -48,7 +48,7 @@ pub fn subst(t: &Ty, map: &HashMap<ParamId, Ty>) -> Ty {
         Ty::Ref(m, x) => Ty::Ref(*m, Box::new(subst(x, map))),
         Ty::Array(x, n) => Ty::Array(Box::new(subst(x, map)), *n),
         Ty::Slice(x) => Ty::Slice(Box::new(subst(x, map))),
-        Ty::Fn(ps, r) => Ty::Fn(ps.iter().map(|x| subst(x, map)).collect(), Box::new(subst(r, map))),
+        Ty::Fn(mode, ps, r) => Ty::Fn(*mode, ps.iter().map(|x| subst(x, map)).collect(), Box::new(subst(r, map))),
         t => t.clone(),
     }
 }
@@ -265,6 +265,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
                         .note("in v0, `print` accepts booleans, numbers and strings"),
                 );
             }
+        }
+        for fields in self.tables.owned_captures.values_mut() {
+            for (_, ty) in fields { *ty = self.infer.zonk(ty); }
         }
         for t in self.tables.expr_types.values_mut() {
             *t = self.infer.zonk(t);
@@ -698,7 +701,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     fn require_mut_at(&mut self, whole: &Expr, e: &Expr, borrow: bool) -> bool {
         let (code, kind) = if borrow { ("E3016", "borrow_mut_immutable") } else { ("E3015", "assign_immutable") };
-        let target = |n: &str| if borrow { format!("cannot borrow `{n}` as mutable") } else { format!("cannot assign to `{n}`") };
+        let target = |n: &str| {
+            if borrow { format!("cannot borrow `{n}` as mutable") } else { format!("cannot assign to `{n}`") }
+        };
         let projected = !std::ptr::eq(whole, e);
         match &e.kind {
             ExprKind::Paren(inner) => self.require_mut_at(whole, inner, borrow),
@@ -819,7 +824,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 }
                 Ty::Array(Box::new(elem), elems.len() as u64)
             }
-            ExprKind::Closure { params, ret, body } => self.closure(params, ret.as_ref(), body, expected),
+            ExprKind::Closure { params, ret, body, .. } => self.closure(e, params, ret.as_ref(), body, expected),
         }
     }
 
@@ -867,7 +872,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                         ps.push(receiver_ty(r, st));
                     }
                     ps.extend(sig.params.iter().cloned());
-                    Ty::Fn(ps.iter().map(|p| subst(p, &map)).collect(), Box::new(subst(&sig.ret, &map)))
+                    Ty::Fn(CallMode::Shared, ps.iter().map(|p| subst(p, &map)).collect(), Box::new(subst(&sig.ret, &map)))
                 }
                 SymbolKind::Module(_) => Ty::Error,
                 k => {
@@ -1190,10 +1195,10 @@ impl<'e, 'a> FnCx<'e, 'a> {
         Ty::Adt(s, generics.iter().map(|p| map[p].clone()).collect())
     }
 
-    fn closure(&mut self, params: &[ClosureParam], ret: Option<&Type>, body: &Block, expected: Option<&Ty>) -> Ty {
+    fn closure(&mut self, e: &Expr, params: &[ClosureParam], ret: Option<&Type>, body: &Block, expected: Option<&Ty>) -> Ty {
         let exp = expected.map(|t| self.infer.shallow(t));
         let (exp_ps, exp_ret) = match &exp {
-            Some(Ty::Fn(ps, r)) if ps.len() == params.len() => (Some(ps.clone()), Some((**r).clone())),
+            Some(Ty::Fn(_, ps, r)) if ps.len() == params.len() => (Some(ps.clone()), Some((**r).clone())),
             Some(Ty::Opaque) => (Some(vec![Ty::Opaque; params.len()]), Some(Ty::Opaque)),
             _ => (None, None),
         };
@@ -1231,7 +1236,55 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     .primary(Span::new(body.span.file, body.span.end - 1, body.span.end), ""),
             );
         }
-        Ty::Fn(pts, Box::new(rt))
+        let mutated = crate::captures::mutated_symbols(body, &self.env.r.tables[self.m.0 as usize].uses, &self.tables);
+        let captured = self.env.r.tables[self.m.0 as usize].captures.get(&e.id);
+        let captures: HashMap<SymbolId, Ty> = captured.map(|c| c.symbols.iter().map(|s| {
+            let ty = self.infer.zonk(&self.locals.get(s).cloned().unwrap_or(Ty::Error));
+            let ty = match ty { Ty::Var(v) if self.infer.kind(v) == VarKind::Int => Ty::Int(IntTy::I64), Ty::Var(v) if self.infer.kind(v) == VarKind::Float => Ty::Float(FloatTy::F64), ty => ty };
+            (*s, ty)
+        }).collect()).unwrap_or_default();
+        let mut capture_tables = TypeTables::default();
+        capture_tables.expr_types = self
+            .tables
+            .expr_types
+            .iter()
+            .map(|(id, ty)| {
+                (
+                    *id,
+                    match self.infer.zonk(ty) {
+                        Ty::Var(v) if self.infer.kind(v) == VarKind::Int => Ty::Int(IntTy::I64),
+                        Ty::Var(v) if self.infer.kind(v) == VarKind::Float => Ty::Float(FloatTy::F64),
+                        ty => ty,
+                    },
+                )
+            })
+            .collect();
+        capture_tables.receivers = self.tables.receivers.clone();
+        capture_tables.owned_captures = self.tables.owned_captures.clone();
+        capture_tables.callable_calls = self.tables.callable_calls.clone();
+        capture_tables.borrowed_builtin_calls = self.tables.borrowed_builtin_calls.clone();
+        capture_tables.binding_modes = self.tables.binding_modes.clone();
+        let consuming = !crate::captures::consumed_symbols(body, &self.env.r.tables[self.m.0 as usize].uses, &capture_tables, &self.env.decls, &captures).is_empty();
+        let mutable = captured.is_some_and(|c| c.symbols.iter().any(|s| mutated.contains(s)));
+        let owned = matches!(e.kind, ExprKind::Closure { owned: true, .. });
+        let modes = captured.map(|c| c.symbols.iter().map(|s| (*s, if owned { crate::CaptureMode::Move } else if mutated.contains(s) { crate::CaptureMode::MutableBorrow } else { crate::CaptureMode::SharedBorrow })).collect()).unwrap_or_default();
+        self.tables.closure_captures.insert(e.id, modes);
+        self.tables.mutable_captures.insert(e.id, mutated);
+        if matches!(e.kind, ExprKind::Closure { owned: true, .. }) {
+            let fields = captured.map(|c| c.symbols.iter().map(|s| (*s, self.infer.zonk(&self.locals.get(s).cloned().unwrap_or(Ty::Error)))).collect()).unwrap_or_default();
+            self.tables.owned_captures.insert(e.id, fields);
+        }
+        Ty::Fn(
+            if consuming {
+                CallMode::Once
+            } else if mutable {
+                CallMode::Mutable
+            } else {
+                CallMode::Shared
+            },
+            pts,
+            Box::new(rt),
+        )
     }
 
     // ------------------------------------------------------------ calls
@@ -1294,16 +1347,38 @@ impl<'e, 'a> FnCx<'e, 'a> {
             },
             Some(Res::ScrutineeVariant(_)) => Ty::Error,
             None => match &callee.kind {
-                ExprKind::Field { base, name } => self.method_call(e, base, name, args),
+                ExprKind::Field { base, name } => {
+                    let bt = self.expr(base, None);
+                    let (inner, _) = peel(&self.infer.shallow(&bt));
+                    let field = if let Ty::Adt(s, _) = inner { self.env.decls.structs.get(&s).is_some_and(|d| d.fields.iter().any(|f| f.name == name.name)) } else { false };
+                    if field { self.value_call(e, callee, args) } else { self.method_call(e, base, name, args) }
+                },
                 _ => self.value_call(e, callee, args),
             },
         }
     }
 
+    fn callable_path_access(&self, e: &Expr) -> Option<bool> {
+        let base = match &e.kind { ExprKind::Field { base, .. } | ExprKind::Index { base, .. } | ExprKind::Paren(base) => base, _ => return None };
+        let direct = self.tables.expr_types.get(&base.id).and_then(|t| peel(&self.infer.shallow(t)).1);
+        match (direct, self.callable_path_access(base)) {
+            (Some(a), Some(b)) => Some(a && b),
+            (a, b) => a.or(b),
+        }
+    }
+
     fn value_call(&mut self, e: &Expr, callee: &Expr, args: &[Expr]) -> Ty {
+        self.tables.callable_calls.insert(e.id);
         let ct = self.expr(callee, None);
-        match self.infer.shallow(&ct) {
-            Ty::Fn(ps, r) => {
+        let (inner, through) = peel(&self.infer.shallow(&ct));
+        match inner {
+            Ty::Fn(mode, ps, r) => {
+                let through = through.or(self.callable_path_access(callee));
+                if (mode == CallMode::Mutable && through == Some(false)) || (mode == CallMode::Once && through.is_some()) {
+                    self.err(
+                        Diagnostic::error("E3044", "callable_access", "callable cannot be invoked through this reference").primary(callee.span, "invocation requires exclusive access or ownership"),
+                    );
+                }
                 self.args(e, "this function", &ps, args);
                 *r
             }
@@ -1566,6 +1641,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
     fn builtin(&mut self, e: &Expr, s: SymbolId, args: &[Expr]) -> Ty {
         let p = &self.env.prelude;
         if s == p.print {
+            self.tables.borrowed_builtin_calls.insert(e.id);
             if args.len() != 1 {
                 self.args(e, "`print`", &[Ty::Opaque], args);
             } else {

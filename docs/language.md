@@ -357,8 +357,33 @@ arguments in expressions in v0, ADR 0012).
 ## 13b. Closures (provisional)
 
 `fn(x) T { ... }` is an anonymous function; parameter types may be omitted when
-inferred from context. Captures are borrows unless the closure is passed to
-`spawn` (then they are moves).
+inferred from context. Captures are inferred shared/mutable borrows. `move fn`
+takes ownership of captured values, including copies of Copy values; captured
+references retain their loans. Borrowing closures cannot escape their stack
+environment. Owned closures can be returned when their captured loans remain valid.
+
+Callable types are `fn(A) R` (shared reusable), `mut fn(A) R` (mutable reusable)
+and `once fn(A) R` (consuming). Local bindings infer the mode from capture uses;
+ordinary invocation does not consume reusable callables. Mutable invocation
+borrows the environment exclusively and does not require replacing the binding.
+Moving a non-Copy capture from a body makes it consuming. Its second invocation
+is an E4001 use-after-move. Mode annotations are invariant. Spawn remains unsupported.
+
+```tarn
+fn make() fn() usize {
+    message := "callback"
+    return move fn() usize { return message.len() }
+}
+fn main() {
+    callback := make()
+    print(callback())
+    print(callback())
+}
+```
+
+Borrowed environments stay on the stack. Capturing owned closures use unique heap
+environments; capture-free closures use function items. Destruction goes through
+post-drop IR and destroys each remaining capture once. See ADR 0032.
 
 ## 14. Unsafe and FFI (provisional)
 

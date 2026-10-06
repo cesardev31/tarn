@@ -6,7 +6,7 @@
 
 use crate::*;
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use tarn_ast::{self as ast, ElseBranch, Expr, ExprKind, ForKind, ItemKind, Pattern, PatternKind, ReceiverKind, Stmt, StmtKind};
 use tarn_diagnostics::{Diagnostic, Severity};
 use tarn_resolve::{ModuleId, ModuleInput, Res, Resolved, SymbolKind};
@@ -164,7 +164,7 @@ impl<'a, 'l> Builder<'a, 'l> {
     /// (whose captures are references) own nothing.
     fn needs_drop(&self, t: &Ty) -> bool {
         match t {
-            Ty::Ref(..) | Ty::Fn(..) | Ty::Never | Ty::Void | Ty::Opaque | Ty::Error => false,
+            Ty::Ref(..) | Ty::Never | Ty::Void | Ty::Opaque | Ty::Error => false,
             _ => !self.is_copy(t),
         }
     }
@@ -870,7 +870,9 @@ impl<'a, 'l> Builder<'a, 'l> {
     /// Is `e` a place expression (named storage), as opposed to a value?
     fn is_place(&self, e: &Expr) -> bool {
         match &e.kind {
-            ExprKind::Ident(_) => matches!(self.res(e.id), Some(Res::Symbol(s)) if self.symbol_place(*s).is_some()),
+            ExprKind::Ident(_) => {
+                matches!(self.res(e.id), Some(Res::Symbol(s)) if self.symbol_place(*s).is_some())
+            }
             ExprKind::Field { .. } => self.res(e.id).is_none(),
             ExprKind::Index { index, .. } => !matches!(index.kind, ExprKind::Range { .. }),
             ExprKind::Paren(inner) => self.is_place(inner),
@@ -1316,7 +1318,7 @@ impl<'a, 'l> Builder<'a, 'l> {
                     }
                     _ => {
                         // A local holding a function or closure.
-                        let f = self.operand(callee);
+                        let f = self.callable_operand(callee);
                         let ops = args.iter().map(|a| self.arg(a)).collect();
                         self.finish_call(Callee::Value(f), ops, spans_of(args), dest, false, spawn, span);
                     }
@@ -1324,13 +1326,33 @@ impl<'a, 'l> Builder<'a, 'l> {
             }
             Some(Res::ScrutineeVariant(_)) => {}
             None => match &callee.kind {
-                ExprKind::Field { base, name } => self.method_call(e, base, name, args, dest, spawn),
+                ExprKind::Field { base, name } if !self.tables().callable_calls.contains(&e.id) => self.method_call(e, base, name, args, dest, spawn),
                 _ => {
-                    let f = self.operand(callee);
+                    let f = self.callable_operand(callee);
                     let ops = args.iter().map(|a| self.operand(a)).collect();
                     self.finish_call(Callee::Value(f), ops, spans_of(args), dest, false, spawn, span);
                 }
             },
+        }
+    }
+
+    fn callable_operand(&mut self, e: &Expr) -> Operand {
+        let ty = self.ty(e);
+        let mut inner = &ty;
+        let mut derefs = 0;
+        while let Ty::Ref(_, t) = inner {
+            inner = t;
+            derefs += 1;
+        }
+        match inner {
+            Ty::Fn(mode, _, _) if *mode != tarn_types::CallMode::Once => {
+                let mut p = self.place(e);
+                for _ in 0..derefs {
+                    p = p.project(Proj::Deref);
+                }
+                self.ref_temp(*mode == tarn_types::CallMode::Mutable, p, inner, e.span)
+            }
+            _ => self.operand(e),
         }
     }
 
@@ -1345,7 +1367,9 @@ impl<'a, 'l> Builder<'a, 'l> {
     fn qualified(&self, s: SymbolId) -> String {
         let sym = self.lx.r.symbol(s);
         match &sym.kind {
-            SymbolKind::Method { owner } => format!("{}.{}", self.lx.r.symbol(*owner).name, sym.name),
+            SymbolKind::Method { owner } => {
+                format!("{}.{}", self.lx.r.symbol(*owner).name, sym.name)
+            }
             SymbolKind::Function if self.lx.t.decls.fns.get(&s).is_some_and(|sig| sig.abi.as_deref() == Some("intrinsic")) => {
                 sym.module.map(|m| format!("{}.{}", self.lx.r.modules[m.0 as usize].name, sym.name)).unwrap_or_else(|| sym.name.clone())
             }
@@ -1433,18 +1457,29 @@ impl<'a, 'l> Builder<'a, 'l> {
     /// references to the captured locals (`&mut` when the body mutates them).
     fn closure(&mut self, e: &Expr, params: &[ast::ClosureParam], body: &ast::Block, dest: Place) {
         let captured: Vec<SymbolId> = self.lx.r.tables[self.m.0 as usize].captures.get(&e.id).map(|c| c.symbols.clone()).unwrap_or_default();
-        let mutated = mutated_symbols(body, &self.lx.r.tables[self.m.0 as usize].uses, self.tables());
+        let mutated = self.tables().mutable_captures.get(&e.id).cloned().unwrap_or_default();
+        let owned = matches!(e.kind, ExprKind::Closure { owned: true, .. });
+        let consumes = matches!(self.ty(e), Ty::Fn(tarn_types::CallMode::Once, ..));
+        let environment: Vec<Ty> = captured.iter().map(|s| if owned { self.sym_ty(*s) } else { Ty::Ref(mutated.contains(s), Box::new(self.sym_ty(*s))) }).collect();
         let id = FunctionId(self.lx.next_id.get());
         self.lx.next_id.set(id.0 + 1);
         let name = format!("{}::closure#{}", self.f.name, self.closure_count);
         self.closure_count += 1;
         let mut cb = Builder::new(self.lx, self.m, id, name, e.span);
         let (param_tys, ret) = match self.ty(e) {
-            Ty::Fn(ps, r) => (ps, *r),
+            Ty::Fn(_, ps, r) => (ps, *r),
             _ => (vec![Ty::Error; params.len()], Ty::Error),
         };
-        let modes = captured.iter().map(|s| if mutated.contains(s) { CaptureMode::MutableBorrow } else { CaptureMode::SharedBorrow }).collect();
-        cb.f.kind = FnKind::Closure { parent: self.f.id, captures: modes };
+        let modes = self.tables().closure_captures.get(&e.id).map(|cs| cs.iter().map(|(_, mode)| *mode).collect()).unwrap_or_default();
+
+        let destructor = if owned {
+            let id = FunctionId(self.lx.next_id.get());
+            self.lx.next_id.set(id.0 + 1);
+            Some(id)
+        } else {
+            None
+        };
+        cb.f.kind = FnKind::Closure { parent: self.f.id, captures: modes, environment: environment.clone(), owned, consumes, destructor, destructor_body: false };
         cb.f.ret = ret.clone();
         cb.f.generics = self.f.generics.clone();
         cb.new_local(ret, LocalKind::Return, None, None, false, e.span);
@@ -1452,12 +1487,17 @@ impl<'a, 'l> Builder<'a, 'l> {
         let mut cap_ops = Vec::new();
         for &s in &captured {
             let m = mutated.contains(&s);
-            let t = Ty::Ref(m, Box::new(self.sym_ty(s)));
+            let t = if owned && consumes { self.sym_ty(s) } else { Ty::Ref(m, Box::new(self.sym_ty(s))) };
             let name = self.lx.r.symbol(s).name.clone();
             let l = cb.new_local(t.clone(), LocalKind::Param, Some(name), None, false, e.span);
-            cb.captures.insert(s, l);
+            if owned && consumes {
+                cb.vars.insert(s, l);
+                cb.scopes[0].push(l);
+            } else {
+                cb.captures.insert(s, l);
+            }
             let p = self.symbol_place(s).unwrap_or(Place::local(RETURN));
-            cap_ops.push(self.ref_temp(m, p, &self.sym_ty(s), e.span));
+            cap_ops.push(if owned { self.read(p, &self.sym_ty(s)) } else { self.ref_temp(m, p, &self.sym_ty(s), e.span) });
         }
         for (p, t) in params.iter().zip(param_tys) {
             if let Some(s) = self.def(p.id) {
@@ -1472,7 +1512,32 @@ impl<'a, 'l> Builder<'a, 'l> {
         self.diags.append(&mut cb.diags);
         let f = cb.finish();
         self.lx.extra.borrow_mut().push(f);
-        self.assign(dest, Rvalue::Aggregate(Aggregate::Closure(id), cap_ops), e.span);
+        if let Some(did) = destructor {
+            let mut db = Builder::new(self.lx, self.m, did, format!("{}::environment-drop#{}", self.f.name, self.closure_count - 1), e.span);
+            db.f.generics = self.f.generics.clone();
+            db.f.kind = FnKind::Closure { parent: self.f.id, captures: vec![CaptureMode::Move; captured.len()], environment: environment.clone(), owned: true, consumes: true, destructor: None, destructor_body: true };
+            db.new_local(Ty::Void, LocalKind::Return, None, None, false, e.span);
+            db.scopes.push(Vec::new());
+            for ty in environment {
+                let l = db.new_local(ty, LocalKind::Param, None, None, false, e.span);
+                db.scopes[0].insert(0, l);
+            }
+            db.f.param_count = captured.len() as u32;
+            db.fall_off_end(e.span);
+            self.lx.extra.borrow_mut().push(db.finish());
+        }
+        if captured.is_empty() {
+            self.assign(dest, Rvalue::Use(Operand::Const(Const::Fn(id, self.f.generics.iter().copied().map(Ty::Param).collect()))), e.span);
+        } else {
+            let storage = if owned { None } else {
+                let l = self.new_local(Ty::Bool, LocalKind::User, Some("closure environment".into()), None, false, e.span);
+                self.push(StatementKind::StorageLive(l), e.span);
+                self.assign(Place::local(l), Rvalue::Use(Operand::Const(Const::Bool(true))), e.span);
+                if let Some(scope) = self.scopes.last_mut() { scope.push(l); }
+                Some(Place::local(l))
+            };
+            self.assign(dest, Rvalue::Aggregate(Aggregate::Closure(id, storage), cap_ops), e.span);
+        }
     }
 }
 
@@ -1515,130 +1580,6 @@ pub(crate) fn binop_name(op: BinOp) -> &'static str {
     }
 }
 
-/// Symbols a closure body writes or borrows mutably (assignment target root,
-/// `&mut` operand root, `&mut self` receiver root): captured by `&mut`.
-fn mutated_symbols(body: &ast::Block, uses: &HashMap<ast::NodeId, tarn_resolve::Use>, t: &tarn_types::TypeTables) -> HashSet<SymbolId> {
-    fn root(e: &Expr, uses: &HashMap<ast::NodeId, tarn_resolve::Use>) -> Option<SymbolId> {
-        match &e.kind {
-            ExprKind::Ident(_) => match uses.get(&e.id).map(|u| &u.res) {
-                Some(Res::Symbol(s)) => Some(*s),
-                _ => None,
-            },
-            ExprKind::Field { base, .. } | ExprKind::Index { base, .. } | ExprKind::Paren(base) => root(base, uses),
-            _ => None,
-        }
-    }
-    struct V<'x> {
-        uses: &'x HashMap<ast::NodeId, tarn_resolve::Use>,
-        t: &'x tarn_types::TypeTables,
-        out: HashSet<SymbolId>,
-    }
-    impl V<'_> {
-        fn stmts(&mut self, s: &[Stmt]) {
-            for x in s {
-                self.stmt(x);
-            }
-        }
-        fn stmt(&mut self, s: &Stmt) {
-            match &s.kind {
-                StmtKind::Let { value: Some(value), .. } => self.expr(value),
-                StmtKind::Assign { target, value } => {
-                    if let Some(r) = root(target, self.uses) {
-                        self.out.insert(r);
-                    }
-                    self.expr(target);
-                    self.expr(value);
-                }
-                StmtKind::Expr(e) | StmtKind::Spawn(e) | StmtKind::Return(Some(e)) => self.expr(e),
-                StmtKind::If(i) => self.if_(i),
-                StmtKind::For(f) => {
-                    match &f.kind {
-                        ForKind::While(c) => self.expr(c),
-                        ForKind::In { iter, .. } => self.expr(iter),
-                        ForKind::Infinite => {}
-                    }
-                    self.stmts(&f.body.stmts);
-                }
-                StmtKind::Match(m) => {
-                    self.expr(&m.scrutinee);
-                    for a in &m.arms {
-                        if let Some(g) = &a.guard {
-                            self.expr(g);
-                        }
-                        self.stmt(&a.body);
-                    }
-                }
-                StmtKind::Block(b) | StmtKind::Unsafe(b) | StmtKind::Scope(b) => self.stmts(&b.stmts),
-                _ => {}
-            }
-        }
-        fn if_(&mut self, i: &ast::IfStmt) {
-            self.expr(&i.cond);
-            self.stmts(&i.then_block.stmts);
-            match i.else_branch.as_deref() {
-                Some(ElseBranch::If(e)) => self.if_(e),
-                Some(ElseBranch::Block(b)) => self.stmts(&b.stmts),
-                None => {}
-            }
-        }
-        fn expr(&mut self, e: &Expr) {
-            match &e.kind {
-                ExprKind::Unary { op: ast::UnaryOp::RefMut, operand } => {
-                    if let Some(r) = root(operand, self.uses) {
-                        self.out.insert(r);
-                    }
-                    self.expr(operand);
-                }
-                ExprKind::Call { callee, args } => {
-                    if let (Some(rcv), ExprKind::Field { base, .. }) = (self.t.receivers.get(&e.id), &callee.kind)
-                        && rcv.kind == ReceiverKind::RefMut
-                        && rcv.derefs == 0
-                        && let Some(r) = root(base, self.uses)
-                    {
-                        self.out.insert(r);
-                    }
-                    self.expr(callee);
-                    for a in args {
-                        self.expr(a);
-                    }
-                }
-                ExprKind::Field { base, .. } | ExprKind::Paren(base) | ExprKind::Try(base) | ExprKind::Unary { operand: base, .. } => self.expr(base),
-                ExprKind::Index { base, index } => {
-                    self.expr(base);
-                    self.expr(index);
-                }
-                ExprKind::Binary { lhs, rhs, .. } => {
-                    self.expr(lhs);
-                    self.expr(rhs);
-                }
-                ExprKind::StructLit { fields, .. } => {
-                    for f in fields {
-                        if let Some(v) = &f.value {
-                            self.expr(v);
-                        }
-                    }
-                }
-                ExprKind::ArrayLit { elems, .. } => {
-                    for x in elems {
-                        self.expr(x);
-                    }
-                }
-                ExprKind::Closure { body, .. } => self.stmts(&body.stmts),
-                ExprKind::Range { start, end, .. } => {
-                    for x in [start, end].into_iter().flatten() {
-                        self.expr(x);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    let mut v = V { uses, t, out: HashSet::new() };
-    v.stmts(&body.stmts);
-    v.out
-}
-
-/// Remove blocks unreachable from the entry and renumber the rest.
 fn prune(f: &mut Function) {
     if f.blocks.is_empty() {
         return;
