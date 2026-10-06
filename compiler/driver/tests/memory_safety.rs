@@ -6,6 +6,10 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("suspended read buffer held until destruction", Some("E4102"), "import \"net\"\nfn bad(owner &net.Execution, stream &mut net.TcpStream) { var bytes = [2]u8{0, 0}\n var op = net.read_operation(owner, stream, &mut bytes)\n op.poll()\n bytes[0] = 1 }"),
+    ("suspended read buffer released by consuming finish", None, "import \"net\"\nfn good(owner &net.Execution, stream &mut net.TcpStream) { var bytes = [2]u8{0, 0}\n var op = net.read_operation(owner, stream, &mut bytes)\n op.poll()\n op.finish()\n bytes[0] = 1 }"),
+    ("suspended write_all retains source loan", Some("E4102"), "import \"net\"\nfn bad(owner &net.Execution, stream &mut net.TcpStream) { var bytes = [2]u8{0, 0}\n var op = net.write_all_operation(owner, stream, &bytes)\n op.poll()\n bytes[0] = 1 }"),
+    ("execution cannot die before its wake holder", Some("E4103"), "import \"net\"\nfn bad(owner net.Execution, stream &mut net.TcpStream) { var bytes = [2]u8{0, 0}\n op := net.read_operation(&owner, stream, &mut bytes)\n moved := owner }"),
     ("poll double close", Some("E4001"), "import \"net\"\nfn bad(poll net.Poll) { poll.close()\n poll.close() }"),
     ("poll event buffer conflicting alias", Some("E4101"), "import \"net\"\nfn bad(poll &mut net.Poll) { var events = [1]net.Event{net.Event.empty()}\n loan := &events\n poll.wait(&mut events, 0)\n print(loan[0].readable) }"),
     ("poll registration retains no socket loan", None, "import \"net\"\nfn good(poll &mut net.Poll, socket net.UdpSocket) { token := poll.register_udp(&socket, net.Interest.Readable)\n socket.close() }") ,

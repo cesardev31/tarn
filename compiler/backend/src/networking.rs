@@ -22,7 +22,11 @@ impl Cx<'_, '_> {
             }
         }
         let result_layout = layout::layout(self.t, dest)?;
-        if result_layout.size != 40 || result_layout.align != 8 || result_layout.fields.iter().map(|(offset, _)| *offset).collect::<Vec<_>>() != [0, 4, 8, 16] {
+        let wake_result = name == "net._waker_new";
+        if wake_result && (result_layout.size != 8 || result_layout.align != 8) {
+            return Err(Error::bug("waker result ABI mismatch"));
+        }
+        if !wake_result && (result_layout.size != 40 || result_layout.align != 8 || result_layout.fields.iter().map(|(offset, _)| *offset).collect::<Vec<_>>() != [0, 4, 8, 16]) {
             return Err(Error::bug("network result ABI mismatch"));
         }
         let slot = self.stack(result_layout.size, result_layout.align);
@@ -35,6 +39,8 @@ impl Cx<'_, '_> {
                     values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0));
                     values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 8));
                 }
+                Ty::Ref(_, inner) if matches!(inner.as_ref(), Ty::Adt(id, _) if Some(*id) == self.t.decls.exec_waker) => values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0)),
+                Ty::Ref(_, inner) if name == "net._waker_new" && matches!(inner.as_ref(), Ty::Adt(id, _) if Some(*id) == self.t.decls.exec_owner) => values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0)),
                 Ty::Ref(_, inner) if **inner == Ty::Str => values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0)),
                 Ty::Adt(id, _) if Some(*id) == self.t.decls.net_poll => values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0)),
                 Ty::Adt(id, _) if self.t.decls.net_sockets.contains(id) => values.push(self.b.ins().load(types::I32, cl::MemFlags::new(), value, 0)),

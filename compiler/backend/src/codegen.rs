@@ -214,6 +214,17 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     for (name, params, returns) in [
         ("tarn_rt_net_main_error", vec![types::I32, types::I32], vec![]),
         ("tarn_rt_net_drop", vec![types::I32], vec![]),
+        ("tarn_rt_net_exec_new", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_net_waker_new", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_net_wake", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_net_wake_link", vec![types::I64; 3], vec![]),
+        ("tarn_rt_net_wake_owner", vec![types::I64; 3], vec![]),
+        ("tarn_rt_net_wake_take", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_net_wake_arm", vec![types::I64, types::I64, types::I32, types::I32], vec![]),
+        ("tarn_rt_net_wake_clear", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_net_exec_wait", vec![types::I64, types::I64, types::I32], vec![]),
+        ("tarn_rt_net_waker_drop", vec![types::I64], vec![]),
+        ("tarn_rt_net_exec_drop", vec![types::I64], vec![]),
         ("tarn_rt_net_poll_drop", vec![types::I64], vec![]),
         ("tarn_rt_net_nonblocking", vec![types::I64, types::I32, types::I8], vec![]),
         ("tarn_rt_net_mode", vec![types::I64, types::I32], vec![]),
@@ -1543,6 +1554,15 @@ impl Cx<'_, '_> {
         self.drop_at(addr, &ty)
     }
     fn drop_at(&mut self, addr: cl::Value, ty: &Ty) -> Result<()> {
+        if let Ty::Adt(id, _) = ty {
+            let helper = if Some(*id) == self.t.decls.exec_waker { Some("tarn_rt_net_waker_drop") }
+                else if Some(*id) == self.t.decls.exec_state { Some("tarn_rt_net_exec_drop") } else { None };
+            if let Some(helper) = helper {
+                let native = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
+                self.runtime(helper, &[native]);
+                return Ok(());
+            }
+        }
         if matches!(ty, Ty::Adt(id, _) if Some(*id) == self.t.decls.net_poll) {
             let handle = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
             self.runtime("tarn_rt_net_poll_drop", &[handle]);

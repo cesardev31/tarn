@@ -22,7 +22,7 @@ impl Decls {
             path.push(ty.clone());
             let answer = match ty {
                 Ty::Ref(..) | Ty::Fn(..) | Ty::Param(_) | Ty::Any(_) | Ty::Opaque | Ty::Var(_) => true,
-                Ty::Adt(s, _) if Some(*s) == d.mutex_guard => true,
+                Ty::Adt(s, _) if Some(*s) == d.mutex_guard || Some(*s) == d.exec_waker => true,
                 Ty::Array(t, _) | Ty::Slice(t) => visit(d, t, path, budget),
                 Ty::Adt(s, args) if Some(*s) == d.task => args.iter().any(|t| visit(d, t, path, budget)),
                 Ty::Adt(s, args) => {
@@ -44,6 +44,11 @@ impl Decls {
 
     pub fn contains_guard(&self, ty: &Ty) -> bool {
         self.contains_resource(ty, self.mutex_guard)
+    }
+
+    /// Resources whose destruction ends a retained loan (unlock or retire wake).
+    pub fn contains_loan_resource(&self, ty: &Ty) -> bool {
+        self.contains_guard(ty) || self.contains_resource(ty, self.exec_waker)
     }
 
     pub fn contains_task(&self, ty: &Ty) -> bool {

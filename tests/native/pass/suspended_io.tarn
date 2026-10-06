@@ -1,0 +1,87 @@
+import "net"
+fn require(value bool) { if !value { panic("suspended assertion") } }
+fn main() Result<void, net.Error> {
+    execution := try net.Execution.new()
+    var listener = try net.TcpListener.bind(&"127.0.0.1:0")
+    try listener.set_nonblocking(true)
+    address := try listener.local_addr()
+    var accept = net.accept_operation(&execution, &mut listener)
+    match accept.poll() { net.Progress.Pending => {}
+        net.Progress.Ready(value) => panic("accept did not suspend") }
+    var client = try net.TcpStream.connect_addr(address)
+    try execution.wait(5000)
+    var server: net.TcpStream
+    match accept.poll() { net.Progress.Ready(value) => { server = try value }
+        net.Progress.Pending => panic("accept still pending") }
+    accept.finish()
+    try server.set_nonblocking(true)
+    var buffer = [2]u8{0, 0}
+    var read = net.read_operation(&execution, &mut server, &mut buffer)
+    match read.poll() { net.Progress.Pending => {}
+        net.Progress.Ready(value) => panic("read did not suspend") }
+    read.wake()
+    read.wake()
+    require(read.runnable())
+    require(!read.runnable())
+    match read.poll() { net.Progress.Pending => {}
+        net.Progress.Ready(value) => panic("spurious wake completed") }
+    try client.write_all(&[2]u8{41, 42})
+    try execution.wait(5000)
+    require(read.runnable())
+    match read.poll() { net.Progress.Ready(value) => { require(try value == usize(2)) }
+        net.Progress.Pending => panic("read still pending") }
+    read.finish()
+    require(buffer[1] == u8(42))
+    buffer[0] = u8(99)
+    try client.set_nonblocking(true)
+    var write = net.write_operation(&execution, &mut client, &buffer)
+    match write.poll() { net.Progress.Ready(value) => { require(try value == usize(2)) }
+        net.Progress.Pending => panic("immediate write pending") }
+    write.finish()
+    var drain = net.read_operation(&execution, &mut server, &mut buffer)
+    match drain.poll() { net.Progress.Ready(value) => { require(try value == usize(2)) }
+        net.Progress.Pending => panic("drain pending") }
+    drain.finish()
+    // Abandon Pending read, release loans and remove its registration.
+    {
+        var abandoned = net.read_operation(&execution, &mut server, &mut buffer)
+        match abandoned.poll() { net.Progress.Pending => {}
+            net.Progress.Ready(value) => panic("abandon read ready") }
+    }
+    buffer[0] = u8(0)
+    // A peer close wakes a suspended read and yields EOF, not a stale count.
+    var eof = net.read_operation(&execution, &mut server, &mut buffer)
+    match eof.poll() { net.Progress.Pending => {}
+        net.Progress.Ready(value) => panic("EOF read did not suspend") }
+    try client.close()
+    try execution.wait(5000)
+    match eof.poll() { net.Progress.Ready(value) => { require(try value == usize(0)) }
+        net.Progress.Pending => panic("peer close did not wake read") }
+    eof.finish()
+    try server.close()
+    var receiver = try net.UdpSocket.bind(&"127.0.0.1:0")
+    var sender = try net.UdpSocket.bind(&"127.0.0.1:0")
+    try receiver.set_nonblocking(true)
+    peer := try receiver.local_addr()
+    var recv = net.recv_operation(&execution, &mut receiver, &mut buffer)
+    match recv.poll() { net.Progress.Pending => {}
+        net.Progress.Ready(value) => panic("udp ready") }
+    try sender.send_to(&[0]u8{}, peer)
+    try execution.wait(5000)
+    match recv.poll() { net.Progress.Ready(value) => { require((try value).count == usize(0)) }
+        net.Progress.Pending => panic("empty datagram pending") }
+    recv.finish()
+    var connecting = try net.TcpStream.connect_nonblocking_addr(address)
+    var connect = net.connect_operation(&execution, &mut connecting)
+    var complete = false
+    for !complete {
+        match connect.poll() { net.Progress.Ready(value) => { try value
+                complete = true }
+            net.Progress.Pending => { try execution.wait(5000) } }
+    }
+    connect.finish()
+    transferred := try connecting.into_stream()
+    try transferred.close()
+    print("suspended ok")
+    return Ok(())
+}

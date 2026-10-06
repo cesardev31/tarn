@@ -808,6 +808,20 @@ is authorized by readiness support.
 
 ---
 
+## Suspended Execution
+
+Phase 12C manual operations use verified owned closure state and a single-thread
+executor before async syntax. Suspension extends ownership and borrowing
+obligations; it does not suspend the memory-safety rules. Wakeup means "poll again",
+not "the operation is complete". A Pending computation must remain safely
+destructible in every state. Executor scheduling authority does not imply
+ownership of application resources. Preserve normal provenance/loan visibility,
+readiness token protection and post-drop cleanup. No async/await syntax or
+multi-thread scheduler follows without a separate approved phase.
+See [ADR 0036](docs/adr/0036-suspended-execution.md).
+
+---
+
 ## Drops
 
 Lowering emits abstract drops.

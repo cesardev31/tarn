@@ -439,3 +439,95 @@ void tarn_rt_net_close_poll(TarnNetRaw *out, TarnPoll *poll) {
     free(poll);
 }
 void tarn_rt_net_poll_drop(TarnPoll *poll) { TarnNetRaw out; tarn_rt_net_close_poll(&out, poll); }
+
+/* Mechanical wake bookkeeping, not an executor or application-state store. */
+typedef struct TarnWake TarnWake;
+typedef struct { TarnPoll *poll; TarnWake *head; } TarnExecution;
+struct TarnWake {
+    TarnExecution *owner;
+    TarnWake *next;
+    uint64_t identity, token, parent;
+    int fd;
+    uint8_t queued;
+};
+static uint64_t net_identity(void) {
+    uint64_t id = atomic_load(&net_next_token);
+    for (;;) {
+        if (id >= INT64_MAX) tarn_rt_fault();
+        if (atomic_compare_exchange_weak(&net_next_token, &id, id + 1)) return id;
+    }
+}
+void tarn_rt_net_exec_new(TarnNetRaw *out, TarnPoll *poll) {
+    net_init(out); TarnExecution *owner = malloc(sizeof(*owner));
+    if (!owner) { out->code = ENOMEM; return; }
+    owner->poll = poll; owner->head = NULL; out->value = (int64_t)(uintptr_t)owner;
+}
+void tarn_rt_net_waker_new(uintptr_t *out, TarnExecution *owner) {
+    TarnWake *wake = calloc(1, sizeof(*wake)); if (!wake) tarn_rt_fault();
+    wake->identity = net_identity(); wake->owner = owner; wake->fd = -1;
+    wake->queued = 1; wake->next = owner->head; owner->head = wake;
+    *out = (uintptr_t)wake;
+}
+static TarnWake *net_wake_find(TarnExecution *owner, uint64_t id) {
+    for (TarnWake *wake = owner->head; wake; wake = wake->next) if (wake->identity == id) return wake;
+    return NULL;
+}
+static void net_wake_deliver(TarnWake *wake) {
+    for (int depth = 0; wake; ++depth) {
+        if (depth >= 64) tarn_rt_fault();
+        wake->queued = 1;
+        wake = net_wake_find(wake->owner, wake->parent);
+    }
+}
+void tarn_rt_net_wake(TarnNetRaw *out, TarnWake *wake) { net_init(out); net_wake_deliver(wake); }
+void tarn_rt_net_wake_link(TarnNetRaw *out, TarnWake *child, TarnWake *parent) {
+    net_init(out);
+    if (child->owner != parent->owner) { out->code = EINVAL; return; }
+    TarnWake *next = parent;
+    for (int depth = 0; next; ++depth) {
+        if (next == child || depth >= 63) { out->code = EINVAL; return; }
+        next = net_wake_find(next->owner, next->parent);
+    }
+    child->parent = parent->identity;
+}
+void tarn_rt_net_wake_owner(TarnNetRaw *out, TarnWake *wake, TarnExecution *owner) {
+    net_init(out); if (wake->owner != owner) out->code = EINVAL;
+}
+void tarn_rt_net_wake_take(TarnNetRaw *out, TarnWake *wake) { net_init(out); out->value = wake->queued; wake->queued = 0; }
+void tarn_rt_net_wake_arm(TarnNetRaw *out, TarnWake *wake, int32_t fd, int32_t interest) {
+    if (wake->token && wake->fd != fd) { net_init(out); out->code = EINVAL; return; }
+    tarn_rt_net_poll_ctl(out, wake->owner->poll, fd, wake->token ? 1 : 0, interest, wake->token);
+    if (!out->code) { wake->fd = fd; wake->token = out->value; }
+}
+void tarn_rt_net_wake_clear(TarnNetRaw *out, TarnWake *wake) {
+    net_init(out); wake->queued = 0;
+    if (!wake->token) return;
+    TarnPoll *poll = wake->owner->poll;
+    /* Reuse the 12B token/cookie check before touching any live fd. */
+    TarnNetRaw status; tarn_rt_net_poll_ctl(&status, poll, wake->fd, 2, 1, wake->token);
+    /* A captured owner may already have closed. Retire only our token record;
+       never erase replacement bookkeeping or modify an unrelated recycled fd. */
+    TarnRegistration **link = &poll->head;
+    while (*link && (*link)->token != wake->token) link = &(*link)->next;
+    if (*link) { TarnRegistration *old = *link; *link = old->next; free(old); }
+    wake->token = 0; wake->fd = -1;
+}
+void tarn_rt_net_exec_wait(TarnNetRaw *out, TarnExecution *owner, int32_t timeout) {
+    TarnEvent events[64]; tarn_rt_net_poll_wait(out, owner->poll, events, 64, timeout);
+    if (out->code) return;
+    for (int i = 0; i < out->value; ++i) {
+        for (TarnWake *wake = owner->head; wake; wake = wake->next)
+            if (wake->token && wake->token == events[i].token) net_wake_deliver(wake);
+    }
+}
+void tarn_rt_net_waker_drop(TarnWake *wake) {
+    TarnNetRaw out; tarn_rt_net_wake_clear(&out, wake);
+    TarnWake **link = &wake->owner->head;
+    while (*link && *link != wake) link = &(*link)->next;
+    if (!*link) tarn_rt_fault();
+    *link = wake->next; free(wake);
+}
+void tarn_rt_net_exec_drop(TarnExecution *owner) {
+    if (owner->head) tarn_rt_fault(); /* Ordinary loans must keep Execution alive. */
+    free(owner);
+}

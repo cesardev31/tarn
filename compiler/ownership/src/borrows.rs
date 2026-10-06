@@ -214,10 +214,10 @@ impl<'a> Fx<'a> {
             }
             StatementKind::StorageLive(l) | StatementKind::StorageDead(l) => live.remove(l.0 as usize),
             // Resource destruction can use retained loans: joining a task or
-            // unlocking a guard keeps its borrowed storage live until this use.
+            // unlocking a guard or retiring a wake keeps borrowed storage live until this use.
             StatementKind::Drop(p) => {
                 Self::place_uses(p, live);
-                if self.t.decls.contains_task(&self.f.local(p.local).ty) || self.t.decls.contains_guard(&self.f.local(p.local).ty) { Self::read_uses(p, live); }
+                if self.t.decls.contains_task(&self.f.local(p.local).ty) || self.t.decls.contains_loan_resource(&self.f.local(p.local).ty) { Self::read_uses(p, live); }
             },
         }
     }
@@ -380,7 +380,7 @@ impl<'a> Fx<'a> {
 
     fn consume_resource_operand(&self, h: &mut Holds, operand: &Operand) {
         if let Operand::Move(place) = operand
-            && place.proj.is_empty() && (self.t.decls.contains_task(&self.f.local(place.local).ty) || self.t.decls.contains_guard(&self.f.local(place.local).ty)) {
+            && place.proj.is_empty() && (self.t.decls.contains_task(&self.f.local(place.local).ty) || self.t.decls.contains_loan_resource(&self.f.local(place.local).ty)) {
             h[place.local.0 as usize] = BitSet::new(self.loans.len());
         }
     }
@@ -403,7 +403,7 @@ impl<'a> Fx<'a> {
                 }
                 StatementKind::StorageLive(l) | StatementKind::StorageDead(l) => h[l.0 as usize] = BitSet::new(self.loans.len()),
                 StatementKind::Drop(place) => {
-                    if place.proj.is_empty() && (self.t.decls.contains_task(&self.f.local(place.local).ty) || self.t.decls.contains_guard(&self.f.local(place.local).ty)) {
+                    if place.proj.is_empty() && (self.t.decls.contains_task(&self.f.local(place.local).ty) || self.t.decls.contains_loan_resource(&self.f.local(place.local).ty)) {
                         h[place.local.0 as usize] = BitSet::new(self.loans.len());
                     }
                 }

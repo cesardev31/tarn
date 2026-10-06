@@ -165,3 +165,16 @@ C owns epoll bookkeeping with nonreused tokens and Linux socket cookies. Public
 Tarn code controls mode changes, connect progression, WouldBlock and monotonic
 EINTR retry policy. No application pointer remains pending after a syscall.
 See [ADR 0035](adr/0035-nonblocking-readiness.md).
+
+## Manual suspended execution (Phase 12C)
+
+Operation<R> stores an ordinary owned mutable closure and a loan-bearing Waker.
+Existing capture metadata exposes across-poll storage and loans; the generic
+loan-resource destruction/liveness mechanism includes Waker-containing holders.
+Execution owns Poll/mechanical wake bookkeeping; a separate Executor owns a
+bounded operation table, avoiding self-reference. Task insertion consumes and
+returns that table through ordinary provenance. Native helpers only manage
+identity, registration and coalesced wake bits. Tarn schedules fair turns and
+implements all network state transitions. No async/await syntax is added.
+See [ADR 0036](adr/0036-suspended-execution.md) and
+[the Phase 12C report](suspended-execution-report.md).

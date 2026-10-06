@@ -92,6 +92,9 @@ pub struct Decls {
     pub net_sockets: Vec<SymbolId>,
     pub net_error: Option<SymbolId>,
     pub net_poll: Option<SymbolId>,
+    pub exec_waker: Option<SymbolId>,
+    pub exec_state: Option<SymbolId>,
+    pub exec_owner: Option<SymbolId>,
     pub result: Option<SymbolId>,
     pub net_intrinsics: HashMap<String, SymbolId>,
     pub mutex: Option<SymbolId>,
@@ -158,6 +161,19 @@ impl<'a> Env<'a> {
             if let Some(id) = ps.get(name) { decls.atomics.insert(id, primitive(ty)); }
         }
         let mut env = Env { inputs, r, decls, prelude, diags: Vec::new() };
+        for (index, input) in inputs.iter().enumerate() {
+            if input.name == "net" && input.trusted_stdlib {
+                let scope = r.scope(r.modules[index].scope);
+                env.decls.exec_waker = scope.get("Waker");
+                env.decls.exec_owner = scope.get("Execution");
+                env.decls.exec_state = scope.get("_ExecutionState");
+                for name in ["Waker", "_ExecutionState", "Execution"] {
+                    if let Some(id) = scope.get(name) {
+                        env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: false, share: false });
+                    }
+                }
+            }
+        }
         env.collect();
         for (index, input) in inputs.iter().enumerate() {
             if input.name == "net" && input.trusted_stdlib {

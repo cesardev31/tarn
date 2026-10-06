@@ -1,4 +1,4 @@
-# Native networking (Phases 12A and 12B)
+# Native networking (Phases 12A, 12B and 12C)
 
 `import "net"` loads the embedded `stdlib/net/net.tarn`. The current target is
 Linux x86_64. Blocking operations, including DNS, may block the calling native task.
@@ -198,4 +198,32 @@ completion returns WouldBlock and closes it; repeated failure checks preserve th
 original failure. Dropping Connecting closes the incomplete stream normally.
 
 See [ADR 0035](adr/0035-nonblocking-readiness.md). No async syntax, pending kernel
-buffer I/O, scheduler, io_uring, HTTP, TLS or channels are implemented.
+buffer I/O, io_uring, HTTP, TLS or channels are implemented by Phase 12B.
+
+## Manual suspended execution (Phase 12C)
+
+`Execution.new()` owns a single-thread readiness context. An `Operation<R>`
+stores a mutable owned poll callback and returns `Progress.Pending` or
+`Progress.Ready(R)`. Polling after Ready aborts. Consume the holder with
+`finish()` after taking the result to release its captured loans; dropping it
+also destroys its state and retires its wake registration.
+
+`read_operation`, `write_operation`, `write_all_operation`, `accept_operation`,
+`connect_operation` and `recv_operation` require nonblocking sockets. They retain
+ordinary buffer/socket loans across Pending. Read reports partial counts and EOF;
+write reports partial counts; write_all retains its offset. UDP preserves empty
+datagrams. These operations attempt I/O, arm readiness after WouldBlock, then
+retry before returning Pending to close the lost-wakeup window.
+
+`Executor.new()` holds up to 16 void-result operations. `executor.add(operation)`
+consumes and returns the executor so transferred loans remain explicit. `turn`
+polls each runnable slot at most once, and `run` consumes the executor until all
+slots complete. Callbacks can use `waker.wake()` for another turn. Repeated wakes
+coalesce; nested operations use `poll_with` to forward readiness to their parent.
+All wake use and polling are confined to the creating execution context/thread.
+
+See [the manual I/O fixture](../tests/native/pass/suspended_io.tarn),
+[the executor example](../tests/native/pass/executor_turns.tarn),
+[ADR 0036](adr/0036-suspended-execution.md) and
+[the Phase 12C report](suspended-execution-report.md). This is a manual bootstrap
+model; async fn, await and a public cancellation API remain deferred.

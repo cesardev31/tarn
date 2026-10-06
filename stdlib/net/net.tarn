@@ -420,3 +420,262 @@ fn _connection_error(code i32) Error {
     if code == 110 { kind = ErrorKind.TimedOut }
     return Error{kind: kind, code: code, domain: 0}
 }
+
+// Phase 12C manual/internal execution surface; not stable async syntax.
+struct _ExecutionState { native usize }
+pub struct Execution {
+    state _ExecutionState
+    poll Poll
+}
+pub struct Waker { native usize }
+pub enum Progress<R> {
+    Pending
+    Ready(R)
+}
+pub struct Operation<R> {
+    poller mut fn(&Waker) Progress<R>
+    waker Waker
+    complete bool
+}
+pub struct Executor { tasks [16]Option<Operation<void>> }
+extern "intrinsic" fn _exec_new(poll usize) _Raw
+extern "intrinsic" fn _waker_new(owner &Execution) Waker
+extern "intrinsic" fn _wake(waker &Waker) _Raw
+extern "intrinsic" fn _wake_link(child &Waker, parent &Waker) _Raw
+extern "intrinsic" fn _wake_owner(waker &Waker, owner usize) _Raw
+extern "intrinsic" fn _wake_take(waker &Waker) _Raw
+extern "intrinsic" fn _wake_arm(waker &Waker, fd i32, interest i32) _Raw
+extern "intrinsic" fn _wake_clear(waker &Waker) _Raw
+extern "intrinsic" fn _exec_wait(owner usize, timeout i32) _Raw
+
+pub fn Execution.new() Result<Execution, Error> {
+    poll := try Poll.new()
+    raw := try _check(_exec_new(poll.handle))
+    return Ok(Execution{state: _ExecutionState{native: usize(raw.value)}, poll: poll})
+}
+pub fn Operation<R>.new(owner &Execution, poller mut fn(&Waker) Progress<R>) Operation<R> {
+    return Operation{poller: poller, waker: _waker_new(owner), complete: false}
+}
+pub fn Operation<R>.wake(&self) { _wake(&self.waker) }
+pub fn Operation<R>.runnable(&self) bool { return _wake_take(&self.waker).value != 0 }
+pub fn Operation<R>.poll(&mut self) Progress<R> {
+    if self.complete { panic("operation polled after completion") }
+    result := self.poller(&self.waker)
+    match &result {
+        Progress.Pending => {}
+        Progress.Ready(value) => {
+            self.complete = true
+            _wake_clear(&self.waker)
+        }
+    }
+    return result
+}
+// Consume the operation to release its conservative across-suspension loans.
+pub fn Operation<R>.finish(self) {}
+pub fn Executor.new() Executor {
+    return Executor{tasks: [16]Option<Operation<void>>{None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None}}
+}
+// Consuming insertion returns the new loan holder through ordinary provenance.
+pub fn Executor.add(self, operation Operation<void>) Executor {
+    var executor = self
+    for i in 0..16 {
+        match &executor.tasks[i] {
+            None => { executor.tasks[i] = Some(operation)
+                return executor
+            }
+            Some(value) => {}
+        }
+    }
+    panic("manual executor capacity exceeded")
+}
+pub fn Executor.turn(&mut self, owner &Execution, timeout i32) Result<usize, Error> {
+    // Readiness is serviced even when a task self-wakes continuously.
+    try owner.wait(0)
+    var remaining = usize(0)
+    var polled = false
+    for i in 0..16 {
+        var complete = false
+        match &mut self.tasks[i] {
+            None => {}
+            Some(operation) => {
+                try _check(_wake_owner(&operation.waker, owner.state.native))
+                remaining = remaining + usize(1)
+                if operation.runnable() {
+                    polled = true
+                    match operation.poll() {
+                        Progress.Pending => {}
+                        Progress.Ready(value) => { complete = true }
+                    }
+                }
+            }
+        }
+        if complete { self.tasks[i] = None
+            remaining = remaining - usize(1)
+        }
+    }
+    if !polled && remaining != usize(0) { try owner.wait(timeout) }
+    return Ok(remaining)
+}
+pub fn Executor.run(self, owner &Execution) Result<void, Error> {
+    var executor = self
+    for {
+        if try executor.turn(owner, -1) == usize(0) { return Ok(()) }
+    }
+}
+
+fn _require_nonblocking(fd i32) Result<void, Error> {
+    for {
+        raw := _mode(fd)
+        if raw.domain == 0 && raw.code == 4 { continue }
+        checked := try _check(raw)
+        if checked.value == 0 { return Err(Error{kind: ErrorKind.InvalidAddress, code: 22, domain: 0}) }
+        return Ok(())
+    }
+}
+fn _arm(waker &Waker, fd i32, interest i32) Result<void, Error> {
+    for {
+        raw := _wake_arm(waker, fd, interest)
+        if raw.domain == 0 && raw.code == 4 { continue }
+        try _check(raw)
+        return Ok(())
+    }
+}
+fn _would_block(error Error) bool {
+    match error.kind { ErrorKind.WouldBlock => { return true }
+        _ => { return false } }
+}
+pub fn poll_read(waker &Waker, stream &mut TcpStream, buffer &mut []u8) Progress<Result<usize, Error>> {
+    match _require_nonblocking(stream.fd) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match stream.read(buffer) {
+        Ok(count) => { return Progress.Ready(Ok(count)) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    match _arm(waker, stream.fd, 1) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match stream.read(buffer) {
+        Ok(count) => { return Progress.Ready(Ok(count)) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    return Progress.Pending
+}
+pub fn read_operation(owner &Execution, stream &mut TcpStream, buffer &mut []u8) Operation<Result<usize, Error>> {
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<usize, Error>> { return poll_read(waker, stream, buffer) })
+}
+pub fn poll_write(waker &Waker, stream &mut TcpStream, buffer &[]u8) Progress<Result<usize, Error>> {
+    match _require_nonblocking(stream.fd) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match stream.write(buffer) {
+        Ok(count) => { return Progress.Ready(Ok(count)) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    match _arm(waker, stream.fd, 2) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match stream.write(buffer) {
+        Ok(count) => { return Progress.Ready(Ok(count)) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    return Progress.Pending
+}
+pub fn write_operation(owner &Execution, stream &mut TcpStream, buffer &[]u8) Operation<Result<usize, Error>> {
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<usize, Error>> { return poll_write(waker, stream, buffer) })
+}
+pub fn write_all_operation(owner &Execution, stream &mut TcpStream, buffer &[]u8) Operation<Result<void, Error>> {
+    var offset = usize(0)
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<void, Error>> {
+        match _require_nonblocking(stream.fd) { Err(error) => { return Progress.Ready(Err(error)) }
+            Ok(value) => {} }
+        if offset == buffer.len() { return Progress.Ready(Ok(())) }
+        match poll_write(waker, stream, &buffer[offset..]) {
+            Progress.Pending => { return Progress.Pending }
+            Progress.Ready(result) => match result {
+                Err(error) => { return Progress.Ready(Err(error)) }
+                Ok(count) => {
+                    if count == usize(0) { return Progress.Ready(Err(Error{kind: ErrorKind.WriteZero, code: 0, domain: 0})) }
+                    offset = offset + count
+                    if offset == buffer.len() { return Progress.Ready(Ok(())) }
+                    _wake(waker)
+                    return Progress.Pending
+                }
+            }
+        }
+    })
+}
+pub fn poll_accept(waker &Waker, listener &mut TcpListener) Progress<Result<TcpStream, Error>> {
+    match _require_nonblocking(listener.fd) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match listener.accept() {
+        Ok(stream) => { return Progress.Ready(Ok(stream)) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    match _arm(waker, listener.fd, 1) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match listener.accept() {
+        Ok(stream) => { return Progress.Ready(Ok(stream)) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    return Progress.Pending
+}
+pub fn accept_operation(owner &Execution, listener &mut TcpListener) Operation<Result<TcpStream, Error>> {
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<TcpStream, Error>> { return poll_accept(waker, listener) })
+}
+pub fn poll_connect(waker &Waker, connecting &mut Connecting) Progress<Result<void, Error>> {
+    match connecting.poll_connected() {
+        Ok(complete) => { if complete { return Progress.Ready(Ok(())) } }
+        Err(error) => { return Progress.Ready(Err(error)) }
+    }
+    match _arm(waker, connecting.stream.fd, 2) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match connecting.poll_connected() {
+        Ok(complete) => { if complete { return Progress.Ready(Ok(())) } }
+        Err(error) => { return Progress.Ready(Err(error)) }
+    }
+    return Progress.Pending
+}
+pub fn connect_operation(owner &Execution, connecting &mut Connecting) Operation<Result<void, Error>> {
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<void, Error>> { return poll_connect(waker, connecting) })
+}
+pub fn poll_recv(waker &Waker, socket &mut UdpSocket, buffer &mut []u8) Progress<Result<RecvFrom, Error>> {
+    match _require_nonblocking(socket.fd) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match socket.recv_from(buffer) {
+        Ok(packet) => { return Progress.Ready(Ok(packet)) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    match _arm(waker, socket.fd, 1) { Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match socket.recv_from(buffer) {
+        Ok(packet) => { return Progress.Ready(Ok(packet)) }
+        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+    }
+    return Progress.Pending
+}
+pub fn recv_operation(owner &Execution, socket &mut UdpSocket, buffer &mut []u8) Operation<Result<RecvFrom, Error>> {
+    return Operation.new(owner, move fn(waker &Waker) Progress<Result<RecvFrom, Error>> { return poll_recv(waker, socket, buffer) })
+}
+pub fn Execution.wait(&self, timeout i32) Result<void, Error> {
+    if timeout < -1 { return Err(Error{kind: ErrorKind.InvalidAddress, code: 22, domain: 0}) }
+    var remaining = timeout
+    var deadline = i64(0)
+    if timeout > 0 { deadline = (try _check(_now())).value + i64(timeout) }
+    for {
+        raw := _exec_wait(self.state.native, remaining)
+        if raw.domain == 0 && raw.code == 4 {
+            if timeout > 0 {
+                now := (try _check(_now())).value
+                if now >= deadline { return Ok(()) }
+                remaining = i32(deadline - now)
+            }
+            continue
+        }
+        try _check(raw)
+        return Ok(())
+    }
+}
+pub fn Waker.wake(&self) { _wake(self) }
+
+pub fn Operation<R>.poll_with(&mut self, parent &Waker) Progress<R> {
+    if _wake_link(&self.waker, parent).code != 0 { panic("invalid nested wake association") }
+    _wake_take(&self.waker)
+    return self.poll()
+}
