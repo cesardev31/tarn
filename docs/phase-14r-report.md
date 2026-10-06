@@ -56,6 +56,14 @@ New tests:
   mistook the local variable in `task.join()` for the module. The resolver's
   unused-import warning caught it.
 
+- **The native ABI verifier assumed that all native declarations load
+  together.** That was true when they all lived in `net.tarn`. After the split, a
+  program importing only `io` (or `io` and `time`) failed with "invalid network
+  declaration ABI". The LSP showed it on opening `io.tarn`; the suite missed it
+  because every test program imported `net`. The verifier now checks each
+  loaded layer completely and requires each layer's dependencies. Regression
+  tests: `tests/native/pass/stdlib_layer_{io,time,net}_only`.
+
 ## Decisions I would defend
 
 - **`io` as the lowest layer that owns `Error`.** Every layer returns it, and
