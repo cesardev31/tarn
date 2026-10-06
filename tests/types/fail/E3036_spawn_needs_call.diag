@@ -1,0 +1,6 @@
+error[E3036]: `spawn` takes a function call
+ --> tests/types/fail/E3036_spawn_needs_call.tarn:4:15
+  |
+4 |         spawn x
+  |               ^
+

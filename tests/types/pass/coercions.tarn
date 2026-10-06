@@ -1,0 +1,22 @@
+fn sum(values &[]i64) i64 {
+    var total = 0
+    for v in values {
+        total = total + v
+    }
+    return total
+}
+
+fn read(x &i64) i64 {
+    var y = 0
+    y = y + 1
+    return y
+}
+
+fn main() {
+    var arr = [3]i64{1, 2, 3}
+    a := sum(&arr)              // &[3]i64 -> &[]i64
+    b := sum(&arr[1..])         // slicing
+    m := &mut arr[0]
+    c := read(m)                // &mut i64 -> &i64
+    print(a + b + c)
+}

@@ -1,0 +1,26 @@
+enum A {
+    Bad
+}
+
+enum B {
+    Worse
+}
+
+fn get() Result<i64, A> {
+    return Ok(1)
+}
+
+fn wrong_error() Result<i64, B> {
+    x := try get()
+    return Ok(x)
+}
+
+fn no_result() i64 {
+    x := try get()
+    return x
+}
+
+fn not_result() Result<i64, A> {
+    y := try 5
+    return Ok(y)
+}

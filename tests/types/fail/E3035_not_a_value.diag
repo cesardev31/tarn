@@ -1,0 +1,16 @@
+error[E3035]: struct `User` is not a value
+ --> tests/types/fail/E3035_not_a_value.tarn:6:10
+  |
+6 |     u := User
+  |          ^^^^
+  |
+  = help: build one with `User{...}`
+
+error[E3035]: builtin `print` is not a value
+ --> tests/types/fail/E3035_not_a_value.tarn:7:10
+  |
+7 |     p := print
+  |          ^^^^^
+  |
+  = help: call it: `print(...)`
+

@@ -1,0 +1,28 @@
+error[E3016]: `bump` needs `&mut self`, but the receiver is `&C`
+  --> tests/types/fail/E3016_borrow_mut_immutable.tarn:10:5
+   |
+10 |     c.bump()
+   |     ^ this is a `&` reference
+   |
+   = help: take a mutable reference (`&mut`) instead
+
+error[E3016]: cannot borrow `c` as mutable, because `c` is not declared with `var`
+  --> tests/types/fail/E3016_borrow_mut_immutable.tarn:15:15
+   |
+14 |     c := C{v: 0}
+   |     - declared immutable here
+15 |     r := &mut c
+   |               ^
+   |
+   = help: declare it with `var c = ...`
+
+error[E3016]: cannot borrow `c` as mutable, because `c` is not declared with `var`
+  --> tests/types/fail/E3016_borrow_mut_immutable.tarn:16:5
+   |
+14 |     c := C{v: 0}
+   |     - declared immutable here
+16 |     c.bump()
+   |     ^
+   |
+   = help: declare it with `var c = ...`
+

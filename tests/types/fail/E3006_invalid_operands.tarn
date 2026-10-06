@@ -1,0 +1,13 @@
+struct P {
+    x i64
+}
+
+fn main() {
+    a: i32 := 1
+    b: i64 := 2
+    c := a + b
+    d := true + 1
+    p := P{x: 1}
+    e := p == p
+    f := 1.5 & 2
+}

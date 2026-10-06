@@ -1,0 +1,6 @@
+interface Shape {
+    fn area(&self) f64
+}
+
+fn f(s Shape) {
+}

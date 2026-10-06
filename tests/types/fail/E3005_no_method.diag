@@ -1,0 +1,20 @@
+error[E3005]: `S` has no method `missing`
+  --> tests/types/fail/E3005_no_method.tarn:10:7
+   |
+10 |     s.missing()
+   |       ^^^^^^^
+
+error[E3005]: `new` is an associated function, not a method
+  --> tests/types/fail/E3005_no_method.tarn:11:12
+   |
+11 |     t := s.new()
+   |            ^^^
+   |
+   = help: call it on the type: `S.new(...)`
+
+error[E3005]: `{integer}` has no method `foo`
+  --> tests/types/fail/E3005_no_method.tarn:13:7
+   |
+13 |     x.foo()
+   |       ^^^
+

@@ -1,0 +1,14 @@
+struct S {
+}
+
+fn S.new() S {
+    return S{}
+}
+
+fn main() {
+    s := S.new()
+    s.missing()
+    t := s.new()
+    x := 3
+    x.foo()
+}

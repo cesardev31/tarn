@@ -17,7 +17,7 @@ fn main() {
 }
 ```
 
-Status: phase 3 (name resolution) done; next is the type checker. See [docs/roadmap.md](docs/roadmap.md).
+Status: phase 4 (type checker) done; next is the typed IR. See [docs/roadmap.md](docs/roadmap.md).
 
 ```bash
 cargo build --release

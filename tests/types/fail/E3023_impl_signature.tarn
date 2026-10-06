@@ -1,0 +1,17 @@
+interface Shape {
+    fn area(&self) f64
+    fn scale(&mut self, k f64)
+}
+
+struct Sq {
+    side f64
+}
+
+impl Shape for Sq {
+    fn area(self) i64 {
+        return 1
+    }
+
+    fn scale(&mut self, k i32) {
+    }
+}

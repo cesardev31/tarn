@@ -1,0 +1,6 @@
+== mutability
+5:17 self: &mut Counter
+9:10 c: &mut Counter
+15:9 c: Counter
+19:9 arr: [2]i64
+21:5 r: &mut Counter

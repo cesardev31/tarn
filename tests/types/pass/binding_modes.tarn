@@ -1,0 +1,48 @@
+// ADR 0018: through a reference, copy values are copied and non-copy
+// values are borrowed.
+enum Shape {
+    Circle(f64)
+    Named(string, f64)
+}
+
+struct User {
+    name string
+    age u32
+}
+
+fn describe(s &Shape) f64 {
+    match s {
+        Circle(r) => return r * r
+        Named(label, size) => {
+            print(label)
+            return size
+        }
+    }
+}
+
+fn names(users &[]User) {
+    for u in users {
+        print(u.name)
+    }
+}
+
+fn ages(values &[]u32) u32 {
+    var total: u32 = 0
+    for v in values {
+        total = total + v
+    }
+    return total
+}
+
+fn owned(s Shape) {
+    match s {
+        Circle(r) => print(r)
+        Named(label, _) => print(label)
+    }
+}
+
+fn user_name(u &User) {
+    match u {
+        User{name, age} => print(age)
+    }
+}

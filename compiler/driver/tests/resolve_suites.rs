@@ -8,84 +8,51 @@
 //!
 //! `TARN_BLESS=1 cargo test` rewrites the expected files.
 
+mod common;
+
+use common::*;
 use std::path::{Path, PathBuf};
-
-const PREFIX: &str = "../../";
-
-fn entries(kind: &str) -> Vec<PathBuf> {
-    let dir = Path::new(PREFIX).join("tests/resolve").join(kind);
-    let mut out = Vec::new();
-    for e in std::fs::read_dir(&dir).unwrap() {
-        let p = e.unwrap().path();
-        if p.is_dir() {
-            out.push(p.join("main.tarn"));
-        } else if p.extension().is_some_and(|e| e == "tarn") {
-            out.push(p);
-        }
-    }
-    out.sort();
-    out
-}
-
-fn golden(entry: &Path, ext: &str, actual: &str, failures: &mut Vec<String>) {
-    let path = entry.with_extension(ext);
-    if std::env::var_os("TARN_BLESS").is_some() {
-        if actual.is_empty() {
-            let _ = std::fs::remove_file(&path);
-        } else {
-            std::fs::write(&path, actual).unwrap();
-        }
-        return;
-    }
-    let expected = std::fs::read_to_string(&path).unwrap_or_default();
-    if expected != actual {
-        failures.push(format!("{}\n--- expected\n{expected}--- actual\n{actual}", path.display()));
-    }
-}
-
-fn run(entry: &Path) -> (String, String, bool) {
-    let res = tarn_driver::check(entry).unwrap();
-    let map = &res.program.sources;
-    let diags: String = res.diagnostics.iter().map(|d| d.render(map) + "\n").collect::<String>().replace(PREFIX, "");
-    let dump = res.resolved.as_ref().map(|r| tarn_resolve::dump_resolution(r, map)).unwrap_or_default();
-    (dump, diags, res.has_errors())
-}
 
 #[test]
 fn resolve_pass_suite() {
-    let files = entries("pass");
+    let files = entries("resolve", "pass");
     assert!(files.len() >= 10, "{}", files.len());
     let mut failures = Vec::new();
     for f in &files {
-        let (dump, diags, errors) = run(f);
-        if errors {
-            failures.push(format!("{} should resolve without errors:\n{diags}", f.display()));
+        let o = run(f);
+        // Type errors are fine here: this suite is about names.
+        if o.codes.iter().any(|c| c.starts_with("E1") || c.starts_with("E2")) {
+            failures.push(format!("{} should resolve without errors:\n{}", f.display(), o.diags));
             continue;
         }
-        golden(f, "res", &dump, &mut failures);
-        golden(f, "diag", &diags, &mut failures);
+        golden(f, "res", &o.resolution, &mut failures);
+        let name_diags: String = o.diags.split("\n\n").filter(|d| d.contains("[E2") || d.contains("[W2")).map(|d| format!("{d}\n\n")).collect();
+        golden(f, "diag", &name_diags, &mut failures);
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 #[test]
 fn resolve_fail_suite() {
-    let files = entries("fail");
+    let files = entries("resolve", "fail");
     assert!(files.len() >= 15, "{}", files.len());
     let mut failures = Vec::new();
     for f in &files {
-        let (_, diags, errors) = run(f);
-        if !errors {
+        let o = run(f);
+        if !o.codes.iter().any(|c| c.starts_with("E2")) {
             failures.push(format!("{} should fail to resolve", f.display()));
             continue;
         }
-        golden(f, "diag", &diags, &mut failures);
+        golden(f, "diag", &o.diags, &mut failures);
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Every example resolves without errors; the only warnings are the ones the
-/// examples document on purpose.
+/// Examples that call string methods only the future stdlib provides.
+const NEEDS_STDLIB: &[&str] = &["11_result.tarn", "12_try.tarn", "27_shadowing.tarn"];
+
+/// Every example checks without errors (except missing stdlib methods in the
+/// examples listed above); the only warnings are the documented ones.
 #[test]
 fn examples_resolve() {
     let mut failures = Vec::new();
@@ -103,6 +70,10 @@ fn examples_resolve() {
         for d in &res.diagnostics {
             let line = format!("{} {}", f.file_name().unwrap().to_string_lossy(), d.code);
             if d.severity == tarn_diagnostics::Severity::Error {
+                // Examples that need the standard library (not built yet).
+                if d.code == "E3005" && NEEDS_STDLIB.iter().any(|n| line.starts_with(n)) {
+                    continue;
+                }
                 failures.push(d.render(&res.program.sources));
             } else {
                 warnings.push(line);

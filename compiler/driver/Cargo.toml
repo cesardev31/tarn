@@ -9,3 +9,4 @@ tarn_ast = { path = "../ast" }
 tarn_diagnostics = { path = "../diagnostics" }
 tarn_parser = { path = "../parser" }
 tarn_resolve = { path = "../resolve" }
+tarn_types = { path = "../types" }

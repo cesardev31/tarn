@@ -19,6 +19,8 @@ pub struct CheckResult {
     pub program: Program,
     /// `None` when the parse had errors (resolution is skipped).
     pub resolved: Option<Resolved>,
+    /// `None` when parsing or resolution had errors.
+    pub typed: Option<tarn_types::Typed>,
     /// Sorted by file, then position.
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -65,12 +67,20 @@ pub fn load(entry: &Path) -> Result<(Program, Vec<Diagnostic>), String> {
 pub fn check(entry: &Path) -> Result<CheckResult, String> {
     let (program, mut diagnostics) = load(entry)?;
     let mut resolved = None;
-    if !diagnostics.iter().any(|d| d.severity == Severity::Error) {
+    let mut typed = None;
+    let errors = |ds: &[Diagnostic]| ds.iter().any(|d| d.severity == Severity::Error);
+    if !errors(&diagnostics) {
         let inputs: Vec<ModuleInput> = program.modules.iter().map(|(n, m)| ModuleInput { name: n.clone(), ast: m }).collect();
         let (r, d) = tarn_resolve::resolve(&inputs);
         diagnostics.extend(d);
+        // Types only on name-clean programs, for the same reason as above.
+        if !errors(&diagnostics) {
+            let (t, d) = tarn_types::check(&inputs, &r);
+            diagnostics.extend(d);
+            typed = Some(t);
+        }
         resolved = Some(r);
     }
     diagnostics.sort_by_key(|d| d.primary_span().map(|s| (s.file, s.start)));
-    Ok(CheckResult { program, resolved, diagnostics })
+    Ok(CheckResult { program, resolved, typed, diagnostics })
 }

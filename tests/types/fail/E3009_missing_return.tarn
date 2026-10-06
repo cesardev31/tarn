@@ -1,0 +1,17 @@
+fn sign(x i64) i64 {
+    if x > 0 {
+        return 1
+    }
+}
+
+fn loop_with_break() i64 {
+    for {
+        break
+    }
+}
+
+fn closure() {
+    f := fn(x i64) i64 {
+        print(x)
+    }
+}

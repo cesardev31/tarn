@@ -1,0 +1,8 @@
+error[E3034]: ranges can only be used in `for` loops and slicing
+ --> tests/types/fail/E3034_range_outside_for.tarn:2:10
+  |
+2 |     r := 0..10
+  |          ^^^^^
+  |
+  = note: ranges are not values in v0
+

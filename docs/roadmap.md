@@ -9,9 +9,9 @@ tested and documented.
 | 1 | Lexer | **done** |
 | 2 | Parser + AST | **done** |
 | 3 | Name resolution (incl. shadowing rules, ADR 0009) | **done** |
-| 4 | Types (primitives, local inference) | next |
-| 5 | Diagnostics (text + JSON, golden tests) | partially (infra done) |
-| 6 | Typed IR | |
+| 4 | Types (primitives, structs, enums, generics, interfaces, mutability) | **done** |
+| 5 | Diagnostics (text + JSON, golden tests) | done for phases 1–4 |
+| 6 | Typed IR | next |
 | 7 | Cranelift backend, `tarn build`/`run` | |
 | 8 | Structs | |
 | 9 | Ownership (moves) | |
@@ -34,6 +34,8 @@ before borrowing, generics or a large stdlib.
 ## Open design questions
 
 - Value-producing `if` (currently: no).
+- Equality for structs/enums (needs an `Equal` interface).
+- Error conversion in `try` (currently exact match only).
 - Exact iteration protocol for `for x in xs`.
 - `try` error conversion (`Error.from`) vs. explicit mapping.
 - Shared vs. monomorphized generics — decide with benchmarks.

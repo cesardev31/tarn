@@ -1,0 +1,16 @@
+error[E3022]: `Rock` does not implement `Shape`
+  --> tests/types/fail/E3022_bound_not_satisfied.tarn:14:10
+   |
+14 |     t := total(&r)
+   |          ^^^^^^^^^ required by a bound `Shape` here
+   |
+   = help: add `impl Shape for Rock` in the module of `Shape` or of `Rock`
+
+error[E3022]: `i64` does not implement `Shape`
+  --> tests/types/fail/E3022_bound_not_satisfied.tarn:15:10
+   |
+15 |     n := total(&5)
+   |          ^^^^^^^^^ required by a bound `Shape` here
+   |
+   = help: only structs and enums can implement interfaces; wrap the `i64` in a struct (ADR 0016)
+

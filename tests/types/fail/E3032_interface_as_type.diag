@@ -1,0 +1,8 @@
+error[E3032]: interface `Shape` cannot be used as a type directly
+ --> tests/types/fail/E3032_interface_as_type.tarn:5:8
+  |
+5 | fn f(s Shape) {
+  |        ^^^^^
+  |
+  = help: use `any Shape` for dynamic dispatch, or a generic parameter `<T: Shape>`
+

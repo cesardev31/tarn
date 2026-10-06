@@ -1,0 +1,12 @@
+== interfaces
+14:13 self: &Square
+20:13 self: &Circle
+25:20 items: &[]S
+26:9 sum: f64
+27:9 s: &S
+33:12 s: &any Shape
+38:5 sq: Square
+39:5 circles: [2]Circle
+40:5 a: f64
+41:5 b: f64
+42:5 c: f64

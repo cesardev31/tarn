@@ -1,0 +1,10 @@
+== copy_types
+11:14 self: Point
+11:20 other: Point
+16:5 a: Point
+17:5 b: Point
+18:5 c: Point
+19:5 r: &Point
+20:5 d: Point
+21:5 dir: Dir
+22:5 e: Dir

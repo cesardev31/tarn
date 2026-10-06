@@ -1,0 +1,20 @@
+error[E3020]: variant `Shape.Circle` has 1 field, but the pattern has 2
+ --> tests/types/fail/E3020_pattern_mismatch.tarn:8:9
+  |
+8 |         Circle(r, x) => print(r)
+  |         ^^^^^^^^^^^^
+
+error[E3020]: variant `Shape.Rect` has 2 fields, but the pattern has 0
+ --> tests/types/fail/E3020_pattern_mismatch.tarn:9:9
+  |
+9 |         Rect => print(0)
+  |         ^^^^
+
+error[E3020]: a variant pattern cannot match a value of type `i64`
+  --> tests/types/fail/E3020_pattern_mismatch.tarn:13:9
+   |
+13 |         Some(x) => print(x)
+   |         ^^^^^^^
+   |
+   = note: only enum values have variants
+

@@ -1,0 +1,32 @@
+error[E3006]: cannot apply `+` to `i32` and `i64`
+ --> tests/types/fail/E3006_invalid_operands.tarn:8:10
+  |
+8 |     c := a + b
+  |          ^^^^^
+  |
+  = note: both operands must have the same type; numbers never convert implicitly
+
+error[E3006]: cannot apply `+` to `bool` and `{integer}`
+ --> tests/types/fail/E3006_invalid_operands.tarn:9:10
+  |
+9 |     d := true + 1
+  |          ^^^^^^^^
+  |
+  = note: arithmetic needs two numbers of the same type
+
+error[E3006]: cannot apply `==` to `P` and `P`
+  --> tests/types/fail/E3006_invalid_operands.tarn:11:10
+   |
+11 |     e := p == p
+   |          ^^^^^^
+   |
+   = note: v0 compares only numbers, strings and booleans (`==`/`!=`); use `match` for enums
+
+error[E3006]: cannot apply `&` to `{float}` and `{integer}`
+  --> tests/types/fail/E3006_invalid_operands.tarn:12:10
+   |
+12 |     f := 1.5 & 2
+   |          ^^^^^^^
+   |
+   = note: bitwise operators need two integers of the same type
+

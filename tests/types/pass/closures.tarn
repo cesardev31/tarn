@@ -1,0 +1,13 @@
+fn apply(f fn(i64) i64, x i64) i64 {
+    return f(x)
+}
+
+fn main() {
+    k := 3
+    a := apply(fn(x) i64 { return x * k }, 2)
+    double := fn(y i64) i64 {
+        return y * 2
+    }
+    b := double(a)
+    print(b)
+}

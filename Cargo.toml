@@ -6,6 +6,7 @@ members = [
     "compiler/ast",
     "compiler/parser",
     "compiler/resolve",
+    "compiler/types",
     "compiler/driver",
     "tools/cli",
 ]

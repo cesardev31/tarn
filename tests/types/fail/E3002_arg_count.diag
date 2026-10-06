@@ -1,0 +1,12 @@
+error[E3002]: `add` takes 2 arguments, but 1 was given
+ --> tests/types/fail/E3002_arg_count.tarn:6:10
+  |
+6 |     x := add(1)
+  |          ^^^^^^
+
+error[E3002]: `add` takes 2 arguments, but 3 were given
+ --> tests/types/fail/E3002_arg_count.tarn:7:10
+  |
+7 |     y := add(1, 2, 3)
+  |          ^^^^^^^^^^^^
+

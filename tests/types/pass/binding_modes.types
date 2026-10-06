@@ -1,0 +1,16 @@
+== binding_modes
+13:13 s: &Shape
+15:16 r: f64
+16:15 label: &string
+16:22 size: f64
+23:10 users: &[]User
+24:9 u: &User
+29:9 values: &[]u32
+30:9 total: u32
+31:9 v: u32
+37:10 s: Shape
+39:16 r: f64
+40:15 label: string
+44:14 u: &User
+46:14 name: &string
+46:20 age: u32

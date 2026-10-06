@@ -155,6 +155,8 @@ impl Infer {
         let ok = match (self.kind(v), &t) {
             (VarKind::General, _) => true,
             (VarKind::Int, Ty::Int(_)) | (VarKind::Float, Ty::Float(_)) => true,
+            // Two literal variables of the same kind.
+            (k, Ty::Var(w)) => self.kind(*w) == k,
             (_, Ty::Opaque | Ty::Error | Ty::Never) => true,
             _ => false,
         };

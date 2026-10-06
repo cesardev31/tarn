@@ -1,0 +1,5 @@
+fn main() {
+    a: u32 := 5
+    b := -a
+    c := -true
+}

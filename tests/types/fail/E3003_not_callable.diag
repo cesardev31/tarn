@@ -1,0 +1,14 @@
+error[E3003]: struct `User` cannot be called
+ --> tests/types/fail/E3003_not_callable.tarn:6:10
+  |
+6 |     u := User("ana")
+  |          ^^^^
+  |
+  = help: build a value with `User{field: value}`, or call an associated function like `User.new(...)`
+
+error[E3003]: a value of type `{integer}` cannot be called
+ --> tests/types/fail/E3003_not_callable.tarn:8:10
+  |
+8 |     m := n(1)
+  |          ^
+

@@ -1,0 +1,24 @@
+error[E3025]: literal `256` does not fit in `u8`
+ --> tests/types/fail/E3025_literal_range.tarn:2:14
+  |
+2 |     a: u8 := 256
+  |              ^^^
+  |
+  = note: `u8` holds 0 to 255
+
+error[E3025]: literal `-129` does not fit in `i8`
+ --> tests/types/fail/E3025_literal_range.tarn:3:14
+  |
+3 |     b: i8 := -129
+  |              ^^^^
+  |
+  = note: `i8` holds -128 to 127
+
+error[E3025]: literal `-1` does not fit in `u32`
+ --> tests/types/fail/E3025_literal_range.tarn:4:15
+  |
+4 |     c: u32 := -1
+  |               ^^
+  |
+  = note: `u32` holds 0 to 4294967295
+

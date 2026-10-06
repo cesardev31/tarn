@@ -1,0 +1,9 @@
+struct User {
+    name string
+}
+
+fn main() {
+    u := User("ana")
+    n := 3
+    m := n(1)
+}

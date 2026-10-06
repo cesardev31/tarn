@@ -1,0 +1,7 @@
+fn f(n usize) {
+    a: [n]i64 := g()
+}
+
+fn g() [2]i64 {
+    return [2]i64{1, 2}
+}

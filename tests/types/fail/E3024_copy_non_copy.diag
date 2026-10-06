@@ -1,0 +1,25 @@
+error[E3024]: `copy` type `Named` contains `string`, which is not copy
+ --> tests/types/fail/E3024_copy_non_copy.tarn:1:13
+  |
+1 | copy struct Named {
+  |             ^^^^^
+  |
+  = help: remove `copy`, or use only copy types (numbers, bool, `&T`, copy structs and enums)
+
+error[E3024]: `copy` type `Token` contains `string`, which is not copy
+ --> tests/types/fail/E3024_copy_non_copy.tarn:5:11
+  |
+5 | copy enum Token {
+  |           ^^^^^
+  |
+  = help: remove `copy`, or use only copy types (numbers, bool, `&T`, copy structs and enums)
+
+error[E3024]: `copy` type `Boxed` contains `T`, which is not copy
+  --> tests/types/fail/E3024_copy_non_copy.tarn:10:13
+   |
+10 | copy struct Boxed<T> {
+   |             ^^^^^
+   |
+   = note: type parameters are never copy in v0
+   = help: remove `copy`, or use only copy types (numbers, bool, `&T`, copy structs and enums)
+

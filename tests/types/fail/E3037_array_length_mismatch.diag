@@ -1,0 +1,8 @@
+error[E3037]: array of length 3 has 2 elements
+ --> tests/types/fail/E3037_array_length_mismatch.tarn:2:10
+  |
+2 |     a := [3]i64{1, 2}
+  |          ^^^^^^^^^^^^
+  |
+  = help: write `[]T{...}` to take the length from the elements
+

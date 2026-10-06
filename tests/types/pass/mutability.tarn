@@ -1,0 +1,24 @@
+struct Counter {
+    value i64
+}
+
+fn Counter.bump(&mut self) {
+    self.value = self.value + 1
+}
+
+fn reset(c &mut Counter) {
+    c.value = 0
+    c.bump()
+}
+
+fn main() {
+    var c = Counter{value: 1}
+    c.bump()
+    c.value = 10
+    reset(&mut c)
+    var arr = [2]i64{1, 2}
+    arr[0] = 5
+    r := &mut c
+    r.bump()
+    r.value = 3
+}

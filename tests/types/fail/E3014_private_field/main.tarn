@@ -1,0 +1,7 @@
+import "account"
+
+fn main() {
+    a := account.Account{owner: "ana", balance: 10}
+    print(a.balance)
+    print(a.owner)
+}

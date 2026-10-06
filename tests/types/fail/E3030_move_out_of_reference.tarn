@@ -1,0 +1,11 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.into_data(self) string {
+    return self.data
+}
+
+fn take(b &Buffer) string {
+    return b.into_data()
+}

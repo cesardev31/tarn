@@ -1,0 +1,7 @@
+fn main() {
+    x := 5
+    for i in x {
+    }
+    for j in 0.. {
+    }
+}

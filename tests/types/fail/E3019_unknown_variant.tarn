@@ -1,0 +1,12 @@
+enum Dir {
+    North
+    South
+}
+
+fn f(d Dir) {
+    match d {
+        North => print(1)
+        Sout => print(2)
+        _ => print(3)
+    }
+}

@@ -1,0 +1,6 @@
+error[E3008]: cannot index into a value of type `{integer}`
+ --> tests/types/fail/E3008_not_indexable.tarn:3:10
+  |
+3 |     y := x[0]
+  |          ^
+

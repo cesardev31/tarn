@@ -1,0 +1,12 @@
+error[E3007]: cannot negate an unsigned `u32`
+ --> tests/types/fail/E3007_negate_unsigned.tarn:3:10
+  |
+3 |     b := -a
+  |          ^^
+
+error[E3007]: cannot negate a value of type `bool`
+ --> tests/types/fail/E3007_negate_unsigned.tarn:4:10
+  |
+4 |     c := -true
+  |          ^^^^^
+

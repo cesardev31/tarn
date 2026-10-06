@@ -1,0 +1,21 @@
+error[E3011]: missing field `age` in `User`
+ --> tests/types/fail/E3011_E3013_struct_literals.tarn:7:10
+  |
+7 |     a := User{name: "a"}
+  |          ^^^^^^^^^^^^^^^
+  |
+  = note: every field must be given; there are no default values
+
+error[E3012]: struct `User` has no field `email`
+ --> tests/types/fail/E3011_E3013_struct_literals.tarn:8:34
+  |
+8 |     b := User{name: "a", age: 1, email: "x"}
+  |                                  ^^^^^
+
+error[E3013]: field `age` is given twice
+ --> tests/types/fail/E3011_E3013_struct_literals.tarn:9:34
+  |
+9 |     c := User{name: "a", age: 1, age: 2}
+  |                          --- first given here
+  |                                  ^^^
+

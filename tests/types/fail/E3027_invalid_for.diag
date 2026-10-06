@@ -1,0 +1,14 @@
+error[E3027]: cannot iterate over `{integer}`
+ --> tests/types/fail/E3027_invalid_for.tarn:3:14
+  |
+3 |     for i in x {
+  |              ^
+  |
+  = note: v0 iterates over ranges `a..b`, arrays and `&` / `&mut` arrays and slices
+
+error[E3027]: a `for` range needs a start and an end
+ --> tests/types/fail/E3027_invalid_for.tarn:5:14
+  |
+5 |     for j in 0.. {
+  |              ^^^
+

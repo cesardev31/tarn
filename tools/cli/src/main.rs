@@ -11,6 +11,7 @@ usage:
     tarn ast <file.tarn>             parse and print the syntax tree
     tarn check <file.tarn> [--json]  lex, parse and resolve names; report diagnostics
     tarn resolve <file.tarn>         print what every name resolves to
+    tarn types <file.tarn>           print the type of every local and parameter
     tarn version                     print the compiler version
 
 planned: build, run, test, check, fmt, clean, cache
@@ -23,6 +24,7 @@ fn main() -> ExitCode {
         Some("ast") => cmd_ast(&args[1..]),
         Some("check") => cmd_check(&args[1..], false),
         Some("resolve") => cmd_check(&args[1..], true),
+        Some("types") => cmd_types(&args[1..]),
         Some("version" | "--version" | "-V") => {
             println!("tarn {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -131,6 +133,28 @@ fn cmd_check(args: &[String], dump: bool) -> ExitCode {
         } else {
             eprint!("{}", d.render(map));
         }
+    }
+    if res.has_errors() { ExitCode::from(1) } else { ExitCode::SUCCESS }
+}
+
+fn cmd_types(args: &[String]) -> ExitCode {
+    let Some(path) = args.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!("error: missing file\n\nusage: tarn types <file.tarn>");
+        return ExitCode::from(2);
+    };
+    let res = match tarn_driver::check(std::path::Path::new(path)) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error[E9001]: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let map = &res.program.sources;
+    if let (Some(r), Some(t)) = (&res.resolved, &res.typed) {
+        print!("{}", tarn_types::dump_types(t, r, map));
+    }
+    for d in &res.diagnostics {
+        eprint!("{}", d.render(map));
     }
     if res.has_errors() { ExitCode::from(1) } else { ExitCode::SUCCESS }
 }

@@ -1,0 +1,17 @@
+struct C {
+    v i64
+}
+
+fn C.bump(&mut self) {
+    self.v = self.v + 1
+}
+
+fn touch(c &C) {
+    c.bump()
+}
+
+fn main() {
+    c := C{v: 0}
+    r := &mut c
+    c.bump()
+}

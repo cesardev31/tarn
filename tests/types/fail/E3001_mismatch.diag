@@ -1,0 +1,28 @@
+error[E3001]: expected `i32`, found `string`
+ --> tests/types/fail/E3001_mismatch.tarn:6:15
+  |
+6 |     a: i32 := "text"
+  |               ^^^^^^ this is `string`
+
+error[E3001]: expected `i64`, found `bool`
+ --> tests/types/fail/E3001_mismatch.tarn:7:15
+  |
+7 |     b := half(true)
+  |               ^^^^ this is `bool`
+
+error[E3001]: expected `i64`, found `i32`
+ --> tests/types/fail/E3001_mismatch.tarn:9:15
+  |
+9 |     d: i64 := c
+  |               ^ this is `i32`
+  |
+  = help: numeric types never convert implicitly; write `i64(value)`
+
+error[E3001]: expected `&i64`, found `i64`
+  --> tests/types/fail/E3001_mismatch.tarn:10:16
+   |
+10 |     e: &i64 := d
+   |                ^ this is `i64`
+   |
+   = help: borrow it with `&`
+

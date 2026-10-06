@@ -1,0 +1,14 @@
+error[E3014]: field `balance` of `Account` is private
+ --> tests/types/fail/E3014_private_field/main.tarn:4:40
+  |
+4 |     a := account.Account{owner: "ana", balance: 10}
+  |                                        ^^^^^^^
+
+error[E3014]: field `balance` of `Account` is private
+ --> tests/types/fail/E3014_private_field/main.tarn:5:13
+  |
+5 |     print(a.balance)
+  |             ^^^^^^^
+  |
+  = help: mark the field `pub`, or add a method that exposes it
+

@@ -1,0 +1,26 @@
+error[E3009]: function `sign` may end without returning `i64`
+ --> tests/types/fail/E3009_missing_return.tarn:5:1
+  |
+1 | fn sign(x i64) i64 {
+  |                --- returns `i64`
+5 | }
+  | ^ can reach the end here
+  |
+  = help: add a `return` on every path, or end with `panic(...)`
+
+error[E3009]: function `loop_with_break` may end without returning `i64`
+  --> tests/types/fail/E3009_missing_return.tarn:11:1
+   |
+ 7 | fn loop_with_break() i64 {
+   |                      --- returns `i64`
+11 | }
+   | ^ can reach the end here
+   |
+   = help: add a `return` on every path, or end with `panic(...)`
+
+error[E3009]: closure may end without returning `i64`
+  --> tests/types/fail/E3009_missing_return.tarn:16:5
+   |
+16 |     }
+   |     ^
+

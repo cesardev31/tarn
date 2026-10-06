@@ -97,6 +97,50 @@ stream them:
 | E2016 | `not_a_struct` | expected a struct, found variant `E.V` |
 | E2017 | `variant_name_case` | variant `v` must start with an uppercase letter |
 | E2018 | `expected_variant` | expected a variant, found `f` |
+| E2019 | `owner_arity` | `Pair` has 2 type parameters, but the method declares 0 |
+| E2020 | `duplicate_impl` | `I` is implemented more than once for `T` |
+| E2021 | `owner_binder_bound` | bounds are not allowed on method owner parameters |
+| E2022 | `specialized_impl` | impl/method type arguments must be fresh parameter names |
+| E2023 | `impl_coherence` | `impl I for T` must be in the module of `I` or `T` |
+| E2024 | `invalid_impl_target` | interfaces can only be implemented for structs and enums |
+| E2025 | `type_arity` | `Pair` takes 2 type arguments, but 1 was given |
+| E3001 | `type_mismatch` | expected `A`, found `B` |
+| E3002 | `wrong_arg_count` | `f` takes 2 arguments, but 1 was given |
+| E3003 | `not_callable` | struct `User` cannot be called |
+| E3004 | `no_field` | `User` has no field `x` |
+| E3005 | `no_method` | `T` has no method `m` |
+| E3006 | `invalid_operands` | cannot apply `+` to `i32` and `i64` |
+| E3007 | `invalid_unary` | cannot negate an unsigned `u32` |
+| E3008 | `not_indexable` | cannot index into a value of type `T` |
+| E3009 | `missing_return` | function `f` may end without returning `T` |
+| E3010 | `cannot_infer` | cannot infer the type of `x` |
+| E3011 | `missing_fields` | missing field `age` in `User` |
+| E3012 | `unknown_field` | struct `User` has no field `x` |
+| E3013 | `duplicate_field_init` | field `x` is given twice |
+| E3014 | `private_field` | field `x` of `T` is private |
+| E3015 | `assign_immutable` | cannot assign to `x`, because `x` is not declared with `var` |
+| E3016 | `borrow_mut_immutable` | cannot borrow `x` as mutable, because `x` is not declared with `var` |
+| E3017 | `try_mismatch` | `try` would return an error of type `A` from a function whose error type is `B` |
+| E3018 | `non_exhaustive_match` | `match` does not cover `V` |
+| E3019 | `unknown_variant` | enum `E` has no variant `V` |
+| E3020 | `pattern_mismatch` | variant `E.V` has 1 field, but the pattern has 2 |
+| E3022 | `bound_not_satisfied` | `T` does not implement `I` |
+| E3023 | `impl_signature_mismatch` | method `m` does not match its declaration in `I` |
+| E3024 | `copy_with_non_copy` | `copy` type `T` contains `string`, which is not copy |
+| E3025 | `literal_out_of_range` | literal `256` does not fit in `u8` |
+| E3026 | `not_printable` | `print` cannot print a value of type `T` |
+| E3027 | `invalid_for_iter` | cannot iterate over `T` |
+| E3028 | `return_value_mismatch` | this function returns `void`, but a value is returned |
+| E3029 | `invalid_conversion` | cannot convert `string` to `u64` |
+| E3030 | `move_out_of_reference` | `m` takes `self` by value, but only a reference is available |
+| E3031 | `extern_call_outside_unsafe` | calling the extern function `f` requires `unsafe` |
+| E3032 | `interface_as_type` | interface `I` cannot be used as a type directly |
+| E3033 | `array_length` | array length must be an integer literal |
+| E3034 | `range_outside_for` | ranges can only be used in `for` loops and slicing |
+| E3035 | `not_a_value` | struct `User` is not a value |
+| E3036 | `spawn_needs_call` | `spawn` takes a function call |
+| E3037 | `array_length_mismatch` | array of length 3 has 2 elements |
+| E3038 | `variant_needs_args` | variant `E.V` takes 1 value |
 | W2001 | `confusing_shadow` | `x` is shadowed in an inner scope and used again after it |
 | W2002 | `shadows_item` | `x` shadows the builtin function `x` |
 | W2003 | `unused_import` | unused import `m` |

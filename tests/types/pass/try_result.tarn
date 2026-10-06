@@ -1,0 +1,22 @@
+enum ParseError {
+    Empty
+    Bad(string)
+}
+
+fn digit(c u8) Result<u8, ParseError> {
+    if c < 48 {
+        return Err(ParseError.Empty)
+    }
+    return Ok(c - 48)
+}
+
+fn two(a u8, b u8) Result<u8, ParseError> {
+    x := try digit(a)
+    y := try digit(b)
+    return Ok(x * 10 + y)
+}
+
+fn maybe(v Option<i64>) Option<i64> {
+    n := try v
+    return Some(n + 1)
+}

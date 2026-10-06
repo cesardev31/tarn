@@ -14,8 +14,8 @@ Source ─▶ Lexer ─▶ Parser ─▶ AST ─▶ Resolve ─▶ Types ─▶ 
 | `compiler/ast` | `tarn_ast` | syntax tree with spans + `NodeId`s, S-expr dump | done (v0) |
 | `compiler/parser` | `tarn_parser` | recursive descent + precedence climbing, error recovery | done (v0) |
 | `compiler/resolve` | `tarn_resolve` | scopes, symbols, `NodeId` side tables (docs/resolution.md) | done (v0) |
+| `compiler/types` | `tarn_types` | type checking, local inference, mutability, exhaustiveness (docs/types.md) | done (v0) |
 | `compiler/driver` | `tarn_driver` | load modules from disk, run phases, sort diagnostics | done (v0) |
-| `compiler/types` | `tarn_types` | type checking, local inference | planned |
 | `compiler/ir` | `tarn_ir` | typed CFG IR | planned |
 | `compiler/ownership` | `tarn_ownership` | move/borrow analysis on IR | planned |
 | `compiler/backend` | `tarn_backend` | IR ─▶ Cranelift ─▶ object | planned |

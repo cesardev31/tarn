@@ -1,0 +1,16 @@
+interface Shape {
+    fn area(&self) f64
+}
+
+struct Rock {
+}
+
+fn total<S: Shape>(s &S) f64 {
+    return s.area()
+}
+
+fn main() {
+    r := Rock{}
+    t := total(&r)
+    n := total(&5)
+}

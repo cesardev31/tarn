@@ -1,0 +1,16 @@
+error[E3026]: `print` cannot print a value of type `P`
+ --> tests/types/fail/E3026_not_printable.tarn:7:11
+  |
+7 |     print(p)
+  |           ^
+  |
+  = note: in v0, `print` accepts booleans, numbers and strings
+
+error[E3026]: `print` cannot print a value of type `Option<i64>`
+ --> tests/types/fail/E3026_not_printable.tarn:8:11
+  |
+8 |     print(Some(1))
+  |           ^^^^^^^
+  |
+  = note: in v0, `print` accepts booleans, numbers and strings
+

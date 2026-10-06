@@ -12,6 +12,7 @@ dependencies = [
  "tarn_lexer",
  "tarn_parser",
  "tarn_resolve",
+ "tarn_types",
 ]
 
 [[package]]
@@ -33,6 +34,7 @@ dependencies = [
  "tarn_diagnostics",
  "tarn_parser",
  "tarn_resolve",
+ "tarn_types",
 ]
 
 [[package]]
@@ -58,4 +60,13 @@ dependencies = [
  "tarn_ast",
  "tarn_diagnostics",
  "tarn_parser",
+]
+
+[[package]]
+name = "tarn_types"
+version = "0.0.1"
+dependencies = [
+ "tarn_ast",
+ "tarn_diagnostics",
+ "tarn_resolve",
 ]

@@ -1,0 +1,7 @@
+fn nothing() {
+    return 5
+}
+
+fn something() i64 {
+    return
+}

@@ -1,0 +1,16 @@
+error[E3038]: variant `Shape.Circle` takes 1 value
+ --> tests/types/fail/E3038_variant_needs_args.tarn:6:10
+  |
+6 |     s := Shape.Circle
+  |          ^^^^^^^^^^^^
+  |
+  = help: write `Shape.Circle(...)`
+
+error[E3038]: variant `Some` takes 1 value
+ --> tests/types/fail/E3038_variant_needs_args.tarn:7:10
+  |
+7 |     t := Some
+  |          ^^^^
+  |
+  = help: write `Some(...)`
+

@@ -125,7 +125,8 @@ Compound:
 
 There is no `null`. Absence is `Option<T>`.
 
-Numeric conversions are always explicit; conversions are written `u64(x)` (checked: panics if the value does not fit,
+Integer literals take the integer type their context requires and default to
+`i64`; float literals default to `f64`. Numeric conversions are always explicit; conversions are written `u64(x)` (checked: panics if the value does not fit,
 in all build profiles) or `u64.wrap(x)` (wrapping). Integer arithmetic overflow panics in
 both debug and release (same safety in every profile).
 
@@ -272,8 +273,9 @@ fn read_config(path &string) Result<Config, Error> {
 ```
 
 `try expr` evaluates `expr`; on `Err(e)` (or `None`) it returns early from the
-enclosing function, converting the error with `Error.from` when the types
-differ (provisional). `try` is a prefix keyword rather than a postfix `?`
+enclosing function. In v0 the error type of `expr` must be exactly the
+function's error type: there is no automatic conversion (E3017); convert
+explicitly with `match`. Automatic conversion is an open question. `try` is a prefix keyword rather than a postfix `?`
 because it is visible at the start of the line, reads the same to people and
 models, and makes control flow greppable. See ADR 0005.
 

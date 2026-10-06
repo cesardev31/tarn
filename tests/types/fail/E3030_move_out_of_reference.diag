@@ -1,0 +1,8 @@
+error[E3030]: `into_data` takes `self` by value, but only a reference to `Buffer` is available
+  --> tests/types/fail/E3030_move_out_of_reference.tarn:10:12
+   |
+10 |     return b.into_data()
+   |            ^
+   |
+   = note: `Buffer` is not a copy type, so it cannot be moved out of a reference
+

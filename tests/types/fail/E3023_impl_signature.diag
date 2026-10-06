@@ -1,0 +1,21 @@
+error[E3023]: method `area` does not match its declaration in `Shape`
+  --> tests/types/fail/E3023_impl_signature.tarn:11:8
+   |
+ 2 |     fn area(&self) f64
+   |        ---- declared here
+11 |     fn area(self) i64 {
+   |        ^^^^
+   |
+   = note: receiver is `self`, the interface declares `&self`
+   = note: returns `i64`, the interface declares `f64`
+
+error[E3023]: method `scale` does not match its declaration in `Shape`
+  --> tests/types/fail/E3023_impl_signature.tarn:15:8
+   |
+ 3 |     fn scale(&mut self, k f64)
+   |        ----- declared here
+15 |     fn scale(&mut self, k i32) {
+   |        ^^^^^
+   |
+   = note: parameter 1 is `i32`, the interface declares `f64`
+

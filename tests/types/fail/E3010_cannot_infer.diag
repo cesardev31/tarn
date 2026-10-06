@@ -1,0 +1,16 @@
+error[E3010]: cannot infer the type of `nothing`
+ --> tests/types/fail/E3010_cannot_infer.tarn:2:5
+  |
+2 |     nothing := None
+  |     ^^^^^^^ inferred so far: `Option<_>`
+  |
+  = help: annotate it: `nothing: <type> := ...`
+
+error[E3010]: cannot infer the type of closure parameter `x`
+ --> tests/types/fail/E3010_cannot_infer.tarn:3:13
+  |
+3 |     f := fn(x) {
+  |             ^
+  |
+  = help: annotate it: `fn(x T) ...`
+

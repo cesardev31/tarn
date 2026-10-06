@@ -1,0 +1,12 @@
+struct User {
+    name string
+    age u32
+}
+
+fn main() {
+    u := User{name: "a", age: 1}
+    print(u.nme)
+    print(u.email)
+    x := 3
+    print(x.value)
+}

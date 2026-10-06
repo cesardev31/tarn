@@ -1,0 +1,18 @@
+struct P {
+    x i64
+}
+
+fn set(p &P, n i64) {
+    p.x = n
+    n = 3
+}
+
+fn main() {
+    x := 10
+    x = 20
+    p := P{x: 1}
+    p.x = 2
+    for i in 0..3 {
+        i = 5
+    }
+}

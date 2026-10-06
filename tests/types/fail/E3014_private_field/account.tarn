@@ -1,0 +1,4 @@
+pub struct Account {
+    pub owner string
+    balance i64
+}

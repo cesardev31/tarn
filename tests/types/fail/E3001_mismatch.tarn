@@ -1,0 +1,11 @@
+fn half(x i64) i64 {
+    return x / 2
+}
+
+fn main() {
+    a: i32 := "text"
+    b := half(true)
+    c: i32 := 1
+    d: i64 := c
+    e: &i64 := d
+}

@@ -1,0 +1,22 @@
+error[E3004]: `User` has no field `nme`
+ --> tests/types/fail/E3004_no_field.tarn:8:13
+  |
+8 |     print(u.nme)
+  |             ^^^
+  |
+  = help: did you mean `name`?
+
+error[E3004]: `User` has no field `email`
+ --> tests/types/fail/E3004_no_field.tarn:9:13
+  |
+9 |     print(u.email)
+  |             ^^^^^
+  |
+  = note: its fields are: name, age
+
+error[E3004]: `{integer}` has no field `value`
+  --> tests/types/fail/E3004_no_field.tarn:11:13
+   |
+11 |     print(x.value)
+   |             ^^^^^
+

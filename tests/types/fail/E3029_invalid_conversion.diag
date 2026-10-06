@@ -1,0 +1,14 @@
+error[E3029]: cannot convert `string` to `u64`
+ --> tests/types/fail/E3029_invalid_conversion.tarn:2:14
+  |
+2 |     a := u64("12")
+  |              ^^^^
+  |
+  = note: conversions are between numeric types
+
+error[E3029]: `string` is not a conversion function
+ --> tests/types/fail/E3029_invalid_conversion.tarn:3:10
+  |
+3 |     b := string(5)
+  |          ^^^^^^^^^
+

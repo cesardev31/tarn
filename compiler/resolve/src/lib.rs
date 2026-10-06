@@ -15,7 +15,7 @@
 mod collect;
 mod dump;
 mod prelude;
-mod suggest;
+pub mod suggest;
 mod walk;
 
 use std::collections::HashMap;

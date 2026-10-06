@@ -15,3 +15,4 @@ tarn_ast = { path = "../../compiler/ast" }
 tarn_parser = { path = "../../compiler/parser" }
 tarn_driver = { path = "../../compiler/driver" }
 tarn_resolve = { path = "../../compiler/resolve" }
+tarn_types = { path = "../../compiler/types" }

@@ -255,8 +255,16 @@ impl<'a> Env<'a> {
         self.fns.insert(sym, sig);
     }
 
-    /// AST type → `Ty`, using the resolver's `uses` table.
+    /// AST type → `Ty` for declarations; diagnostics go to `self.diags`.
     pub fn lower(&mut self, m: ModuleId, t: &Type) -> Ty {
+        let mut diags = std::mem::take(&mut self.diags);
+        let ty = self.lower_with(m, t, &mut diags);
+        self.diags = diags;
+        ty
+    }
+
+    /// AST type → `Ty`, using the resolver's `uses` table.
+    pub fn lower_with(&self, m: ModuleId, t: &Type, diags: &mut Vec<Diagnostic>) -> Ty {
         let uses = &self.r.tables[m.0 as usize].uses;
         match &t.kind {
             TypeKind::Path(p) => match uses.get(&p.id).map(|u| u.res.clone()) {
@@ -266,7 +274,7 @@ impl<'a> Env<'a> {
                         SymbolKind::Primitive => primitive(&sym.name),
                         SymbolKind::PreludeType | SymbolKind::Struct | SymbolKind::Enum => {
                             let arity = self.r.type_arity.get(&s).copied().unwrap_or(0);
-                            let mut args: Vec<Ty> = p.args.iter().map(|a| self.lower(m, a)).collect();
+                            let mut args: Vec<Ty> = p.args.iter().map(|a| self.lower_with(m, a, diags)).collect();
                             args.resize(arity, Ty::Error);
                             // The prelude `Error` is a placeholder until the stdlib defines it.
                             if matches!(sym.kind, SymbolKind::PreludeType) && sym.name == "Error" {
@@ -276,7 +284,7 @@ impl<'a> Env<'a> {
                         }
                         SymbolKind::GenericParam => Ty::Param(ParamId(s.0)),
                         SymbolKind::Interface => {
-                            self.diags.push(
+                            diags.push(
                                 Diagnostic::error("E3032", "interface_as_type", format!("interface `{}` cannot be used as a type directly", sym.name))
                                     .primary(p.span, "")
                                     .help(format!("use `any {}` for dynamic dispatch, or a generic parameter `<T: {}>`", sym.name, sym.name)),
@@ -289,14 +297,14 @@ impl<'a> Env<'a> {
                 Some(Res::External { .. }) => Ty::Opaque,
                 _ => Ty::Error,
             },
-            TypeKind::Ref { mutable, inner } => Ty::Ref(*mutable, Box::new(self.lower(m, inner))),
-            TypeKind::Slice(inner) => Ty::Slice(Box::new(self.lower(m, inner))),
+            TypeKind::Ref { mutable, inner } => Ty::Ref(*mutable, Box::new(self.lower_with(m, inner, diags))),
+            TypeKind::Slice(inner) => Ty::Slice(Box::new(self.lower_with(m, inner, diags))),
             TypeKind::Array { len, elem } => {
-                let elem = self.lower(m, elem);
+                let elem = self.lower_with(m, elem, diags);
                 match len.kind {
                     tarn_ast::ExprKind::Int(n) => Ty::Array(Box::new(elem), n),
                     _ => {
-                        self.diags.push(
+                        diags.push(
                             Diagnostic::error("E3033", "array_length", "array length must be an integer literal")
                                 .primary(len.span, "")
                                 .note("constant expressions are not supported in v0"),
@@ -306,8 +314,8 @@ impl<'a> Env<'a> {
                 }
             }
             TypeKind::Fn { params, ret } => Ty::Fn(
-                params.iter().map(|p| self.lower(m, p)).collect(),
-                Box::new(ret.as_ref().map(|r| self.lower(m, r)).unwrap_or(Ty::Void)),
+                params.iter().map(|p| self.lower_with(m, p, diags)).collect(),
+                Box::new(ret.as_ref().map(|r| self.lower_with(m, r, diags)).unwrap_or(Ty::Void)),
             ),
             TypeKind::Any(_) => match uses.get(&t.id).map(|u| &u.res) {
                 Some(Res::Symbol(i)) => Ty::Any(*i),

@@ -1,0 +1,12 @@
+copy struct Named {
+    name string
+}
+
+copy enum Token {
+    Word(string)
+    End
+}
+
+copy struct Boxed<T> {
+    value T
+}

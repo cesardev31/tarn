@@ -1,0 +1,8 @@
+error[E3033]: array length must be an integer literal
+ --> tests/types/fail/E3033_array_length.tarn:2:9
+  |
+2 |     a: [n]i64 := g()
+  |         ^
+  |
+  = note: constant expressions are not supported in v0
+

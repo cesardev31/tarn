@@ -1,0 +1,45 @@
+error[E3015]: cannot assign through a shared reference `&P`
+ --> tests/types/fail/E3015_assign_immutable.tarn:6:5
+  |
+6 |     p.x = n
+  |     ^^^
+  |     - this is a `&` reference
+  |
+  = help: take a mutable reference (`&mut`) instead
+
+error[E3015]: cannot assign to `n`: `n` is a parameter, and parameters are immutable
+ --> tests/types/fail/E3015_assign_immutable.tarn:7:5
+  |
+7 |     n = 3
+  |     ^
+  |
+  = help: copy it into a mutable binding first: `var n2 = n`
+
+error[E3015]: cannot assign to `x`, because `x` is not declared with `var`
+  --> tests/types/fail/E3015_assign_immutable.tarn:12:5
+   |
+11 |     x := 10
+   |     - declared immutable here
+12 |     x = 20
+   |     ^
+   |
+   = help: declare it with `var x = ...`
+
+error[E3015]: cannot assign to `p.x`, because `p` is not declared with `var`
+  --> tests/types/fail/E3015_assign_immutable.tarn:14:5
+   |
+13 |     p := P{x: 1}
+   |     - declared immutable here
+14 |     p.x = 2
+   |     ^^^
+   |
+   = help: declare it with `var p = ...`
+
+error[E3015]: cannot assign to `i`: `i` is a loop variable, and loop variables are immutable
+  --> tests/types/fail/E3015_assign_immutable.tarn:16:9
+   |
+16 |         i = 5
+   |         ^
+   |
+   = help: copy it into a mutable binding first: `var i2 = i`
+

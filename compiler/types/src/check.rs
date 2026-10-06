@@ -1,0 +1,1585 @@
+//! Checking function bodies: expressions, statements, patterns, mutability,
+//! exhaustiveness and returns. One `FnCx` per top-level function (closures are
+//! checked inside their enclosing function, sharing its inference table).
+
+use crate::env::{Env, FnSig};
+use crate::ty::*;
+use crate::{MethodTarget, TypeTables};
+use std::collections::HashMap;
+use tarn_ast::*;
+use tarn_diagnostics::{Diagnostic, Span};
+use tarn_resolve::{ModuleId, Res, SymbolId, SymbolKind};
+
+pub struct FnCx<'e, 'a> {
+    pub env: &'e Env<'a>,
+    pub m: ModuleId,
+    pub infer: Infer,
+    pub diags: Vec<Diagnostic>,
+    pub locals: HashMap<SymbolId, Ty>,
+    pub tables: TypeTables,
+    rets: Vec<Ty>,
+    unsafe_depth: u32,
+    /// Integer literals to range-check once types are known: (span, value, type).
+    literals: Vec<(Span, i128, Ty)>,
+    /// Generic arguments that must implement an interface: (type, interface, span).
+    obligations: Vec<(Ty, SymbolId, Span)>,
+    /// Arguments of `print` to check once types are known.
+    printables: Vec<(Ty, Span)>,
+    /// Bindings whose type must be fully inferred: (symbol, name span).
+    inferred_lets: Vec<(SymbolId, Span)>,
+}
+
+fn peel(t: &Ty) -> (Ty, Option<bool>) {
+    let mut t = t.clone();
+    let mut through = None;
+    while let Ty::Ref(m, inner) = t {
+        through = Some(through.map_or(m, |x: bool| x && m));
+        t = *inner;
+    }
+    (t, through)
+}
+
+pub fn subst(t: &Ty, map: &HashMap<ParamId, Ty>) -> Ty {
+    match t {
+        Ty::Param(p) => map.get(p).cloned().unwrap_or(Ty::Param(*p)),
+        Ty::Adt(s, a) => Ty::Adt(*s, a.iter().map(|x| subst(x, map)).collect()),
+        Ty::Ref(m, x) => Ty::Ref(*m, Box::new(subst(x, map))),
+        Ty::Array(x, n) => Ty::Array(Box::new(subst(x, map)), *n),
+        Ty::Slice(x) => Ty::Slice(Box::new(subst(x, map))),
+        Ty::Fn(ps, r) => Ty::Fn(ps.iter().map(|x| subst(x, map)).collect(), Box::new(subst(r, map))),
+        t => t.clone(),
+    }
+}
+
+impl<'e, 'a> FnCx<'e, 'a> {
+    pub fn new(env: &'e Env<'a>, m: ModuleId) -> Self {
+        FnCx {
+            env,
+            m,
+            infer: Infer::default(),
+            diags: Vec::new(),
+            locals: HashMap::new(),
+            tables: TypeTables::default(),
+            rets: Vec::new(),
+            unsafe_depth: 0,
+            literals: Vec::new(),
+            obligations: Vec::new(),
+            printables: Vec::new(),
+            inferred_lets: Vec::new(),
+        }
+    }
+
+    // ------------------------------------------------------------ helpers
+
+    fn show(&self, t: &Ty) -> String {
+        crate::display_vars(&self.infer.zonk(t), self.env, &self.infer)
+    }
+
+    fn res(&self, node: NodeId) -> Option<Res> {
+        self.env.r.tables[self.m.0 as usize].uses.get(&node).map(|u| u.res.clone())
+    }
+
+    fn def(&self, node: NodeId) -> Option<SymbolId> {
+        self.env.r.tables[self.m.0 as usize].defs.get(&node).copied()
+    }
+
+    fn kind(&self, s: SymbolId) -> &SymbolKind {
+        &self.env.r.symbol(s).kind
+    }
+
+    fn err(&mut self, d: Diagnostic) {
+        self.diags.push(d);
+    }
+
+    fn mismatch(&mut self, span: Span, expected: &Ty, found: &Ty) {
+        let (e, f) = (self.show(expected), self.show(found));
+        let mut d = Diagnostic::error("E3001", "type_mismatch", format!("expected `{e}`, found `{f}`")).primary(span, format!("this is `{f}`"));
+        let (ze, zf) = (self.infer.zonk(expected), self.infer.zonk(found));
+        if let (Ty::Int(_) | Ty::Float(_), Ty::Int(_) | Ty::Float(_)) = (&ze, &zf) {
+            d = d.help(format!("numeric types never convert implicitly; write `{e}(value)`"));
+        } else if let Ty::Ref(_, inner) = &ze
+            && self.infer.unify(&inner.clone(), &zf)
+        {
+            d = d.help("borrow it with `&`");
+        }
+        self.err(d);
+    }
+
+    /// `actual` is used where `expected` is required. Applies the implicit
+    /// coercions: `&mut T → &T`, `&[N]T → &[]T`, `&T → &any I`.
+    fn coerce(&mut self, actual: &Ty, expected: &Ty, span: Span) -> bool {
+        let (a, x) = (self.infer.shallow(actual), self.infer.shallow(expected));
+        if let (Ty::Ref(am, ai), Ty::Ref(xm, xi)) = (&a, &x)
+            && (*am || !*xm)
+        {
+            let (ai, xi) = (self.infer.shallow(ai), self.infer.shallow(xi));
+            match (&ai, &xi) {
+                (Ty::Array(ae, _), Ty::Slice(xe)) => {
+                    if self.infer.unify(ae, xe) {
+                        return true;
+                    }
+                }
+                (_, Ty::Any(iface)) => {
+                    if self.implements(&ai, *iface) {
+                        return true;
+                    }
+                }
+                _ => {
+                    if self.infer.unify(&ai, &xi) {
+                        return true;
+                    }
+                }
+            }
+        }
+        if self.infer.unify(&a, &x) {
+            return true;
+        }
+        self.mismatch(span, expected, actual);
+        false
+    }
+
+    fn implements(&self, t: &Ty, iface: SymbolId) -> bool {
+        match self.infer.shallow(t) {
+            Ty::Adt(s, _) => self.env.has_impl(iface, s),
+            Ty::Param(p) => self.env.bounds.get(&p).is_some_and(|b| b.contains(&iface)),
+            Ty::Any(i) => i == iface,
+            Ty::Opaque | Ty::Error => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_copy(&self, t: &Ty) -> bool {
+        match self.infer.zonk(t) {
+            Ty::Bool | Ty::Int(_) | Ty::Float(_) | Ty::Never | Ty::Void | Ty::Opaque | Ty::Error => true,
+            Ty::Ref(m, _) => !m,
+            Ty::Array(e, _) => self.is_copy(&e),
+            Ty::Adt(s, _) => {
+                self.env.structs.get(&s).is_some_and(|d| d.is_copy) || self.env.enums.get(&s).is_some_and(|d| d.is_copy)
+            }
+            Ty::Var(v) => self.infer.kind(v) != VarKind::General,
+            _ => false,
+        }
+    }
+
+    fn instantiate(&mut self, generics: &[ParamId]) -> HashMap<ParamId, Ty> {
+        generics.iter().map(|p| (*p, self.infer.fresh(VarKind::General))).collect()
+    }
+
+    fn obligations_for(&mut self, generics: &[ParamId], map: &HashMap<ParamId, Ty>, span: Span) {
+        for p in generics {
+            for iface in self.env.bounds.get(p).cloned().unwrap_or_default() {
+                self.obligations.push((map[p].clone(), iface, span));
+            }
+        }
+    }
+
+    fn record(&mut self, e: &Expr, t: Ty) -> Ty {
+        self.tables.expr_types.insert(e.id, t.clone());
+        t
+    }
+
+    // ------------------------------------------------------------ functions
+
+    pub fn function(&mut self, f: &FnDecl, sig: &FnSig) {
+        if let (Some(r), Some(st)) = (&f.receiver, &sig.self_ty) {
+            let t = match r.kind {
+                ReceiverKind::Value => st.clone(),
+                ReceiverKind::Ref => Ty::Ref(false, Box::new(st.clone())),
+                ReceiverKind::RefMut => Ty::Ref(true, Box::new(st.clone())),
+            };
+            if let Some(s) = self.def(r.id) {
+                self.locals.insert(s, t);
+            }
+        }
+        for (p, t) in f.params.iter().zip(&sig.params) {
+            if let Some(s) = self.def(p.id) {
+                self.locals.insert(s, t.clone());
+            }
+        }
+        let Some(body) = &f.body else { return };
+        self.rets.push(sig.ret.clone());
+        self.stmts(&body.stmts);
+        self.rets.pop();
+        if !matches!(sig.ret, Ty::Void | Ty::Never) && !self.diverges(&body.stmts) {
+            let ret = self.show(&sig.ret);
+            self.err(
+                Diagnostic::error("E3009", "missing_return", format!("function `{}` may end without returning `{ret}`", f.name.name))
+                    .primary(Span::new(body.span.file, body.span.end - 1, body.span.end), "can reach the end here")
+                    .secondary(f.ret.as_ref().map(|t| t.span).unwrap_or(f.name.span), format!("returns `{ret}`"))
+                    .help("add a `return` on every path, or end with `panic(...)`"),
+            );
+        }
+    }
+
+    /// Defaults, deferred checks and final types. Called once per function.
+    pub fn finish(&mut self) {
+        self.infer.default_literals();
+        for (s, span) in std::mem::take(&mut self.inferred_lets) {
+            let t = self.locals[&s].clone();
+            if self.infer.has_unresolved(&t) {
+                let name = self.env.r.symbol(s).name.clone();
+                let shown = self.show(&t);
+                self.err(
+                    Diagnostic::error("E3010", "cannot_infer", format!("cannot infer the type of `{name}`"))
+                        .primary(span, format!("inferred so far: `{shown}`"))
+                        .help(format!("annotate it: `{name}: <type> := ...`")),
+                );
+            }
+        }
+        for (span, value, t) in std::mem::take(&mut self.literals) {
+            if let Ty::Int(it) = self.infer.zonk(&t) {
+                let (lo, hi) = it.range();
+                if value < lo || value > hi {
+                    self.err(
+                        Diagnostic::error("E3025", "literal_out_of_range", format!("literal `{value}` does not fit in `{}`", it.name()))
+                            .primary(span, "")
+                            .note(format!("`{}` holds {lo} to {hi}", it.name())),
+                    );
+                }
+            }
+        }
+        for (t, iface, span) in std::mem::take(&mut self.obligations) {
+            let z = self.infer.zonk(&t);
+            if !self.implements(&z, iface) && !matches!(z, Ty::Var(_)) {
+                let (tn, iname) = (self.show(&z), self.env.r.symbol(iface).name.clone());
+                let help = if matches!(z, Ty::Adt(..)) {
+                    format!("add `impl {iname} for {tn}` in the module of `{iname}` or of `{tn}`")
+                } else {
+                    format!("only structs and enums can implement interfaces; wrap the `{tn}` in a struct (ADR 0016)")
+                };
+                self.err(
+                    Diagnostic::error("E3022", "bound_not_satisfied", format!("`{tn}` does not implement `{iname}`"))
+                        .primary(span, format!("required by a bound `{iname}` here"))
+                        .help(help),
+                );
+            }
+        }
+        for (t, span) in std::mem::take(&mut self.printables) {
+            let z = self.infer.zonk(&t);
+            let (inner, _) = peel(&z);
+            if !matches!(inner, Ty::Bool | Ty::Int(_) | Ty::Float(_) | Ty::Str | Ty::Opaque | Ty::Error | Ty::Var(_)) {
+                let shown = self.show(&z);
+                self.err(
+                    Diagnostic::error("E3026", "not_printable", format!("`print` cannot print a value of type `{shown}`"))
+                        .primary(span, "")
+                        .note("in v0, `print` accepts booleans, numbers and strings"),
+                );
+            }
+        }
+        for t in self.tables.expr_types.values_mut() {
+            *t = self.infer.zonk(t);
+        }
+        for t in self.locals.values_mut() {
+            *t = self.infer.zonk(t);
+        }
+    }
+
+    // ------------------------------------------------------------ statements
+
+    fn stmts(&mut self, stmts: &[Stmt]) {
+        for s in stmts {
+            self.stmt(s);
+        }
+    }
+
+    fn stmt(&mut self, s: &Stmt) {
+        match &s.kind {
+            StmtKind::Let { name, ty, value, .. } => {
+                let ann = ty.as_ref().map(|t| self.env_lower(t));
+                let vt = self.expr(value, ann.as_ref());
+                let t = match ann {
+                    Some(a) => {
+                        self.coerce(&vt, &a, value.span);
+                        a
+                    }
+                    None => vt,
+                };
+                if let Some(sym) = self.def(s.id) {
+                    if matches!(self.infer.shallow(&t), Ty::Void) && ty.is_none() {
+                        self.err(
+                            Diagnostic::error("E3001", "type_mismatch", format!("`{}` would have type `void`", name.name))
+                                .primary(value.span, "this expression produces no value"),
+                        );
+                    }
+                    self.locals.insert(sym, t);
+                    self.inferred_lets.push((sym, name.span));
+                }
+            }
+            StmtKind::Assign { target, value } => {
+                let tt = self.expr(target, None);
+                self.require_mut(target, false);
+                let vt = self.expr(value, Some(&tt));
+                self.coerce(&vt, &tt, value.span);
+            }
+            StmtKind::Expr(e) => {
+                self.expr(e, None);
+            }
+            StmtKind::Spawn(e) => {
+                if !matches!(e.kind, ExprKind::Call { .. }) {
+                    self.err(Diagnostic::error("E3036", "spawn_needs_call", "`spawn` takes a function call").primary(e.span, ""));
+                }
+                self.expr(e, None);
+            }
+            StmtKind::Return(value) => {
+                let ret = self.rets.last().cloned().unwrap_or(Ty::Void);
+                match value {
+                    Some(v) => {
+                        if matches!(ret, Ty::Void) {
+                            self.expr(v, None);
+                            self.err(
+                                Diagnostic::error("E3028", "return_value_mismatch", "this function returns `void`, but a value is returned")
+                                    .primary(v.span, "")
+                                    .help("remove the value, or declare a return type"),
+                            );
+                        } else {
+                            let t = self.expr(v, Some(&ret));
+                            self.coerce(&t, &ret, v.span);
+                        }
+                    }
+                    None if !matches!(ret, Ty::Void | Ty::Never) => {
+                        let shown = self.show(&ret);
+                        self.err(
+                            Diagnostic::error("E3028", "return_value_mismatch", format!("`return` without a value in a function returning `{shown}`"))
+                                .primary(s.span, ""),
+                        );
+                    }
+                    None => {}
+                }
+            }
+            StmtKind::Break | StmtKind::Continue | StmtKind::Error => {}
+            StmtKind::If(i) => self.if_stmt(i),
+            StmtKind::For(f) => self.for_stmt(s, f),
+            StmtKind::Match(m) => self.match_stmt(m),
+            StmtKind::Block(b) | StmtKind::Scope(b) => self.stmts(&b.stmts),
+            StmtKind::Unsafe(b) => {
+                self.unsafe_depth += 1;
+                self.stmts(&b.stmts);
+                self.unsafe_depth -= 1;
+            }
+        }
+    }
+
+    fn env_lower(&mut self, t: &Type) -> Ty {
+        self.env.lower_with(self.m, t, &mut self.diags)
+    }
+
+    fn cond(&mut self, e: &Expr) {
+        let t = self.expr(e, Some(&Ty::Bool));
+        self.coerce(&t, &Ty::Bool, e.span);
+    }
+
+    fn if_stmt(&mut self, i: &IfStmt) {
+        self.cond(&i.cond);
+        self.stmts(&i.then_block.stmts);
+        match i.else_branch.as_deref() {
+            Some(ElseBranch::If(e)) => self.if_stmt(e),
+            Some(ElseBranch::Block(b)) => self.stmts(&b.stmts),
+            None => {}
+        }
+    }
+
+    fn for_stmt(&mut self, s: &Stmt, f: &ForStmt) {
+        match &f.kind {
+            ForKind::Infinite => {}
+            ForKind::While(c) => self.cond(c),
+            ForKind::In { iter, .. } => {
+                let elem = match &iter.kind {
+                    ExprKind::Range { start, end, .. } => {
+                        let t = self.infer.fresh(VarKind::Int);
+                        for b in [start, end].into_iter().flatten() {
+                            let bt = self.expr(b, Some(&t));
+                            self.coerce(&bt, &t, b.span);
+                        }
+                        if start.is_none() || end.is_none() {
+                            self.err(Diagnostic::error("E3027", "invalid_for_iter", "a `for` range needs a start and an end").primary(iter.span, ""));
+                        }
+                        self.record(iter, Ty::Opaque);
+                        t
+                    }
+                    _ => {
+                        let it = self.expr(iter, None);
+                        self.iter_elem(&it, iter.span)
+                    }
+                };
+                if let Some(sym) = self.def(s.id) {
+                    self.locals.insert(sym, elem);
+                }
+            }
+        }
+        self.stmts(&f.body.stmts);
+    }
+
+    /// ADR 0018: iterating through a reference yields copies of copy elements
+    /// and references to non-copy elements.
+    fn iter_elem(&mut self, t: &Ty, span: Span) -> Ty {
+        let z = self.infer.zonk(t);
+        match &z {
+            Ty::Ref(m, inner) => match &**inner {
+                Ty::Array(e, _) | Ty::Slice(e) => self.project(e, Some(*m)),
+                _ => self.bad_iter(&z, span),
+            },
+            Ty::Array(e, _) => (**e).clone(),
+            Ty::Opaque | Ty::Error => Ty::Opaque,
+            _ => self.bad_iter(&z, span),
+        }
+    }
+
+    fn bad_iter(&mut self, t: &Ty, span: Span) -> Ty {
+        let shown = self.show(t);
+        self.err(
+            Diagnostic::error("E3027", "invalid_for_iter", format!("cannot iterate over `{shown}`"))
+                .primary(span, "")
+                .note("v0 iterates over ranges `a..b`, arrays and `&` / `&mut` arrays and slices"),
+        );
+        Ty::Error
+    }
+
+    /// Element/field reached through a reference (ADR 0018).
+    fn project(&self, t: &Ty, through: Option<bool>) -> Ty {
+        match through {
+            None => t.clone(),
+            Some(_) if self.is_copy(t) => t.clone(),
+            Some(m) => Ty::Ref(m, Box::new(t.clone())),
+        }
+    }
+
+    // ------------------------------------------------------------ match
+
+    fn match_stmt(&mut self, m: &MatchStmt) {
+        let st = self.expr(&m.scrutinee, None);
+        for arm in &m.arms {
+            self.pattern(&arm.pattern, &st);
+            if let Some(g) = &arm.guard {
+                self.cond(g);
+            }
+            match &arm.body.kind {
+                StmtKind::Block(b) => self.stmts(&b.stmts),
+                _ => self.stmt(&arm.body),
+            }
+        }
+        self.exhaustive(m, &st);
+    }
+
+    fn pattern(&mut self, p: &Pattern, t: &Ty) {
+        let z = self.infer.zonk(t);
+        let (inner, through) = peel(&z);
+        match &p.kind {
+            PatternKind::Wildcard | PatternKind::Error => {}
+            PatternKind::Ident(_) => match self.res(p.id) {
+                None => {
+                    if let Some(sym) = self.def(p.id) {
+                        let bt = self.project(&inner, through);
+                        self.locals.insert(sym, bt);
+                    }
+                }
+                Some(r) => {
+                    self.variant_pattern(p, &r, &inner, through, &[]);
+                }
+            },
+            PatternKind::Literal(e) => {
+                let lt = self.expr(e, Some(&inner));
+                if !self.infer.unify(&lt, &inner) {
+                    self.mismatch(e.span, &inner, &lt);
+                }
+            }
+            PatternKind::Range { start, end, .. } => {
+                for b in [start, end] {
+                    let bt = self.expr(b, Some(&inner));
+                    if !self.infer.unify(&bt, &inner) {
+                        self.mismatch(b.span, &inner, &bt);
+                    }
+                }
+            }
+            PatternKind::Variant { args, .. } => {
+                if let Some(r) = self.res(p.id) {
+                    self.variant_pattern(p, &r, &inner, through, args);
+                } else {
+                    for a in args {
+                        self.pattern(a, &Ty::Error);
+                    }
+                }
+            }
+            PatternKind::Struct { fields, .. } => {
+                let Some(Res::Symbol(s)) = self.res(p.id) else { return };
+                let targs = match &inner {
+                    Ty::Adt(x, a) if *x == s => a.clone(),
+                    Ty::Opaque | Ty::Error => Vec::new(),
+                    other => {
+                        let expected = self.show(other);
+                        let name = self.env.r.symbol(s).name.clone();
+                        self.err(
+                            Diagnostic::error("E3020", "pattern_mismatch", format!("pattern of struct `{name}` cannot match `{expected}`")).primary(p.span, ""),
+                        );
+                        return;
+                    }
+                };
+                let Some(def) = self.env.structs.get(&s) else { return };
+                let map: HashMap<ParamId, Ty> = def.generics.iter().copied().zip(targs).collect();
+                for fp in fields {
+                    let Some(fd) = def.fields.iter().find(|f| f.name == fp.name.name) else {
+                        let name = self.env.r.symbol(s).name.clone();
+                        self.err(
+                            Diagnostic::error("E3012", "unknown_field", format!("struct `{name}` has no field `{}`", fp.name.name)).primary(fp.name.span, ""),
+                        );
+                        continue;
+                    };
+                    let ft = subst(&fd.ty, &map);
+                    match &fp.pattern {
+                        Some(sub) => {
+                            let wrapped = match through {
+                                Some(m) => Ty::Ref(m, Box::new(ft)),
+                                None => ft,
+                            };
+                            self.pattern(sub, &wrapped);
+                        }
+                        None => {
+                            if let Some(sym) = self.def(fp.id) {
+                                let bt = self.project(&ft, through);
+                                self.locals.insert(sym, bt);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn variant_pattern(&mut self, p: &Pattern, r: &Res, scrut: &Ty, through: Option<bool>, args: &[Pattern]) {
+        let (enum_sym, targs) = match scrut {
+            Ty::Adt(s, a) if self.env.enums.contains_key(s) => (*s, a.clone()),
+            Ty::Opaque | Ty::Error | Ty::Var(_) => {
+                for a in args {
+                    self.pattern(a, &Ty::Opaque);
+                }
+                return;
+            }
+            other => {
+                let shown = self.show(other);
+                self.err(
+                    Diagnostic::error("E3020", "pattern_mismatch", format!("a variant pattern cannot match a value of type `{shown}`"))
+                        .primary(p.span, "")
+                        .note("only enum values have variants"),
+                );
+                return;
+            }
+        };
+        let def = &self.env.enums[&enum_sym];
+        let enum_name = self.env.r.symbol(enum_sym).name.clone();
+        let variant = match r {
+            Res::Symbol(v) => def.variants.iter().find(|x| x.sym == *v),
+            Res::ScrutineeVariant(n) => def.variants.iter().find(|x| &x.name == n),
+            Res::External { .. } => None,
+        };
+        let Some(variant) = variant else {
+            let name = match r {
+                Res::Symbol(v) => self.env.r.symbol(*v).name.clone(),
+                Res::ScrutineeVariant(n) => n.clone(),
+                _ => String::new(),
+            };
+            let names: Vec<_> = def.variants.iter().map(|v| v.name.clone()).collect();
+            let mut d = Diagnostic::error("E3019", "unknown_variant", format!("enum `{enum_name}` has no variant `{name}`")).primary(p.span, "");
+            d = d.note(format!("its variants are: {}", names.join(", ")));
+            self.err(d);
+            return;
+        };
+        let (vsym, vname, fields) = (variant.sym, variant.name.clone(), variant.fields.clone());
+        self.tables.pattern_variants.insert(p.id, vsym);
+        let unit_form = matches!(p.kind, PatternKind::Ident(_));
+        if unit_form && !fields.is_empty() || !unit_form && fields.len() != args.len() {
+            self.err(
+                Diagnostic::error(
+                    "E3020",
+                    "pattern_mismatch",
+                    format!("variant `{enum_name}.{vname}` has {} field{}, but the pattern has {}", fields.len(), if fields.len() == 1 { "" } else { "s" }, args.len()),
+                )
+                .primary(p.span, ""),
+            );
+        }
+        let map: HashMap<ParamId, Ty> = def.generics.iter().copied().zip(targs).collect();
+        for (a, ft) in args.iter().zip(fields.iter()) {
+            let ft = subst(ft, &map);
+            let wrapped = match through {
+                Some(m) => Ty::Ref(m, Box::new(ft)),
+                None => ft,
+            };
+            self.pattern(a, &wrapped);
+        }
+    }
+
+    /// Conservative exhaustiveness: top-level coverage of enum variants and
+    /// booleans; other types need a catch-all arm. Nested refutable patterns
+    /// never count as covering (the program may need an extra `_` arm).
+    fn exhaustive(&mut self, m: &MatchStmt, st: &Ty) {
+        let (inner, _) = peel(&self.infer.zonk(st));
+        let unguarded: Vec<&MatchArm> = m.arms.iter().filter(|a| a.guard.is_none()).collect();
+        if unguarded.iter().any(|a| self.irrefutable(&a.pattern)) {
+            return;
+        }
+        let missing: Vec<String> = match &inner {
+            Ty::Adt(s, _) if self.env.enums.contains_key(s) => self.env.enums[s]
+                .variants
+                .iter()
+                .filter(|v| {
+                    !unguarded.iter().any(|a| {
+                        self.tables.pattern_variants.get(&a.pattern.id) == Some(&v.sym)
+                            && match &a.pattern.kind {
+                                PatternKind::Variant { args, .. } => args.iter().all(|x| self.irrefutable(x)),
+                                _ => true,
+                            }
+                    })
+                })
+                .map(|v| v.name.clone())
+                .collect(),
+            Ty::Bool => {
+                let has = |b: bool| unguarded.iter().any(|a| matches!(&a.pattern.kind, PatternKind::Literal(e) if e.kind == ExprKind::Bool(b)));
+                [true, false].into_iter().filter(|b| !has(*b)).map(|b| b.to_string()).collect()
+            }
+            Ty::Opaque | Ty::Error | Ty::Var(_) => return,
+            Ty::Adt(s, _) if self.env.structs.contains_key(s) => return,
+            other => {
+                let shown = self.show(other);
+                self.err(
+                    Diagnostic::error("E3018", "non_exhaustive_match", format!("`match` on `{shown}` does not cover every value"))
+                        .primary(m.scrutinee.span, "")
+                        .help("add a final `_ => ...` arm"),
+                );
+                return;
+            }
+        };
+        if !missing.is_empty() {
+            let list = missing.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
+            self.err(
+                Diagnostic::error("E3018", "non_exhaustive_match", format!("`match` does not cover {list}"))
+                    .primary(m.scrutinee.span, "")
+                    .help("add the missing arms, or a final `_ => ...` arm")
+                    .note("guarded arms and nested refutable patterns do not count as covering in v0"),
+            );
+        }
+    }
+
+    fn irrefutable(&self, p: &Pattern) -> bool {
+        match &p.kind {
+            PatternKind::Wildcard | PatternKind::Error => true,
+            PatternKind::Ident(_) => self.def(p.id).is_some(),
+            PatternKind::Struct { fields, .. } => fields.iter().all(|f| f.pattern.as_ref().is_none_or(|x| self.irrefutable(x))),
+            _ => false,
+        }
+    }
+
+    /// Whether control can never reach the end of these statements.
+    pub fn diverges(&self, stmts: &[Stmt]) -> bool {
+        stmts.iter().any(|s| self.stmt_diverges(s))
+    }
+
+    fn stmt_diverges(&self, s: &Stmt) -> bool {
+        match &s.kind {
+            StmtKind::Return(_) => true,
+            StmtKind::Expr(e) => matches!(self.tables.expr_types.get(&e.id).map(|t| self.infer.zonk(t)), Some(Ty::Never)),
+            StmtKind::If(i) => self.if_diverges(i),
+            StmtKind::Match(m) => {
+                !m.arms.is_empty()
+                    && !self.diags.iter().any(|d| d.code == "E3018" && d.primary_span() == Some(m.scrutinee.span))
+                    && m.arms.iter().all(|a| match &a.body.kind {
+                        StmtKind::Block(b) => self.diverges(&b.stmts),
+                        _ => self.stmt_diverges(&a.body),
+                    })
+            }
+            StmtKind::Block(b) | StmtKind::Unsafe(b) | StmtKind::Scope(b) => self.diverges(&b.stmts),
+            StmtKind::For(f) => matches!(f.kind, ForKind::Infinite) && !has_break(&f.body.stmts),
+            _ => false,
+        }
+    }
+
+    fn if_diverges(&self, i: &IfStmt) -> bool {
+        self.diverges(&i.then_block.stmts)
+            && match i.else_branch.as_deref() {
+                Some(ElseBranch::If(e)) => self.if_diverges(e),
+                Some(ElseBranch::Block(b)) => self.diverges(&b.stmts),
+                None => false,
+            }
+    }
+
+    // ------------------------------------------------------------ mutability (ADR 0017)
+
+    /// Report if `e` is not a mutable place (ADR 0017). `borrow` selects the
+    /// E3016 wording (`&mut`, `&mut self` calls) over E3015 (assignment).
+    fn require_mut(&mut self, e: &Expr, borrow: bool) -> bool {
+        self.require_mut_at(e, e, borrow)
+    }
+
+    fn require_mut_at(&mut self, whole: &Expr, e: &Expr, borrow: bool) -> bool {
+        let (code, kind) = if borrow { ("E3016", "borrow_mut_immutable") } else { ("E3015", "assign_immutable") };
+        let target = |n: &str| if borrow { format!("cannot borrow `{n}` as mutable") } else { format!("cannot assign to `{n}`") };
+        let projected = !std::ptr::eq(whole, e);
+        match &e.kind {
+            ExprKind::Paren(inner) => self.require_mut_at(whole, inner, borrow),
+            ExprKind::Ident(name) => {
+                let Some(Res::Symbol(s)) = self.res(e.id) else { return true };
+                let sym = self.env.r.symbol(s).clone();
+                let place = if projected { format!("{name}.…") } else { name.clone() };
+                let place = if projected { crate::place_text(whole).unwrap_or(place) } else { place };
+                match sym.kind {
+                    SymbolKind::Local { mutable: true } => true,
+                    SymbolKind::Local { mutable: false } => {
+                        let mut d = Diagnostic::error(code, kind, format!("{}, because `{name}` is not declared with `var`", target(&place))).primary(whole.span, "");
+                        if let Some(sp) = sym.span {
+                            d = d.secondary(sp, "declared immutable here");
+                        }
+                        self.err(d.help(format!("declare it with `var {name} = ...`")));
+                        false
+                    }
+                    SymbolKind::Param | SymbolKind::SelfParam | SymbolKind::PatternBinding | SymbolKind::LoopBinding | SymbolKind::ClosureParam => {
+                        let what = crate::binding_kind(&sym.kind);
+                        self.err(
+                            Diagnostic::error(code, kind, format!("{}: `{name}` is a {what}, and {what}s are immutable", target(&place)))
+                                .primary(whole.span, "")
+                                .help(format!("copy it into a mutable binding first: `var {name}2 = {name}`")),
+                        );
+                        false
+                    }
+                    _ => {
+                        self.err(Diagnostic::error(code, kind, target(&place)).primary(whole.span, ""));
+                        false
+                    }
+                }
+            }
+            ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => {
+                let bt = self.tables.expr_types.get(&base.id).map(|t| self.infer.zonk(t)).unwrap_or(Ty::Error);
+                match bt {
+                    Ty::Ref(true, _) | Ty::Opaque | Ty::Error => true,
+                    Ty::Ref(false, _) => {
+                        let shown = self.show(&bt);
+                        let verb = if borrow { "borrow as mutable" } else { "assign" };
+                        self.err(
+                            Diagnostic::error(code, kind, format!("cannot {verb} through a shared reference `{shown}`"))
+                                .primary(whole.span, "")
+                                .secondary(base.span, "this is a `&` reference")
+                                .help("take a mutable reference (`&mut`) instead"),
+                        );
+                        false
+                    }
+                    _ => self.require_mut_at(whole, base, borrow),
+                }
+            }
+            _ => {
+                let what = if borrow { "borrow a temporary value as mutable" } else { "assign to a temporary value" };
+                self.err(Diagnostic::error(code, kind, format!("cannot {what}")).primary(whole.span, "").help("store it in a `var` first"));
+                false
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ expressions
+
+    pub fn expr(&mut self, e: &Expr, expected: Option<&Ty>) -> Ty {
+        let t = self.expr_inner(e, expected);
+        self.record(e, t)
+    }
+
+    fn int_literal(&mut self, e: &Expr, value: i128) -> Ty {
+        let t = self.infer.fresh(VarKind::Int);
+        self.literals.push((e.span, value, t.clone()));
+        t
+    }
+
+    fn expr_inner(&mut self, e: &Expr, expected: Option<&Ty>) -> Ty {
+        match &e.kind {
+            ExprKind::Int(v) => self.int_literal(e, *v as i128),
+            ExprKind::Float(_) => self.infer.fresh(VarKind::Float),
+            ExprKind::Str(_) => Ty::Str,
+            ExprKind::Bool(_) => Ty::Bool,
+            ExprKind::Unit => Ty::Void,
+            ExprKind::Error => Ty::Error,
+            ExprKind::Paren(inner) => self.expr(inner, expected),
+            ExprKind::Ident(_) => self.name_value(e),
+            ExprKind::Field { base, name } => match self.res(e.id) {
+                Some(_) => self.name_value(e),
+                None => self.field(e, base, name),
+            },
+            ExprKind::Call { callee, args } => self.call(e, callee, args, expected),
+            ExprKind::Index { base, index } => self.index(base, index),
+            ExprKind::Unary { op, operand } => self.unary(e, *op, operand, expected),
+            ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs),
+            ExprKind::Range { .. } => {
+                self.err(
+                    Diagnostic::error("E3034", "range_outside_for", "ranges can only be used in `for` loops and slicing")
+                        .primary(e.span, "")
+                        .note("ranges are not values in v0"),
+                );
+                Ty::Error
+            }
+            ExprKind::Try(inner) => self.try_expr(e, inner),
+            ExprKind::StructLit { fields, .. } => self.struct_lit(e, fields),
+            ExprKind::ArrayLit { ty, elems } => {
+                let at = self.env_lower(ty);
+                let (elem, len) = match &at {
+                    Ty::Array(el, n) => ((**el).clone(), Some(*n)),
+                    Ty::Slice(el) => ((**el).clone(), None),
+                    _ => (Ty::Error, None),
+                };
+                for x in elems {
+                    let xt = self.expr(x, Some(&elem));
+                    self.coerce(&xt, &elem, x.span);
+                }
+                if let Some(n) = len
+                    && n != elems.len() as u64
+                {
+                    self.err(
+                        Diagnostic::error("E3037", "array_length_mismatch", format!("array of length {n} has {} elements", elems.len()))
+                            .primary(e.span, "")
+                            .help("write `[]T{...}` to take the length from the elements"),
+                    );
+                }
+                Ty::Array(Box::new(elem), elems.len() as u64)
+            }
+            ExprKind::Closure { params, ret, body } => self.closure(params, ret.as_ref(), body, expected),
+        }
+    }
+
+    /// An identifier or a static path used as a value.
+    fn name_value(&mut self, e: &Expr) -> Ty {
+        match self.res(e.id) {
+            Some(Res::External { .. }) => Ty::Opaque,
+            Some(Res::ScrutineeVariant(_)) | None => Ty::Error,
+            Some(Res::Symbol(s)) => match self.kind(s).clone() {
+                SymbolKind::Local { .. }
+                | SymbolKind::Param
+                | SymbolKind::SelfParam
+                | SymbolKind::PatternBinding
+                | SymbolKind::LoopBinding
+                | SymbolKind::ClosureParam => self.locals.get(&s).cloned().unwrap_or(Ty::Error),
+                SymbolKind::Variant { parent } => {
+                    let (fields, generics) = self.variant_info(parent, s);
+                    let map = self.instantiate(&generics);
+                    if !fields.is_empty() {
+                        let name = match self.env.r.symbol(s).module {
+                            Some(_) => format!("{}.{}", self.env.r.symbol(parent).name, self.env.r.symbol(s).name),
+                            None => self.env.r.symbol(s).name.clone(),
+                        };
+                        self.err(
+                            Diagnostic::error("E3038", "variant_needs_args", format!("variant `{name}` takes {} value{}", fields.len(), if fields.len() == 1 { "" } else { "s" }))
+                                .primary(e.span, "")
+                                .help(format!("write `{name}(...)`")),
+                        );
+                        return Ty::Error;
+                    }
+                    Ty::Adt(parent, generics.iter().map(|p| map[p].clone()).collect())
+                }
+                SymbolKind::Function | SymbolKind::Method { .. } | SymbolKind::ImplMethod { .. } => {
+                    let Some(sig) = self.env.fns.get(&s).cloned() else { return Ty::Error };
+                    let map = self.instantiate(&sig.generics);
+                    let mut ps: Vec<Ty> = Vec::new();
+                    if let (Some(r), Some(st)) = (sig.receiver, &sig.self_ty) {
+                        ps.push(receiver_ty(r, st));
+                    }
+                    ps.extend(sig.params.iter().cloned());
+                    Ty::Fn(ps.iter().map(|p| subst(p, &map)).collect(), Box::new(subst(&sig.ret, &map)))
+                }
+                SymbolKind::Module(_) => Ty::Error,
+                k => {
+                    let name = self.env.r.symbol(s).name.clone();
+                    let what = crate::binding_kind(&k);
+                    self.err(
+                        Diagnostic::error("E3035", "not_a_value", format!("{what} `{name}` is not a value"))
+                            .primary(e.span, "")
+                            .help(match k {
+                                SymbolKind::Struct => format!("build one with `{name}{{...}}`"),
+                                SymbolKind::Builtin => format!("call it: `{name}(...)`"),
+                                _ => "use a value of this type instead".to_string(),
+                            }),
+                    );
+                    Ty::Error
+                }
+            },
+        }
+    }
+
+    fn variant_info(&self, parent: SymbolId, v: SymbolId) -> (Vec<Ty>, Vec<ParamId>) {
+        let Some(def) = self.env.enums.get(&parent) else { return (Vec::new(), Vec::new()) };
+        let fields = def.variants.iter().find(|x| x.sym == v).map(|x| x.fields.clone()).unwrap_or_default();
+        (fields, def.generics.clone())
+    }
+
+    fn field(&mut self, e: &Expr, base: &Expr, name: &Ident) -> Ty {
+        let bt = self.expr(base, None);
+        let (inner, through) = peel(&self.infer.zonk(&bt));
+        let _ = through;
+        match &inner {
+            Ty::Opaque | Ty::Error => Ty::Opaque,
+            Ty::Adt(s, args) if self.env.structs.contains_key(s) => {
+                let def = &self.env.structs[s];
+                let Some(f) = def.fields.iter().find(|f| f.name == name.name) else {
+                    let tname = self.show(&inner);
+                    let names: Vec<&str> = def.fields.iter().map(|f| f.name.as_str()).collect();
+                    let mut d = Diagnostic::error("E3004", "no_field", format!("`{tname}` has no field `{}`", name.name)).primary(name.span, "");
+                    if let Some(sug) = tarn_resolve::suggest::best(&name.name, names.iter().copied()) {
+                        d = d.help(format!("did you mean `{sug}`?"));
+                    } else if !names.is_empty() {
+                        d = d.note(format!("its fields are: {}", names.join(", ")));
+                    }
+                    self.err(d);
+                    return Ty::Error;
+                };
+                if def.module != self.m && !f.is_pub {
+                    let tname = self.env.r.symbol(*s).name.clone();
+                    self.err(
+                        Diagnostic::error("E3014", "private_field", format!("field `{}` of `{tname}` is private", name.name))
+                            .primary(name.span, "")
+                            .help("mark the field `pub`, or add a method that exposes it"),
+                    );
+                }
+                let map: HashMap<ParamId, Ty> = def.generics.iter().copied().zip(args.iter().cloned()).collect();
+                let _ = e;
+                subst(&f.ty, &map)
+            }
+            other => {
+                let shown = self.show(other);
+                let mut d = Diagnostic::error("E3004", "no_field", format!("`{shown}` has no field `{}`", name.name)).primary(name.span, "");
+                if matches!(other, Ty::Adt(..)) {
+                    d = d.note("only structs have fields; did you mean to call a method?");
+                }
+                self.err(d);
+                Ty::Error
+            }
+        }
+    }
+
+    fn index(&mut self, base: &Expr, index: &Expr) -> Ty {
+        let bt = self.expr(base, None);
+        let (inner, _) = peel(&self.infer.zonk(&bt));
+        let elem = match &inner {
+            Ty::Array(e, _) | Ty::Slice(e) => (**e).clone(),
+            Ty::Opaque | Ty::Error => Ty::Opaque,
+            other => {
+                let shown = self.show(other);
+                self.err(Diagnostic::error("E3008", "not_indexable", format!("cannot index into a value of type `{shown}`")).primary(base.span, ""));
+                Ty::Error
+            }
+        };
+        let usize_ = Ty::Int(IntTy::Usize);
+        if let ExprKind::Range { start, end, .. } = &index.kind {
+            for b in [start, end].into_iter().flatten() {
+                let t = self.expr(b, Some(&usize_));
+                self.coerce(&t, &usize_, b.span);
+            }
+            self.record(index, Ty::Opaque);
+            return Ty::Slice(Box::new(elem));
+        }
+        let it = self.expr(index, Some(&usize_));
+        self.coerce(&it, &usize_, index.span);
+        elem
+    }
+
+    fn unary(&mut self, e: &Expr, op: UnaryOp, operand: &Expr, expected: Option<&Ty>) -> Ty {
+        match op {
+            UnaryOp::Neg => {
+                let t = match operand.kind {
+                    ExprKind::Int(v) => {
+                        let t = self.int_literal(e, -(v as i128));
+                        self.record(operand, t.clone())
+                    }
+                    _ => self.expr(operand, expected),
+                };
+                match self.infer.shallow(&t) {
+                    Ty::Int(i) if !i.signed() => {
+                        self.err(
+                            Diagnostic::error("E3007", "invalid_unary", format!("cannot negate an unsigned `{}`", i.name())).primary(e.span, ""),
+                        );
+                        Ty::Error
+                    }
+                    Ty::Int(_) | Ty::Float(_) | Ty::Opaque | Ty::Error => t,
+                    Ty::Var(v) if self.infer.kind(v) != VarKind::General => t,
+                    other => {
+                        let shown = self.show(&other);
+                        self.err(Diagnostic::error("E3007", "invalid_unary", format!("cannot negate a value of type `{shown}`")).primary(e.span, ""));
+                        Ty::Error
+                    }
+                }
+            }
+            UnaryOp::Not => {
+                let t = self.expr(operand, Some(&Ty::Bool));
+                self.coerce(&t, &Ty::Bool, operand.span);
+                Ty::Bool
+            }
+            UnaryOp::Ref | UnaryOp::RefMut => {
+                let inner_expected = match expected.map(|x| self.infer.shallow(x)) {
+                    Some(Ty::Ref(_, x)) => Some(*x),
+                    _ => None,
+                };
+                let t = self.expr(operand, inner_expected.as_ref());
+                let mutable = op == UnaryOp::RefMut;
+                if mutable {
+                    self.require_mut(operand, true);
+                }
+                Ty::Ref(mutable, Box::new(t))
+            }
+        }
+    }
+
+    fn binary(&mut self, e: &Expr, op: BinaryOp, lhs: &Expr, rhs: &Expr) -> Ty {
+        use BinaryOp::*;
+        let lt = self.expr(lhs, None);
+        let rt = self.expr(rhs, Some(&lt));
+        let (l, r) = (self.infer.shallow(&lt), self.infer.shallow(&rt));
+        let numeric = |t: &Ty, cx: &Self| match t {
+            Ty::Int(_) | Ty::Float(_) | Ty::Opaque | Ty::Error => true,
+            Ty::Var(v) => cx.infer.kind(*v) != VarKind::General,
+            _ => false,
+        };
+        let integer = |t: &Ty, cx: &Self| match t {
+            Ty::Int(_) | Ty::Opaque | Ty::Error => true,
+            Ty::Var(v) => cx.infer.kind(*v) == VarKind::Int,
+            _ => false,
+        };
+        let fail = |cx: &mut Self, why: &str| {
+            let (ls, rs) = (cx.show(&lt), cx.show(&rt));
+            cx.err(
+                Diagnostic::error("E3006", "invalid_operands", format!("cannot apply `{}` to `{ls}` and `{rs}`", op.symbol()))
+                    .primary(e.span, "")
+                    .note(why.to_string()),
+            );
+            Ty::Error
+        };
+        match op {
+            Add if matches!(peel(&l).0, Ty::Str) => {
+                if matches!(peel(&r).0, Ty::Str | Ty::Opaque | Ty::Error) {
+                    Ty::Str
+                } else {
+                    fail(self, "`+` joins two strings")
+                }
+            }
+            Add | Sub | Mul | Div | Rem => {
+                if !numeric(&l, self) || !numeric(&r, self) {
+                    return fail(self, "arithmetic needs two numbers of the same type");
+                }
+                if !self.infer.unify(&l, &r) {
+                    return fail(self, "both operands must have the same type; numbers never convert implicitly");
+                }
+                l
+            }
+            BitAnd | BitOr | BitXor => {
+                if !integer(&l, self) || !self.infer.unify(&l, &r) {
+                    return fail(self, "bitwise operators need two integers of the same type");
+                }
+                l
+            }
+            Shl | Shr => {
+                if !integer(&l, self) || !integer(&r, self) {
+                    return fail(self, "shifts need integers");
+                }
+                l
+            }
+            And | Or => {
+                self.coerce(&lt, &Ty::Bool, lhs.span);
+                self.coerce(&rt, &Ty::Bool, rhs.span);
+                Ty::Bool
+            }
+            Eq | Ne | Lt | Le | Gt | Ge => {
+                if !self.infer.unify(&l, &r) {
+                    return fail(self, "comparison needs two values of the same type");
+                }
+                let z = self.infer.zonk(&l);
+                let (inner, _) = peel(&z);
+                let ok = match &inner {
+                    Ty::Int(_) | Ty::Float(_) | Ty::Str | Ty::Opaque | Ty::Error => true,
+                    Ty::Bool => matches!(op, Eq | Ne),
+                    Ty::Var(v) => self.infer.kind(*v) != VarKind::General,
+                    _ => false,
+                };
+                if !ok {
+                    return fail(self, "v0 compares only numbers, strings and booleans (`==`/`!=`); use `match` for enums");
+                }
+                Ty::Bool
+            }
+        }
+    }
+
+    fn try_expr(&mut self, e: &Expr, inner: &Expr) -> Ty {
+        let t = self.expr(inner, None);
+        let z = self.infer.zonk(&t);
+        let ret = self.infer.zonk(&self.rets.last().cloned().unwrap_or(Ty::Void));
+        let (opt, res) = (self.env.prelude.option, self.env.prelude.result);
+        match (&z, &ret) {
+            (Ty::Opaque | Ty::Error, _) => Ty::Opaque,
+            (Ty::Adt(s, a), Ty::Adt(rs, ra)) if *s == res && *rs == res => {
+                if !self.infer.unify(&a[1], &ra[1]) {
+                    let (got, want) = (self.show(&a[1]), self.show(&ra[1]));
+                    self.err(
+                        Diagnostic::error("E3017", "try_mismatch", format!("`try` would return an error of type `{got}` from a function whose error type is `{want}`"))
+                            .primary(e.span, "")
+                            .note("v0 does not convert error types automatically")
+                            .help("convert it explicitly with `match`, or change the function's error type"),
+                    );
+                }
+                a[0].clone()
+            }
+            (Ty::Adt(s, a), Ty::Adt(rs, _)) if *s == opt && *rs == opt => a[0].clone(),
+            (Ty::Adt(s, a), _) if *s == res || *s == opt => {
+                let (got, want) = (self.show(&z), self.show(&ret));
+                self.err(
+                    Diagnostic::error("E3017", "try_mismatch", format!("`try` on `{got}` needs the function to return a `{}`", if *s == res { "Result" } else { "Option" }))
+                        .primary(e.span, "")
+                        .note(format!("this function returns `{want}`")),
+                );
+                a.first().cloned().unwrap_or(Ty::Error)
+            }
+            _ => {
+                let got = self.show(&z);
+                self.err(
+                    Diagnostic::error("E3017", "try_mismatch", format!("`try` needs a `Result` or `Option`, found `{got}`")).primary(inner.span, ""),
+                );
+                Ty::Error
+            }
+        }
+    }
+
+    fn struct_lit(&mut self, e: &Expr, fields: &[FieldInit]) -> Ty {
+        let Some(Res::Symbol(s)) = self.res(e.id) else {
+            for f in fields {
+                if let Some(v) = &f.value {
+                    self.expr(v, None);
+                }
+            }
+            return Ty::Opaque;
+        };
+        let Some(def) = self.env.structs.get(&s) else { return Ty::Error };
+        let name = self.env.r.symbol(s).name.clone();
+        let map = self.instantiate(&def.generics.clone());
+        let mut seen: HashMap<&str, Span> = HashMap::new();
+        for f in fields {
+            let fd = def.fields.iter().find(|x| x.name == f.name.name);
+            let expected = fd.map(|x| subst(&x.ty, &map));
+            let vt = match &f.value {
+                Some(v) => self.expr(v, expected.as_ref()),
+                None => match self.res(f.id) {
+                    Some(Res::Symbol(l)) => self.locals.get(&l).cloned().unwrap_or(Ty::Error),
+                    _ => Ty::Error,
+                },
+            };
+            let Some(fd) = fd else {
+                self.err(Diagnostic::error("E3012", "unknown_field", format!("struct `{name}` has no field `{}`", f.name.name)).primary(f.name.span, ""));
+                continue;
+            };
+            if let Some(prev) = seen.insert(&fd.name, f.name.span) {
+                self.err(
+                    Diagnostic::error("E3013", "duplicate_field_init", format!("field `{}` is given twice", f.name.name))
+                        .primary(f.name.span, "")
+                        .secondary(prev, "first given here"),
+                );
+            }
+            if def.module != self.m && !fd.is_pub {
+                self.err(Diagnostic::error("E3014", "private_field", format!("field `{}` of `{name}` is private", f.name.name)).primary(f.name.span, ""));
+            }
+            self.coerce(&vt, &expected.unwrap(), f.span);
+        }
+        let missing: Vec<String> = def.fields.iter().filter(|f| !seen.contains_key(f.name.as_str())).map(|f| format!("`{}`", f.name)).collect();
+        if !missing.is_empty() {
+            self.err(
+                Diagnostic::error("E3011", "missing_fields", format!("missing field{} {} in `{name}`", if missing.len() == 1 { "" } else { "s" }, missing.join(", ")))
+                    .primary(e.span, "")
+                    .note("every field must be given; there are no default values"),
+            );
+        }
+        Ty::Adt(s, def.generics.iter().map(|p| map[p].clone()).collect())
+    }
+
+    fn closure(&mut self, params: &[ClosureParam], ret: Option<&Type>, body: &Block, expected: Option<&Ty>) -> Ty {
+        let exp = expected.map(|t| self.infer.shallow(t));
+        let (exp_ps, exp_ret) = match &exp {
+            Some(Ty::Fn(ps, r)) if ps.len() == params.len() => (Some(ps.clone()), Some((**r).clone())),
+            Some(Ty::Opaque) => (Some(vec![Ty::Opaque; params.len()]), Some(Ty::Opaque)),
+            _ => (None, None),
+        };
+        let mut pts = Vec::new();
+        for (i, p) in params.iter().enumerate() {
+            let t = match (&p.ty, &exp_ps) {
+                (Some(t), _) => self.env_lower(t),
+                (None, Some(ps)) => ps[i].clone(),
+                (None, None) => {
+                    self.err(
+                        Diagnostic::error("E3010", "cannot_infer", format!("cannot infer the type of closure parameter `{}`", p.name.name))
+                            .primary(p.name.span, "")
+                            .help(format!("annotate it: `fn({} T) ...`", p.name.name)),
+                    );
+                    Ty::Error
+                }
+            };
+            if let Some(s) = self.def(p.id) {
+                self.locals.insert(s, t.clone());
+            }
+            pts.push(t);
+        }
+        let rt = match (ret, exp_ret) {
+            (Some(t), _) => self.env_lower(t),
+            (None, Some(r)) => r,
+            (None, None) => Ty::Void,
+        };
+        self.rets.push(rt.clone());
+        self.stmts(&body.stmts);
+        self.rets.pop();
+        if !matches!(self.infer.shallow(&rt), Ty::Void | Ty::Never | Ty::Opaque) && !self.diverges(&body.stmts) {
+            let shown = self.show(&rt);
+            self.err(
+                Diagnostic::error("E3009", "missing_return", format!("closure may end without returning `{shown}`"))
+                    .primary(Span::new(body.span.file, body.span.end - 1, body.span.end), ""),
+            );
+        }
+        Ty::Fn(pts, Box::new(rt))
+    }
+
+    // ------------------------------------------------------------ calls
+
+    fn call(&mut self, e: &Expr, callee: &Expr, args: &[Expr], expected: Option<&Ty>) -> Ty {
+        let target = self.res(callee.id);
+        match target {
+            Some(Res::External { .. }) => {
+                self.record(callee, Ty::Opaque);
+                for a in args {
+                    self.expr(a, Some(&Ty::Opaque));
+                }
+                Ty::Opaque
+            }
+            Some(Res::Symbol(s)) => match self.kind(s).clone() {
+                SymbolKind::Builtin => self.builtin(e, s, args),
+                SymbolKind::Primitive => self.conversion(e, s, args),
+                SymbolKind::Variant { parent } => {
+                    let (fields, generics) = self.variant_info(parent, s);
+                    let mut map = self.instantiate(&generics);
+                    let result = Ty::Adt(parent, generics.iter().map(|p| map[p].clone()).collect());
+                    if let Some(x) = expected {
+                        self.infer.unify(&result, x);
+                    }
+                    for (k, v) in map.iter_mut() {
+                        let _ = k;
+                        *v = self.infer.shallow(v);
+                    }
+                    let ps: Vec<Ty> = fields.iter().map(|f| subst(f, &map)).collect();
+                    let name = self.env.r.symbol(s).name.clone();
+                    self.args(e, &format!("variant `{name}`"), &ps, args);
+                    result
+                }
+                SymbolKind::Function | SymbolKind::Method { .. } | SymbolKind::ImplMethod { .. } => {
+                    let Some(sig) = self.env.fns.get(&s).cloned() else { return Ty::Error };
+                    self.sig_call(e, s, &sig, None, args, expected)
+                }
+                SymbolKind::Local { .. }
+                | SymbolKind::Param
+                | SymbolKind::PatternBinding
+                | SymbolKind::LoopBinding
+                | SymbolKind::ClosureParam
+                | SymbolKind::SelfParam => self.value_call(e, callee, args),
+                k => {
+                    let name = self.env.r.symbol(s).name.clone();
+                    let what = crate::binding_kind(&k);
+                    let mut d = Diagnostic::error("E3003", "not_callable", format!("{what} `{name}` cannot be called")).primary(callee.span, "");
+                    if matches!(k, SymbolKind::Struct) {
+                        d = d.help(format!("build a value with `{name}{{field: value}}`, or call an associated function like `{name}.new(...)`"));
+                    }
+                    self.err(d);
+                    for a in args {
+                        self.expr(a, None);
+                    }
+                    Ty::Error
+                }
+            },
+            Some(Res::ScrutineeVariant(_)) => Ty::Error,
+            None => match &callee.kind {
+                ExprKind::Field { base, name } => self.method_call(e, base, name, args),
+                _ => self.value_call(e, callee, args),
+            },
+        }
+    }
+
+    fn value_call(&mut self, e: &Expr, callee: &Expr, args: &[Expr]) -> Ty {
+        let ct = self.expr(callee, None);
+        match self.infer.shallow(&ct) {
+            Ty::Fn(ps, r) => {
+                self.args(e, "this function", &ps, args);
+                *r
+            }
+            Ty::Opaque | Ty::Error => {
+                for a in args {
+                    self.expr(a, Some(&Ty::Opaque));
+                }
+                Ty::Opaque
+            }
+            other => {
+                let shown = self.show(&other);
+                self.err(Diagnostic::error("E3003", "not_callable", format!("a value of type `{shown}` cannot be called")).primary(callee.span, ""));
+                Ty::Error
+            }
+        }
+    }
+
+    fn args(&mut self, e: &Expr, what: &str, params: &[Ty], args: &[Expr]) {
+        if params.len() != args.len() {
+            self.err(
+                Diagnostic::error(
+                    "E3002",
+                    "wrong_arg_count",
+                    format!("{what} takes {} argument{}, but {} {} given", params.len(), if params.len() == 1 { "" } else { "s" }, args.len(), if args.len() == 1 { "was" } else { "were" }),
+                )
+                .primary(e.span, ""),
+            );
+        }
+        for (i, a) in args.iter().enumerate() {
+            match params.get(i) {
+                Some(p) => {
+                    let at = self.expr(a, Some(p));
+                    self.coerce(&at, p, a.span);
+                }
+                None => {
+                    self.expr(a, None);
+                }
+            }
+        }
+    }
+
+    /// Call through a signature. `recv` = already-typed receiver for method
+    /// call syntax; for static calls (`T.m(x)`) the receiver is the first arg.
+    fn sig_call(&mut self, e: &Expr, s: SymbolId, sig: &FnSig, recv: Option<(&Expr, Ty, HashMap<ParamId, Ty>)>, args: &[Expr], expected: Option<&Ty>) -> Ty {
+        let name = self.env.r.symbol(s).name.clone();
+        if sig.is_extern && self.unsafe_depth == 0 {
+            self.err(
+                Diagnostic::error("E3031", "extern_call_outside_unsafe", format!("calling the extern function `{name}` requires `unsafe`"))
+                    .primary(e.span, "")
+                    .help("wrap the call in `unsafe { ... }` and document why it is sound"),
+            );
+        }
+        let mut map = self.instantiate(&sig.generics);
+        let has_recv = recv.is_some();
+        if let Some((_, _, fixed)) = &recv {
+            map.extend(fixed.clone());
+        }
+        // Propagate the expected result type into the generics first, so
+        // arguments like `None` or closures see concrete types.
+        if let Some(x) = expected {
+            let r = subst(&sig.ret, &map);
+            self.infer.unify(&r, x);
+        }
+        let mut ps: Vec<Ty> = Vec::new();
+        if !has_recv && let (Some(r), Some(st)) = (sig.receiver, &sig.self_ty) {
+            ps.push(receiver_ty(r, st));
+        }
+        ps.extend(sig.params.iter().cloned());
+        let ps: Vec<Ty> = ps.iter().map(|p| subst(p, &map)).collect();
+        let what = if has_recv { format!("method `{name}`") } else { format!("`{name}`") };
+        self.args(e, &what, &ps, args);
+        self.obligations_for(&sig.generics, &map, e.span);
+        subst(&sig.ret, &map)
+    }
+
+    fn method_call(&mut self, e: &Expr, base: &Expr, name: &Ident, args: &[Expr]) -> Ty {
+        let bt = self.expr(base, None);
+        let z = self.infer.zonk(&bt);
+        let (inner, through) = peel(&z);
+        // Find the method.
+        let found: Option<(SymbolId, FnSig, HashMap<ParamId, Ty>)> = match &inner {
+            Ty::Opaque | Ty::Error => {
+                self.tables.method_calls.insert(e.id, MethodTarget::Opaque);
+                for a in args {
+                    self.expr(a, Some(&Ty::Opaque));
+                }
+                return Ty::Opaque;
+            }
+            Ty::Adt(s, targs) => {
+                if *s == self.env.prelude.channel || self.env.r.symbol(*s).name == "Sender" && matches!(self.kind(*s), SymbolKind::PreludeType) {
+                    // Channel/Sender methods come with the concurrency runtime.
+                    self.tables.method_calls.insert(e.id, MethodTarget::Opaque);
+                    for a in args {
+                        self.expr(a, Some(&Ty::Opaque));
+                    }
+                    return Ty::Opaque;
+                }
+                self.lookup_method(*s, targs, &name.name)
+            }
+            Ty::Param(p) => self.interface_method(self.env.bounds.get(p).cloned().unwrap_or_default(), &name.name),
+            Ty::Any(i) => self.interface_method(vec![*i], &name.name),
+            _ => None,
+        };
+        let Some((msym, sig, fixed)) = found else {
+            if let Some(t) = self.intrinsic(e, &inner, name, args) {
+                return t;
+            }
+            let shown = self.show(&inner);
+            let mut d = Diagnostic::error("E3005", "no_method", format!("`{shown}` has no method `{}`", name.name)).primary(name.span, "");
+            if matches!(inner, Ty::Str | Ty::Int(_) | Ty::Float(_)) {
+                d = d.note("the standard library is not available yet; v0 only has a few built-in methods (see docs/types.md)");
+            } else if let Ty::Param(_) = inner {
+                d = d.help("add an interface bound that declares this method: `<T: Interface>`");
+            }
+            self.err(d);
+            for a in args {
+                self.expr(a, None);
+            }
+            return Ty::Error;
+        };
+        self.tables.method_calls.insert(e.id, MethodTarget::Symbol(msym));
+        let Some(rk) = sig.receiver else {
+            let tn = self.env.r.symbol(msym).name.clone();
+            self.err(
+                Diagnostic::error("E3005", "no_method", format!("`{tn}` is an associated function, not a method"))
+                    .primary(name.span, "")
+                    .help(format!("call it on the type: `{}.{tn}(...)`", self.show(&inner))),
+            );
+            return Ty::Error;
+        };
+        // Receiver adjustment: auto-borrow places, auto-deref references.
+        match rk {
+            ReceiverKind::Ref => {}
+            ReceiverKind::RefMut => match through {
+                Some(true) => {}
+                Some(false) => {
+                    let shown = self.show(&z);
+                    self.err(
+                        Diagnostic::error("E3016", "borrow_mut_immutable", format!("`{}` needs `&mut self`, but the receiver is `{shown}`", name.name))
+                            .primary(base.span, "this is a `&` reference")
+                            .help("take a mutable reference (`&mut`) instead"),
+                    );
+                }
+                None => {
+                    self.require_mut(base, true);
+                }
+            },
+            ReceiverKind::Value => {
+                if through.is_some() && !self.is_copy(&inner) {
+                    let shown = self.show(&inner);
+                    self.err(
+                        Diagnostic::error("E3030", "move_out_of_reference", format!("`{}` takes `self` by value, but only a reference to `{shown}` is available", name.name))
+                            .primary(base.span, "")
+                            .note(format!("`{shown}` is not a copy type, so it cannot be moved out of a reference")),
+                    );
+                }
+            }
+        }
+        self.sig_call(e, msym, &sig, Some((base, bt, fixed)), args, None)
+    }
+
+    /// Inherent methods, then impl methods; binds the owner's binders to the
+    /// receiver's type arguments.
+    fn lookup_method(&self, s: SymbolId, targs: &[Ty], name: &str) -> Option<(SymbolId, FnSig, HashMap<ParamId, Ty>)> {
+        let mut cands: Vec<SymbolId> = Vec::new();
+        if let Some(m) = self.env.r.member(s, name)
+            && matches!(self.kind(m), SymbolKind::Method { .. })
+        {
+            cands.push(m);
+        }
+        if cands.is_empty() {
+            for i in &self.env.r.impls {
+                if i.target == Some(s) {
+                    cands.extend(i.methods.iter().copied().filter(|&m| self.env.r.symbol(m).name == name));
+                }
+            }
+        }
+        let m = *cands.first()?;
+        let sig = self.env.fns.get(&m)?.clone();
+        let fixed: HashMap<ParamId, Ty> = sig.generics.iter().copied().zip(targs.iter().cloned()).collect();
+        Some((m, sig, fixed))
+    }
+
+    fn interface_method(&self, ifaces: Vec<SymbolId>, name: &str) -> Option<(SymbolId, FnSig, HashMap<ParamId, Ty>)> {
+        for i in ifaces {
+            if let Some(m) = self.env.r.member(i, name)
+                && let Some(sig) = self.env.fns.get(&m)
+            {
+                return Some((m, sig.clone(), HashMap::new()));
+            }
+        }
+        None
+    }
+
+    /// Provisional built-in methods until the standard library exists.
+    fn intrinsic(&mut self, e: &Expr, recv: &Ty, name: &Ident, args: &[Expr]) -> Option<Ty> {
+        let ret = match (recv, name.name.as_str()) {
+            (Ty::Str | Ty::Array(..) | Ty::Slice(_), "len") => Ty::Int(IntTy::Usize),
+            (Ty::Str | Ty::Array(..) | Ty::Slice(_), "is_empty") => Ty::Bool,
+            (Ty::Str, "clone") => Ty::Str,
+            (Ty::Float(_), "sqrt" | "abs") => recv.clone(),
+            (Ty::Int(i), "abs") if i.signed() => recv.clone(),
+            _ => return None,
+        };
+        self.tables.method_calls.insert(e.id, MethodTarget::Intrinsic(name.name.clone()));
+        self.args(e, &format!("method `{}`", name.name), &[], args);
+        Some(ret)
+    }
+
+    fn builtin(&mut self, e: &Expr, s: SymbolId, args: &[Expr]) -> Ty {
+        let p = &self.env.prelude;
+        if s == p.print {
+            if args.len() != 1 {
+                self.args(e, "`print`", &[Ty::Opaque], args);
+            } else {
+                let t = self.expr(&args[0], None);
+                self.printables.push((t, args[0].span));
+            }
+            Ty::Void
+        } else if s == p.panic {
+            self.args(e, "`panic`", &[Ty::Str], args);
+            Ty::Never
+        } else if s == p.channel_fn {
+            let cap = self.infer.fresh(VarKind::Int);
+            self.args(e, "`channel`", &[cap], args);
+            let elem = self.infer.fresh(VarKind::General);
+            Ty::Adt(p.channel, vec![elem])
+        } else {
+            Ty::Error
+        }
+    }
+
+    /// `u64(x)`: checked numeric conversion.
+    fn conversion(&mut self, e: &Expr, s: SymbolId, args: &[Expr]) -> Ty {
+        let target = crate::env::primitive(&self.env.r.symbol(s).name);
+        if !matches!(target, Ty::Int(_) | Ty::Float(_)) {
+            let name = self.env.r.symbol(s).name.clone();
+            self.err(Diagnostic::error("E3029", "invalid_conversion", format!("`{name}` is not a conversion function")).primary(e.span, ""));
+            return Ty::Error;
+        }
+        if args.len() != 1 {
+            self.args(e, "a conversion", &[Ty::Opaque], args);
+            return target;
+        }
+        let t = self.expr(&args[0], None);
+        let ok = match self.infer.shallow(&t) {
+            Ty::Int(_) | Ty::Float(_) | Ty::Opaque | Ty::Error => true,
+            Ty::Var(v) => self.infer.kind(v) != VarKind::General,
+            _ => false,
+        };
+        if !ok {
+            let shown = self.show(&t);
+            self.err(
+                Diagnostic::error("E3029", "invalid_conversion", format!("cannot convert `{shown}` to `{}`", self.show(&target)))
+                    .primary(args[0].span, "")
+                    .note("conversions are between numeric types"),
+            );
+        }
+        target
+    }
+}
+
+pub fn receiver_ty(r: ReceiverKind, st: &Ty) -> Ty {
+    match r {
+        ReceiverKind::Value => st.clone(),
+        ReceiverKind::Ref => Ty::Ref(false, Box::new(st.clone())),
+        ReceiverKind::RefMut => Ty::Ref(true, Box::new(st.clone())),
+    }
+}
+
+fn has_break(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(|s| match &s.kind {
+        StmtKind::Break => true,
+        StmtKind::If(i) => if_has_break(i),
+        StmtKind::Match(m) => m.arms.iter().any(|a| has_break(std::slice::from_ref(&a.body))),
+        StmtKind::Block(b) | StmtKind::Unsafe(b) | StmtKind::Scope(b) => has_break(&b.stmts),
+        // `break` inside a nested loop belongs to that loop.
+        _ => false,
+    })
+}
+
+fn if_has_break(i: &IfStmt) -> bool {
+    has_break(&i.then_block.stmts)
+        || match i.else_branch.as_deref() {
+            Some(ElseBranch::If(e)) => if_has_break(e),
+            Some(ElseBranch::Block(b)) => has_break(&b.stmts),
+            None => false,
+        }
+}

@@ -1,0 +1,6 @@
+fn main() {
+    nothing := None
+    f := fn(x) {
+        print(1)
+    }
+}

@@ -1,0 +1,8 @@
+error[E3031]: calling the extern function `getpid` requires `unsafe`
+ --> tests/types/fail/E3031_extern_outside_unsafe.tarn:4:10
+  |
+4 |     p := getpid()
+  |          ^^^^^^^^
+  |
+  = help: wrap the call in `unsafe { ... }` and document why it is sound
+

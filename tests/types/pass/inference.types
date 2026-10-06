@@ -1,0 +1,19 @@
+== inference
+6:20 self: Pair<A, B>
+10:16 value: T
+14:13 items: &[]T
+22:5 a: i64
+23:5 b: u8
+24:5 c: u8
+25:5 d: f64
+26:5 e: f32
+27:5 f: i64
+28:5 g: string
+29:5 p: Pair<i64, string>
+30:5 q: Pair<string, i64>
+31:5 nothing: Option<i32>
+32:5 some: Option<u8>
+33:5 r: Result<u64, string>
+34:5 arr: [3]u16
+35:5 h: Option<&u16>
+36:5 n: u64

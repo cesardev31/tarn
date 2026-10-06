@@ -1,0 +1,35 @@
+error[E3018]: `match` does not cover `East`
+ --> tests/types/fail/E3018_non_exhaustive.tarn:8:11
+  |
+8 |     match d {
+  |           ^
+  |
+  = note: guarded arms and nested refutable patterns do not count as covering in v0
+  = help: add the missing arms, or a final `_ => ...` arm
+
+error[E3018]: `match` on `i64` does not cover every value
+  --> tests/types/fail/E3018_non_exhaustive.tarn:12:11
+   |
+12 |     match n {
+   |           ^
+   |
+   = help: add a final `_ => ...` arm
+
+error[E3018]: `match` does not cover `false`
+  --> tests/types/fail/E3018_non_exhaustive.tarn:15:11
+   |
+15 |     match b {
+   |           ^
+   |
+   = note: guarded arms and nested refutable patterns do not count as covering in v0
+   = help: add the missing arms, or a final `_ => ...` arm
+
+error[E3018]: `match` does not cover `Some`
+  --> tests/types/fail/E3018_non_exhaustive.tarn:18:11
+   |
+18 |     match Some(n) {
+   |           ^^^^^^^
+   |
+   = note: guarded arms and nested refutable patterns do not count as covering in v0
+   = help: add the missing arms, or a final `_ => ...` arm
+

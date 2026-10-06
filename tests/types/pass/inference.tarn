@@ -1,0 +1,38 @@
+struct Pair<A, B> {
+    first A
+    second B
+}
+
+fn Pair<A, B>.swap(self) Pair<B, A> {
+    return Pair{first: self.second, second: self.first}
+}
+
+fn identity<T>(value T) T {
+    return value
+}
+
+fn first<T>(items &[]T) Option<&T> {
+    if items.is_empty() {
+        return None
+    }
+    return Some(&items[0])
+}
+
+fn main() {
+    a := 1                       // i64 by default
+    b: u8 := 2                   // annotation
+    c := b + 3                   // literal adopts u8
+    d := 2.5                     // f64 by default
+    e: f32 := 1.5
+    f := identity(a)
+    g := identity("text")
+    p := Pair{first: 1, second: "one"}
+    q := p.swap()
+    nothing: Option<i32> := None
+    some := Some(c)
+    r: Result<u64, string> := Ok(7)
+    arr := [3]u16{1, 2, 3}
+    h := first(&arr)
+    n := u64(c) + u64(arr[0])
+    print(a)
+}

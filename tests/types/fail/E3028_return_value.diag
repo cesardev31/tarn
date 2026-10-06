@@ -1,0 +1,14 @@
+error[E3028]: this function returns `void`, but a value is returned
+ --> tests/types/fail/E3028_return_value.tarn:2:12
+  |
+2 |     return 5
+  |            ^
+  |
+  = help: remove the value, or declare a return type
+
+error[E3028]: `return` without a value in a function returning `i64`
+ --> tests/types/fail/E3028_return_value.tarn:6:5
+  |
+6 |     return
+  |     ^^^^^^
+

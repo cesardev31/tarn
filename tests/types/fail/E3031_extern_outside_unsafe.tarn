@@ -1,0 +1,5 @@
+extern "C" fn getpid() i32
+
+fn main() {
+    p := getpid()
+}

@@ -1,0 +1,23 @@
+error[E3017]: `try` would return an error of type `A` from a function whose error type is `B`
+  --> tests/types/fail/E3017_try_mismatch.tarn:14:10
+   |
+14 |     x := try get()
+   |          ^^^^^^^^^
+   |
+   = note: v0 does not convert error types automatically
+   = help: convert it explicitly with `match`, or change the function's error type
+
+error[E3017]: `try` on `Result<i64, A>` needs the function to return a `Result`
+  --> tests/types/fail/E3017_try_mismatch.tarn:19:10
+   |
+19 |     x := try get()
+   |          ^^^^^^^^^
+   |
+   = note: this function returns `i64`
+
+error[E3017]: `try` needs a `Result` or `Option`, found `{integer}`
+  --> tests/types/fail/E3017_try_mismatch.tarn:24:14
+   |
+24 |     y := try 5
+   |              ^
+

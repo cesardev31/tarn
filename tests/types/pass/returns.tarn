@@ -1,0 +1,38 @@
+enum Light {
+    Red
+    Green
+}
+
+fn sign(x i64) i64 {
+    if x > 0 {
+        return 1
+    } else if x < 0 {
+        return -1
+    } else {
+        return 0
+    }
+}
+
+fn next(l Light) Light {
+    match l {
+        Red => return Light.Green
+        Green => return Light.Red
+    }
+}
+
+fn forever() i64 {
+    for {
+    }
+}
+
+fn fail(msg string) i64 {
+    panic(msg)
+}
+
+fn classify(n i64) string {
+    match n {
+        0 => return "zero"
+        1..=9 => return "small"
+        _ => return "large"
+    }
+}

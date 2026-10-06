@@ -1,0 +1,22 @@
+enum Dir {
+    North
+    South
+    East
+}
+
+fn f(d Dir, n i64, b bool) {
+    match d {
+        North => print(1)
+        South => print(2)
+    }
+    match n {
+        0 => print(0)
+    }
+    match b {
+        true => print(1)
+    }
+    match Some(n) {
+        Some(1) => print(1)
+        None => print(0)
+    }
+}

@@ -1,0 +1,23 @@
+copy struct Point {
+    x f64
+    y f64
+}
+
+copy enum Dir {
+    North
+    South
+}
+
+fn Point.add(self, other Point) Point {
+    return Point{x: self.x + other.x, y: self.y + other.y}
+}
+
+fn main() {
+    a := Point{x: 1.0, y: 2.0}
+    b := a
+    c := a.add(b)
+    r := &c
+    d := r.add(a)           // by-value method through & is fine for copy types
+    dir := Dir.North
+    e := dir
+}

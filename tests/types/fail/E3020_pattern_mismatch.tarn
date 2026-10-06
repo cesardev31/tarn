@@ -1,0 +1,16 @@
+enum Shape {
+    Circle(f64)
+    Rect(f64, f64)
+}
+
+fn f(s Shape, n i64) {
+    match s {
+        Circle(r, x) => print(r)
+        Rect => print(0)
+        _ => print(1)
+    }
+    match n {
+        Some(x) => print(x)
+        _ => print(0)
+    }
+}

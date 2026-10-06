@@ -1,0 +1,10 @@
+struct User {
+    name string
+    age u32
+}
+
+fn main() {
+    a := User{name: "a"}
+    b := User{name: "a", age: 1, email: "x"}
+    c := User{name: "a", age: 1, age: 2}
+}

@@ -1,0 +1,8 @@
+error[E3019]: enum `Dir` has no variant `Sout`
+ --> tests/types/fail/E3019_unknown_variant.tarn:9:9
+  |
+9 |         Sout => print(2)
+  |         ^^^^
+  |
+  = note: its variants are: North, South
+
