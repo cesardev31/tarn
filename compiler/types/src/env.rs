@@ -88,6 +88,7 @@ pub struct Prelude {
 /// phases (IR lowering) so they never re-derive layouts or signatures.
 #[derive(Default)]
 pub struct Decls {
+    pub task: Option<SymbolId>,
     /// Interface declaration order, plus resolved implementation IDs.
     pub interfaces: HashMap<SymbolId, Vec<SymbolId>>,
     pub interface_methods: HashMap<SymbolId, (SymbolId, usize)>,
@@ -137,7 +138,7 @@ impl<'a> Env<'a> {
             panic: get("panic"),
             channel_fn: get("channel"),
         };
-        let decls = Decls { copy: prelude.copy, ..Decls::default() };
+        let decls = Decls { task: ps.get("Task"), copy: prelude.copy, ..Decls::default() };
         let mut env = Env { inputs, r, decls, prelude, diags: Vec::new() };
         env.collect();
         for imp in &r.impls {
@@ -298,7 +299,11 @@ impl<'a> Env<'a> {
         let offset = usize::from(receiver.is_some());
         let mut sources = Vec::new();
         let holds = |ty: &Ty| ty_holds_references(ty);
-        let result = if !holds(&ret) {
+        // The private Task lang item transfers an owned stored result; it does
+        // not manufacture a reference from a bodyless declaration.
+        let task_join = f.abi.as_deref() == Some("intrinsic") && f.name.name == "join"
+            && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.task);
+        let result = if task_join { ResultContract::Owned } else if !holds(&ret) {
             if self.decls.is_copy(&ret) { ResultContract::Copy } else { ResultContract::Owned }
         } else if f.body.is_some() {
             ResultContract::InferredBorrow

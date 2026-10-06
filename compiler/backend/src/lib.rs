@@ -71,7 +71,7 @@ pub fn build(p: &post_drop::Program, t: &Typed, output: &Path) -> Result<()> {
     std::fs::write(&object, bytes).map_err(io_error)?;
     std::fs::write(&runtime, RUNTIME).map_err(io_error)?;
     let linked = Command::new("cc")
-        .args(["-std=c11", "-O0", "-fno-strict-aliasing", "-no-pie"])
+        .args(["-std=c11", "-O0", "-fno-strict-aliasing", "-no-pie", "-pthread"])
         .arg(&object)
         .arg(&runtime)
         .arg("-lm")

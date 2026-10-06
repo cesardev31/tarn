@@ -61,6 +61,7 @@ pub fn verify(p: &Program) -> Vec<String> {
             }
             if let Terminator::Call { args, dest, callee, .. } = &b.term {
                 let callee_ok = match callee {
+                    Callee::TaskSpawn { worker, drop_result, .. } => (worker.0 as usize) < p.functions.len() && (drop_result.0 as usize) < p.functions.len(),
                     Callee::Fn(id, _) => (id.0 as usize) < p.functions.len(),
                     Callee::Value(o) => op_ok(o),
                     _ => true,

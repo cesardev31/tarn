@@ -6,6 +6,13 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("task double join", Some("E4001"), "fn main() { t := spawn move fn() i64 { return 42 }\n t.join()\n t.join() }") ,
+    ("task handle use after move", Some("E4001"), "fn main() { t := spawn move fn() i64 { return 42 }\n u := t\n t.join()\n u.join() }") ,
+    ("task capture use after move", Some("E4001"), "fn main() { s := \"owned\"\n t := spawn move fn() string { return s }\n print(s)\n t.join() }") ,
+    ("unscoped borrowed task closure", Some("E4206"), "fn main() { x := 42\n t := spawn fn() i64 { return x }\n t.join() }") ,
+    ("owned task containing local loan", Some("E4206"), "fn main() { x: i64 := 42\n r := &x\n t := spawn move fn() i64 { return r.abs() }\n t.join() }") ,
+    ("task result cannot borrow its environment", Some("E4201"), "fn main() { x := 42\n t := spawn move fn() &i64 { return &x }\n t.join() }") ,
+    ("task handle ownership transfer", None, "fn main() { t := spawn move fn() i64 { return 42 }\n u := t\n print(u.join()) }") ,
     ("opaque std return rejected", Some("E3040"), "import \"fs\"\nfn main() {\n    x := fs.open(\"file\")\n}"),
     ("opaque std type rejected", Some("E3040"), "import \"fs\"\nfn observe(x &fs.File) {}"),
     ("opaque prelude error rejected", Some("E3040"), "fn observe(x &Error) {}"),

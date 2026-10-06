@@ -1,0 +1,62 @@
+fn normal_exit() {
+    outer := "outer-normal"
+    capture := "capture-normal"
+    task := spawn move fn() string {
+        capture.len()
+        return "unused-normal"
+    }
+    outer.len()
+}
+fn return_exit() {
+    capture := "capture-return"
+    task := spawn move fn() string {
+        capture.len()
+        return "unused-return"
+    }
+    return
+}
+fn loop_exits() {
+    for {
+        task := spawn move fn() string { return "unused-break" }
+        break
+    }
+    var count = 0
+    for count < 2 {
+        count = count + 1
+        task := spawn move fn() string { return "unused-continue" }
+        continue
+    }
+}
+fn nested_scopes() {
+    scope {
+        outer := spawn move fn() string { return "unused-outer" }
+        scope {
+            inner := spawn move fn() string { return "unused-inner" }
+            return
+        }
+    }
+}
+fn overwrite() {
+    var task: Task<string>
+    task = spawn move fn() string { return "unused-overwrite" }
+    task = spawn move fn() string { return "joined-replacement" }
+    task = task
+    task.join()
+}
+fn conditional(enabled bool) {
+    var task: Task<string>
+    if enabled {
+        task = spawn move fn() string { return "unused-conditional" }
+    }
+}
+fn main() {
+    normal_exit()
+    return_exit()
+    loop_exits()
+    nested_scopes()
+    spawn move fn() string { return "unused-expression" }
+    overwrite()
+    conditional(false)
+    conditional(true)
+    print(42)
+}

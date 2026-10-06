@@ -1,7 +1,8 @@
 # ADR 0033: safe native tasks and structured completion
 
-Status: proposed for phase 11; implementation in progress. This document is not
-an assertion that native tasks or synchronization are available today.
+Status: proposed for phase 11. Sub-stage 11A implements native handle-owned
+tasks; 11B capabilities/scoped loans and 11C synchronization are pending approval.
+Do not mark this ADR accepted before all three sub-stages are validated.
 
 ## Ownership boundary
 
@@ -10,7 +11,7 @@ thread-safety checker, backend ownership query or explicit lifetime syntax is
 introduced. Phase-10 callable environments and verified destruction functions
 remain authoritative. General reference-bearing user structs/enums retain E4203.
 
-The intended expression is `spawn move fn() R { ... }`, producing unique owned
+The 11A expression is `spawn move fn() R { ... }`, producing unique owned
 `Task<R>` storage. The task body has zero explicit arguments. Spawn transfers its
 callable; mode controls invocation, independently of environment ownership. A
 reusable owned callable may be invoked once by the task and then destroyed; a
@@ -19,8 +20,10 @@ stack environment must not cross an unscoped boundary. Moving a reference does
 not extend its provenance. Unscoped result types may not contain loans whose
 storage could die before task completion/result transfer.
 
-Existing `spawn call(...)` and `scope { ... }` are provisional syntax/IR, not a
-native concurrency implementation. Compatibility or migration must be explicit;
+The legacy `spawn call(...)` stays frontend-provisional and native-unsupported.
+`scope { ... }` retains a provisional completion marker; in 11A that marker has no
+child records and native tasks inside remain handle-owned unscoped tasks.
+Compatibility or migration must be explicit;
 ordinary calls must never accidentally execute synchronously as spawn recovery.
 
 ## Handle policy and results
@@ -36,9 +39,9 @@ semantics), or mandatory explicit join (application ceremony and path complexity
 It can block indefinitely if the application deadlocks or its worker never ends.
 This is visible resource destruction behavior, not cancellation. Self-join and
 OS thread failures must abort rather than hang on an impossible runtime invariant.
-Whether the public join returns a plain result or a modeled Result is still open;
-no fake Error contract or recoverable panic transport may be introduced merely
-for `try` syntax. Allocation/thread failures can remain abort-only in v0.
+The public 11A `join()` returns R directly. There is no fake Error contract or
+recoverable panic transport for `try` syntax. Allocation/thread failures are
+abort-only runtime faults.
 
 ## Scoped tasks
 
@@ -132,8 +135,47 @@ callable, dynamic, drop and native regression gates.
 
 No async/await, futures, reactor, green threads, work stealing, cancellation,
 detach, user destructors, unwinding, optimizer, LLVM, package manager or platform
-expansion. Public join/error API, scoped spawn spelling, capability declarations
+expansion. Scoped spawn spelling, capability declarations
 for trusted native/dynamic types, mutex shared ownership and exact atomic surface
-must be resolved and tested before this ADR can become accepted. Runtime execution,
-thread capability enforcement, scoped loan retention and synchronization remain
-unimplemented at this checkpoint.
+must be resolved and tested before this ADR can become accepted. Thread
+capability enforcement, scoped loan retention and synchronization remain
+unimplemented. 11A is the executable handle/result ownership boundary.
+
+## 11A private runtime allocation (implementation contract)
+
+The initial runtime record owns a pthread ID, a worker adapter pointer, two
+callable lanes (code/environment), a separately allocated canonically aligned
+result buffer, a compiler-generated result destruction adapter and execution-only
+joined/initialized bits. The worker adapter receives `(result, code, environment)`;
+it invokes an ordinary verified Tarn wrapper and transfers its return into result
+storage. It is responsible for callable destruction according to verified IR.
+The C runtime never interprets Tarn types or destroys callable captures itself.
+
+The result buffer allocates at least one byte for zero-size results. Source values
+remain subject to the native layout limit. Worker return sets initialized; join
+synchronizes that write through pthread_join. Explicit join waits, transfers the
+result into caller storage, then releases the record without result destruction.
+Implicit destruction waits, dispatches the result destruction adapter exactly once,
+then releases both allocations. No operation can detach. Allocation/create/join
+failure and self-join abort. `join()` returns R directly, with no panic Result.
+The compiler now emits ordinary worker and unused-result destruction functions,
+checks them through 6A/6B/post-drop, and specializes their explicit IDs. Backend
+adapters only bridge canonical scalar/aggregate/zero-size ABI lanes. Core declares
+a private usize handle field in non-Copy Task<R>; a trusted intrinsic join contract
+transfers the stored result, rather than inventing borrowed-result inflow from a
+bodyless generic declaration. Capturing move closures may have Shared, Mutable
+or Once invocation; the wrapper borrows reusable inputs and destroys them after
+calling, or moves a Once input. The runtime does not independently free captures.
+
+Current 11A limits: spawn accepts a direct zero-argument move-closure literal;
+references/borrowed stack environments remain rejected, including captured loans
+inside owned environments. General callable-value spawn and generic capability
+contracts await 11B. Sequential execution is never used as fallback. Private
+function-pointer lanes assume the existing Linux x86_64 System V ABI.
+
+11A validation covers real native scalar/string/generic-ADT/enum/array/zero-size
+results, multiple/nested tasks, handle/capture moves, return/break/continue/nested
+implicit completion, conditional initialization, overwrite/self-assignment,
+exact capture/result destruction traces, worker SIGABRT, corrupted metadata and
+both mutation corpora. Runtime tests assert distinct pthread identity, repeated
+joins and deterministic injected allocation/create/join/self-join faults.

@@ -93,3 +93,21 @@ Borrowed dynamic references use private `(data, vtable)` pairs and resolved
 frontend implementation IDs (ADR 0030). Declaration-derived passing/result
 contracts and `borrows(...)` clauses expose invisible implementation promises
 (ADR 0031); the backend still receives no move/borrow results.
+
+
+## Native task boundary (phase 11A)
+
+`Callee::TaskSpawn` records generated worker/result-destruction function IDs and
+specialization arguments. Both functions pass through ordinary IR verification,
+move/borrow checking and post-drop elaboration. The post-drop verifier validates
+the callable/result shapes and owned argument. Backend specialization reserves
+these functions through its existing work list. Small C ABI adapters bridge to
+their private canonical ABI; the runtime never inspects capture/result types.
+
+`Task<R>` has the canonical eight-byte private handle field declared in core;
+its result is owned through runtime metadata, not an inline field. Native drop
+of this resource waits and dispatches its verified result destruction function.
+Explicit join moves result bytes to caller storage before releasing allocations.
+The linker includes `-pthread`. Representation and abort semantics:
+[ADR 0033](adr/0033-safe-native-tasks.md). Scoped loan retention, Transfer/Share and
+synchronization remain pending; no backend ownership queries are introduced.

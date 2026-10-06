@@ -395,6 +395,7 @@ pub enum ExprKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnaryOp {
+    Spawn,
     Neg,
     Not,
     Ref,
@@ -452,6 +453,7 @@ impl BinaryOp {
 impl UnaryOp {
     pub fn symbol(self) -> &'static str {
         match self {
+            UnaryOp::Spawn => "spawn ",
             UnaryOp::Neg => "-",
             UnaryOp::Not => "!",
             UnaryOp::Ref => "&",

@@ -357,7 +357,7 @@ impl<'a> Fx<'a> {
                 Elided::Prov(p) => p,
                 _ => Vec::new(),
             }),
-            Callee::Builtin(_) => Some(Vec::new()),
+            Callee::Builtin(_) | Callee::TaskSpawn { .. } => Some(Vec::new()),
             // Source calls without contracts are rejected with E3040. Keep
             // manually constructed/recovery IR conservative as well.
             Callee::Opaque(_) => None,

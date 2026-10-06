@@ -134,6 +134,9 @@ impl Parser {
                 self.bump();
                 StmtKind::Unsafe(self.parse_block())
             }
+            TokenKind::Spawn if (*self.nth(1) == TokenKind::Fn || matches!(self.nth(1), TokenKind::Ident(n) if n == "move")) => {
+                StmtKind::Expr(self.parse_expr())
+            }
             TokenKind::Spawn => {
                 self.bump();
                 StmtKind::Spawn(self.parse_expr())

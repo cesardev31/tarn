@@ -55,3 +55,10 @@ pub extern "intrinsic" fn i16.abs(self) i16
 pub extern "intrinsic" fn i32.abs(self) i32
 pub extern "intrinsic" fn i64.abs(self) i64
 pub extern "intrinsic" fn isize.abs(self) isize
+
+
+/// Unique native task; joining consumes it, destruction joins unused tasks.
+pub struct Task<R> {
+    handle usize
+}
+pub extern "intrinsic" fn Task<R>.join(self) R

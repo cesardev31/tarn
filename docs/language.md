@@ -341,23 +341,36 @@ Coherence (ADR 0016): an `impl I for T` must be written in the module that
 declares `I` or the one that declares `T`; `T` is a struct or enum; its type
 arguments are binders (`impl I for Pair<A, B>`); at most one impl per pair.
 
-## 13. Concurrency (provisional, phase 25)
+## 13. Native tasks (phase 11A)
 
 ```tarn
-ch: Channel<Result<Bytes, Error>> := channel(8)
-scope {
-    spawn download(url, ch.sender())
-    spawn download(mirror, ch.sender())
-}                      // scope waits for every task spawned inside it
+fn main() {
+    task := spawn move fn() i32 { return 42 }
+    value := task.join()
+    print(value)
+}
 ```
 
-Values sent across tasks are moved. Shared mutable state requires an explicit
-synchronization type (`Mutex<T>`). There is no `async`/`await` in the plan.
+`spawn` creates a real native pthread on Linux x86_64. Initially its operand must
+be a zero-parameter `move fn` literal. `Task<R>` is owned, non-Copy and movable;
+`join()` consumes it and returns R directly. Joining twice or using a moved
+handle is rejected by ordinary move checking. If an initialized handle is dropped,
+its destruction waits and destroys the unused result. This applies on normal,
+return, break, continue and nested exits; discarding a spawn expression therefore
+joins its temporary at statement end. There is no detach or cancellation.
 
-Channels are created with `channel(capacity)` and sent to through a
-`Sender<T>` (`ch.sender()`); the element type comes from the
-binding: `ch: Channel<Result<usize, Error>> := channel(8)` (no explicit generic
-arguments in expressions in v0, ADR 0012).
+Ownership captures transfer through ordinary closure semantics; moved references
+retain their loans and are rejected at this unscoped boundary in 11A. Borrowed
+results whose storage would die in the worker are rejected. Panic in any worker
+aborts the process. Allocation, thread creation/join failure and self-join are
+runtime faults that abort, not recoverable Result values.
+
+Transfer/Share enforcement and scoped loan retention belong to 11B and are not
+implemented. Lexical `scope { ... }` still has a provisional completion marker;
+11A tasks inside it are ordinary handle-owned unscoped tasks. The legacy
+`spawn call(...)` form remains frontend-provisional and rejected by native codegen.
+Mutex/atomics belong to 11C. Channels, async/await and networking are unavailable.
+See [ADR 0033](adr/0033-safe-native-tasks.md), still proposed for the full phase.
 
 ## 13b. Closures (provisional)
 

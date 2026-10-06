@@ -977,6 +977,23 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     fn unary(&mut self, e: &Expr, op: UnaryOp, operand: &Expr, expected: Option<&Ty>) -> Ty {
         match op {
+            UnaryOp::Spawn => {
+                let ty = self.expr(operand, None);
+                match self.infer.shallow(&ty) {
+                    Ty::Fn(_, params, result) if params.is_empty() => {
+                        if !matches!(operand.kind, ExprKind::Closure { owned: true, .. }) {
+                            self.err(Diagnostic::error("E4206", "reference_to_spawned_task", "unscoped spawn requires an owned closure")
+                                .primary(operand.span, "use `move fn` to transfer captures"));
+                        }
+                        self.env.decls.task.map(|id| Ty::Adt(id, vec![*result])).unwrap_or(Ty::Error)
+                    }
+                    _ => {
+                        self.err(Diagnostic::error("E3036", "spawn_needs_call", "spawn requires a zero-parameter owned closure")
+                            .primary(operand.span, ""));
+                        Ty::Error
+                    }
+                }
+            }
             UnaryOp::Neg => {
                 let t = match operand.kind {
                     ExprKind::Int(v) => {

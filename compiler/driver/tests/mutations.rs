@@ -15,6 +15,8 @@ fn corpus() -> Vec<PathBuf> {
             }
         }
     }
+    out.push(root.join("tests/native/pass/tasks.tarn"));
+    out.push(root.join("tests/native/pass/task_completion.tarn"));
     out.sort();
     out
 }

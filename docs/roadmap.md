@@ -20,7 +20,7 @@ tested and documented.
 | 8 | Native feature completeness (ADRs 0028–0029) | **done within documented subset** |
 | 9 | Borrowed dynamic interfaces and semantic contracts (ADRs 0030–0031) | **done within documented subset** |
 | 10 | Callable invocation and owned closures (ADR 0032) | **done within documented subset** |
-| 11 | Safe native concurrency (proposed ADR 0033) | **in progress: scope-exit IR groundwork; native tasks not implemented** |
+| 11 | Safe native concurrency (proposed ADR 0033) | **11A implemented: pthread tasks and Task ownership; 11B/11C pending approval** |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
 | 19 | Formatter (basic) | |
 | 20 | VS Code extension (TextMate) | **started**: language + highlighting |

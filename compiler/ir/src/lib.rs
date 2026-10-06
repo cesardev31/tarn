@@ -292,6 +292,8 @@ pub enum Builtin {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Callee {
+    /// Native task worker and verified unused-result destruction function.
+    TaskSpawn { worker: FunctionId, drop_result: FunctionId, type_args: Vec<Ty> },
     /// Statically resolved function or method, with type arguments.
     Fn(FunctionId, Vec<Ty>),
     /// Interface method on a type parameter or `any I`: chosen at

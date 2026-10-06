@@ -156,6 +156,12 @@ pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
             match &mut b.term {
                 Terminator::Call { callee, args, .. } => {
                     match callee {
+                        Callee::TaskSpawn { worker, drop_result, type_args } => {
+                            let ts = type_args.iter().map(|ty| tarn_types::subst(ty, &map)).collect::<Vec<_>>();
+                            *worker = cx.intern(*worker, ts.clone())?;
+                            *drop_result = cx.intern(*drop_result, ts)?;
+                            type_args.clear();
+                        }
                         Callee::Fn(id, ts) => {
                             for ty in ts.iter_mut() {
                                 *ty = tarn_types::subst(ty, &map);

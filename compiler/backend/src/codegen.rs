@@ -208,8 +208,13 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         let thunk = module.declare_function(&format!("tarn_thunk_{}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?;
         thunks.insert(*id, thunk);
     }
+    let task_adapters = emit_task_adapters(&mut module, p, t, &ids)?;
     let mut runtime = HashMap::new();
     for (name, params, returns) in [
+        ("tarn_rt_task_spawn", vec![types::I64; 5], vec![types::I64]),
+        ("tarn_rt_task_wait", vec![types::I64], vec![types::I64]),
+        ("tarn_rt_task_release", vec![types::I64], vec![]),
+        ("tarn_rt_task_drop", vec![types::I64], vec![]),
         ("tarn_rt_rem_f32", vec![types::F32, types::F32], vec![types::F32]),
         ("tarn_rt_rem_f64", vec![types::F64, types::F64], vec![types::F64]),
         ("tarn_rt_string", vec![types::I64, types::I64], vec![types::I64]),
@@ -247,6 +252,7 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
                 ids: &ids,
                 thunks: &thunks,
                 runtime: &runtime,
+                task_adapters: &task_adapters,
                 tables: &tables,
                 locals: Vec::new(),
                 flags: Vec::new(),
@@ -332,6 +338,68 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     module.define_function(entry, &mut ctx).map_err(|e| Error::bug(e.to_string()))?;
     module.finish().emit().map_err(|e| Error::bug(e.to_string()))
 }
+fn emit_task_adapters(module: &mut ObjectModule, p: &post::Program, t: &Typed,
+    ids: &HashMap<FunctionId, FuncId>) -> Result<HashMap<FunctionId, (FuncId, FuncId)>> {
+    let mut shapes = std::collections::BTreeMap::new();
+    for f in &p.functions { for b in &f.blocks {
+        if let Terminator::Call { callee: Callee::TaskSpawn { worker, drop_result, .. }, .. } = &b.term {
+            if shapes.insert(*worker, *drop_result).is_some_and(|old| old != *drop_result) {
+                return Err(Error::bug("conflicting task destruction metadata"));
+            }
+        }
+    }}
+    let mut adapters = HashMap::new();
+    for (worker, drop_result) in shapes {
+        let f = &p.functions.get(worker.0 as usize).ok_or_else(|| Error::bug("missing task worker"))?.decl;
+        let drop = &p.functions.get(drop_result.0 as usize).ok_or_else(|| Error::bug("missing result destruction"))?.decl;
+        if f.param_count != 1 || !matches!(f.local(LocalId(1)).ty, Ty::Fn(_, ref args, ref ret) if args.is_empty() && **ret == f.ret) || drop.param_count != 1 || drop.local(LocalId(1)).ty != f.ret || drop.ret != Ty::Void {
+            return Err(Error::bug("task adapter metadata mismatch"));
+        }
+        let mut declared = Vec::new();
+        for (is_worker, target) in [(true, worker), (false, drop_result)] {
+            let mut sig = module.make_signature();
+            sig.params = vec![cl::AbiParam::new(types::I64); if is_worker { 3 } else { 1 }];
+            let id = module.declare_function(&format!("tarn_task_{}_{}", if is_worker { "worker" } else { "drop" }, worker.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?;
+            let mut ctx = module.make_context();
+            ctx.func.signature = sig;
+            let mut fb = FunctionBuilderContext::new();
+            {
+                let mut b = FunctionBuilder::new(&mut ctx.func, &mut fb);
+                let entry = b.create_block();
+                b.append_block_params_for_function_params(entry);
+                b.switch_to_block(entry);
+                let params = b.block_params(entry).to_vec();
+                let mut values = Vec::new();
+                let size = layout::layout(t, &f.ret)?.size;
+                if is_worker {
+                    if size > 0 && scalar(&f.ret).is_none() { values.push(params[0]); }
+                    let slot = b.create_sized_stack_slot(cl::StackSlotData::new(cl::StackSlotKind::ExplicitSlot, 16, 3));
+                    let pair = b.ins().stack_addr(types::I64, slot, 0);
+                    b.ins().store(cl::MemFlags::new(), params[1], pair, 0);
+                    b.ins().store(cl::MemFlags::new(), params[2], pair, 8);
+                    values.push(pair);
+                } else if let Some(ty) = scalar(&f.ret) {
+                    values.push(b.ins().load(ty, cl::MemFlags::new(), params[0], 0));
+                } else if size > 0 { values.push(params[0]); }
+                let target = module.declare_func_in_func(ids[&target], b.func);
+                let call = b.ins().call(target, &values);
+                if is_worker && scalar(&f.ret).is_some() {
+                    let value = b.inst_results(call)[0];
+                    b.ins().store(cl::MemFlags::new(), value, params[0], 0);
+                }
+                b.ins().return_(&[]);
+                b.seal_all_blocks();
+                b.finalize();
+            }
+            cranelift_codegen::verify_function(&ctx.func, module.isa()).map_err(|e| Error::bug(e.to_string()))?;
+            module.define_function(id, &mut ctx).map_err(|e| Error::bug(e.to_string()))?;
+            declared.push(id);
+        }
+        adapters.insert(worker, (declared[0], declared[1]));
+    }
+    Ok(adapters)
+}
+
 #[derive(Clone, Copy)]
 enum Slot {
     Ssa(Variable),
@@ -357,6 +425,7 @@ struct Cx<'a, 'b> {
     ids: &'b HashMap<FunctionId, FuncId>,
     thunks: &'b HashMap<FunctionId, FuncId>,
     runtime: &'b HashMap<&'static str, FuncId>,
+    task_adapters: &'b HashMap<FunctionId, (FuncId, FuncId)>,
     tables: &'b [(tarn_resolve::SymbolId, Ty, Vec<FunctionId>, DataId)],
     locals: Vec<Slot>,
     flags: Vec<Flag>,
@@ -1068,12 +1137,48 @@ impl Cx<'_, '_> {
                 self.b.ins().trap(cl::TrapCode::user(2).unwrap());
             }
             Terminator::Call { callee, args, dest, next, spawn, .. } => {
-                if *spawn {
+                if *spawn && !matches!(callee, Callee::TaskSpawn { .. }) {
                     return Err(Error::unsupported("spawn"));
                 }
                 let args = args.iter().map(|o| self.operand(o)).collect::<Result<Vec<_>>>()?;
                 let dest_ty = self.place_ty(dest)?;
+                if matches!(callee, Callee::Intrinsic(name) if name == "Task.join") {
+                    if args.len() != 1 || !matches!(&args[0].ty, Ty::Adt(id, ts) if Some(*id) == self.t.decls.task && ts == &vec![dest_ty.clone()]) {
+                        return Err(Error::bug("task join ABI mismatch"));
+                    }
+                    let task = self.b.ins().load(types::I64, cl::MemFlags::new(), args[0].value.unwrap(), 0);
+                    let result = self.runtime("tarn_rt_task_wait", &[task])[0];
+                    let value = if let Some(ty) = scalar(&dest_ty) {
+                        Some(self.b.ins().load(ty, cl::MemFlags::new(), result, 0))
+                    } else if layout::layout(self.t, &dest_ty)?.size > 0 { Some(result) } else { None };
+                    self.write(dest, Val { value, ty: dest_ty })?;
+                    self.runtime("tarn_rt_task_release", &[task]);
+                    if let Some(next) = next { self.b.ins().jump(self.blocks[next.0 as usize], &[]); }
+                    else { return Err(Error::bug("task join without return edge")); }
+                    return Ok(());
+                }
                 let value = match callee {
+                    Callee::TaskSpawn { worker, drop_result, type_args } => {
+                        if !type_args.is_empty() || args.len() != 1 { return Err(Error::bug("task spawn shape")); }
+                        let wf = &self.p.functions[worker.0 as usize].decl;
+                        let df = &self.p.functions[drop_result.0 as usize].decl;
+                        if wf.param_count != 1 || wf.local(LocalId(1)).ty != args[0].ty || df.param_count != 1 || df.local(LocalId(1)).ty != wf.ret || df.ret != Ty::Void || !matches!(&dest_ty, Ty::Adt(id, ts) if Some(*id)==self.t.decls.task && ts==&vec![wf.ret.clone()]) {
+                            return Err(Error::bug("task worker/result ABI mismatch"));
+                        }
+                        let (wa, da) = self.task_adapters[worker];
+                        let wa = self.module.declare_func_in_func(wa, self.b.func);
+                        let da = self.module.declare_func_in_func(da, self.b.func);
+                        let wa = self.b.ins().func_addr(types::I64, wa);
+                        let da = self.b.ins().func_addr(types::I64, da);
+                        let size = self.b.ins().iconst(types::I64, i64::from(layout::layout(self.t, &wf.ret)?.size));
+                        let pair = args[0].value.ok_or_else(|| Error::bug("task callable missing"))?;
+                        let code = self.b.ins().load(types::I64, cl::MemFlags::new(), pair, 0);
+                        let env = self.b.ins().load(types::I64, cl::MemFlags::new(), pair, 8);
+                        let task = self.runtime("tarn_rt_task_spawn", &[wa, da, size, code, env])[0];
+                        let addr = self.addr(dest)?;
+                        self.b.ins().store(cl::MemFlags::new(), task, addr, 0);
+                        Val { value: Some(addr), ty: dest_ty.clone() }
+                    }
                     Callee::Fn(id, type_args) => {
                         if !type_args.is_empty() {
                             return Err(Error::unsupported("generic function call"));
@@ -1193,6 +1298,9 @@ impl Cx<'_, '_> {
                         let call = self.b.ins().call_indirect(sig, code, &values);
                         Val { value: if aggregate { result } else { self.b.inst_results(call).first().copied() }, ty: dest_ty.clone() }
                     }
+                    // 11A has only handle-owned unscoped tasks. Lexical scope
+                    // completion has no child records until scoped spawn (11B).
+                    Callee::Builtin(Builtin::JoinScope) => Val { value: None, ty: Ty::Void },
                     Callee::Builtin(Builtin::Print) => {
                         if args.len() != 1 {
                             return Err(Error::bug("print arity"));
@@ -1380,6 +1488,10 @@ impl Cx<'_, '_> {
                     let ptr = self.b.ins().iadd_imm(addr, (i * u64::from(size)) as i64);
                     self.drop_at(ptr, elem)?;
                 }
+            }
+            Ty::Adt(id, _) if Some(*id) == self.t.decls.task => {
+                let task = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
+                self.runtime("tarn_rt_task_drop", &[task]);
             }
             Ty::Adt(..) => {
                 let l = layout::layout(self.t, ty)?;

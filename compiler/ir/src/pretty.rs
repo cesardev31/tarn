@@ -130,6 +130,7 @@ impl P<'_> {
             Callee::Fn(id, targs) => format!("{}{}", self.p.function(*id).name, self.targs(targs)),
             Callee::Virtual { method, type_args } => format!("virtual {}{}", self.r.symbol(*method).name, self.targs(type_args)),
             Callee::Intrinsic(n) => format!("intrinsic {n}"),
+            Callee::TaskSpawn { worker, drop_result, .. } => format!("task worker#{} drop#{}", worker.0, drop_result.0),
             Callee::Builtin(b) => format!("builtin {b:?}").to_lowercase(),
             Callee::Value(o) => format!("({})", self.operand(o)),
             Callee::Opaque(n) => format!("opaque {n}"),

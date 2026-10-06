@@ -366,3 +366,55 @@ fn executable_publication_replaces_the_inode_before_launch() {
     drop(writer);
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn native_tasks_destroy_captures_and_results_once_on_all_exit_paths() {
+    let path = Path::new("../../tests/native/pass/task_completion.tarn");
+    let (exe, _) = compile(&std::fs::read_to_string(path).unwrap(), "task-completion-trace");
+    let output = Command::new(&exe).env("TARN_TRACE_DROPS", "1").output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"42\n");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let drops = stderr.lines().map(|line| line.strip_prefix("drop:").expect("unexpected task stderr")).collect::<Vec<_>>();
+    assert_eq!(drops, ["capture-normal", "unused-normal", "outer-normal", "capture-return", "unused-return",
+        "unused-break", "unused-continue", "unused-continue", "unused-inner", "unused-outer", "unused-expression",
+        "unused-overwrite", "joined-replacement", "unused-conditional"]);
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+
+    let source = std::fs::read_to_string("../../tests/native/pass/tasks.tarn").unwrap();
+    let (exe, _) = compile(&source, "task-owned-results-trace");
+    let output = Command::new(&exe).env("TARN_TRACE_DROPS", "1").output().unwrap();
+    assert!(output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let mut drops = stderr.lines().map(|line| line.strip_prefix("drop:").unwrap()).collect::<Vec<_>>();
+    drops.sort();
+    assert_eq!(drops, ["enum", "generic", "hello", "left", "right"]);
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn worker_panic_aborts_the_process_and_task_metadata_is_verified() {
+    use std::os::unix::process::ExitStatusExt;
+    let (exe, result) = compile("fn main() { t := spawn move fn() { panic(\"worker panic\") }\n t.join() }", "task-worker-panic");
+    let output = Command::new(&exe).env_remove("TARN_TRACE_DROPS").output().unwrap();
+    assert_eq!(output.status.signal(), Some(6));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("worker panic"));
+    let source = result.drops.as_ref().unwrap();
+    let typed = result.typed.as_ref().unwrap();
+    for kind in 0..4 {
+        let mut corrupted = tarn_ir::post_drop::Program { functions: source.functions.clone(), by_symbol: source.by_symbol.clone() };
+        let block = corrupted.functions.iter_mut().flat_map(|f| &mut f.blocks).find(|b|
+            matches!(b.term, tarn_ir::Terminator::Call { callee: tarn_ir::Callee::TaskSpawn { .. }, .. })).unwrap();
+        if let tarn_ir::Terminator::Call { callee: tarn_ir::Callee::TaskSpawn { worker, drop_result, .. }, args, spawn, .. } = &mut block.term {
+            match kind {
+                0 => *worker = tarn_ir::FunctionId(u32::MAX),
+                1 => *drop_result = *worker,
+                2 => args.clear(),
+                _ => *spawn = false,
+            }
+        }
+        assert!(!tarn_ir::post_drop::verify(&corrupted, typed).is_empty());
+        assert!(tarn_backend::emit_object(&corrupted, typed).unwrap_err().to_string().starts_with("compiler bug"));
+    }
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}

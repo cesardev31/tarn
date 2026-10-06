@@ -69,6 +69,7 @@ fn starts_expr(k: &TokenKind) -> bool {
             | T::Amp
             | T::AmpAmp
             | T::Try
+            | T::Spawn
             | T::Fn
     )
 }
@@ -174,6 +175,7 @@ impl Parser {
     fn parse_unary(&mut self) -> Expr {
         let start = self.span();
         let kind = match self.peek().clone() {
+            TokenKind::Spawn => self.prefix(UnaryOp::Spawn),
             TokenKind::Minus => self.prefix(UnaryOp::Neg),
             TokenKind::Bang => self.prefix(UnaryOp::Not),
             TokenKind::Amp => {

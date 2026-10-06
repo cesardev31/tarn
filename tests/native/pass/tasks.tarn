@@ -1,0 +1,47 @@
+struct Box<T> { value T }
+enum Choice { Text(string)
+    Empty
+}
+struct Empty {}
+fn main() {
+    task := spawn move fn() i32 { return 42 }
+    print(task.join())
+    s := "hello"
+    text := spawn move fn() string { return s }
+    print(text.join())
+    owned := Box{value: "generic"}
+    generic := spawn move fn() Box<string> { return owned }
+    print(generic.join().value)
+    e := spawn move fn() Choice { return Choice.Text("enum") }
+    match e.join() {
+        Choice.Text(value) => print(value)
+        Choice.Empty => print("empty")
+    }
+    array := spawn move fn() [2]string { return [2]string{"left", "right"} }
+    values := array.join()
+    print(values[0])
+    print(values[1])
+    zero := spawn move fn() Empty { return Empty{} }
+    zero.join()
+    moved := spawn move fn() i64 { return 7 }
+    other := moved
+    print(other.join())
+    nested := spawn move fn() i64 {
+        child := spawn move fn() i64 { return 8 }
+        return child.join()
+    }
+    print(nested.join())
+    var sum: i64 = 0
+    for i in 0..128 {
+        first := spawn move fn() i64 { return 42 }
+        second := spawn move fn() i64 { return 1 }
+        sum = sum + first.join() + second.join()
+    }
+    print(sum)
+    var counter: i64 = 41
+    mutable := spawn move fn() i64 {
+        counter = counter + 1
+        return counter
+    }
+    print(mutable.join())
+}

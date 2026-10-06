@@ -1029,6 +1029,7 @@ impl<'a, 'l> Builder<'a, 'l> {
         let span = e.span;
         let ty = self.ty(e);
         match &e.kind {
+            ExprKind::Unary { op: ast::UnaryOp::Spawn, operand } => self.spawn_task(e, operand, dest),
             ExprKind::Call { callee, args } => self.call(e, callee, args, dest, false),
             ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs, dest),
             ExprKind::Unary { op: ast::UnaryOp::Ref | ast::UnaryOp::RefMut, operand } => {
@@ -1462,6 +1463,42 @@ impl<'a, 'l> Builder<'a, 'l> {
         let t = self.new_local(rt.clone(), LocalKind::Temp, None, None, false, span);
         self.assign(Place::local(t), Rvalue::Ref(mutable, place), span);
         self.read(Place::local(t), &rt)
+    }
+
+    fn spawn_task(&mut self, e: &Expr, callable: &Expr, dest: Place) {
+        let ty = self.ty(callable);
+        let Ty::Fn(mode, _, result) = &ty else { return };
+        let worker = FunctionId(self.lx.next_id.get());
+        let drop_result = FunctionId(worker.0 + 1);
+        self.lx.next_id.set(worker.0 + 2);
+        let mut wb = Builder::new(self.lx, self.m, worker, format!("{}::task-worker#{}", self.f.name, worker.0), e.span);
+        wb.f.generics = self.f.generics.clone();
+        wb.f.ret = *result.clone();
+        wb.new_local(*result.clone(), LocalKind::Return, None, None, false, e.span);
+        wb.scopes.push(Vec::new());
+        let input = wb.new_local(ty.clone(), LocalKind::Param, None, None, false, e.span);
+        wb.scopes[0].push(input);
+        wb.f.param_count = 1;
+        let call = match mode {
+            tarn_types::CallMode::Once => Operand::Move(Place::local(input)),
+            mode => wb.ref_temp(*mode == tarn_types::CallMode::Mutable, Place::local(input), &ty, e.span),
+        };
+        wb.finish_call(Callee::Value(call), Vec::new(), Vec::new(), Place::local(RETURN), false, false, e.span);
+        wb.emit_return(e.span);
+        self.lx.extra.borrow_mut().push(wb.finish());
+        let mut db = Builder::new(self.lx, self.m, drop_result, format!("{}::task-result-drop#{}", self.f.name, worker.0), e.span);
+        db.f.generics = self.f.generics.clone();
+        db.new_local(Ty::Void, LocalKind::Return, None, None, false, e.span);
+        db.scopes.push(Vec::new());
+        let input = db.new_local(*result.clone(), LocalKind::Param, None, None, false, e.span);
+        db.scopes[0].push(input);
+        db.f.param_count = 1;
+        db.fall_off_end(e.span);
+        self.lx.extra.borrow_mut().push(db.finish());
+        let input = self.operand(callable);
+        self.finish_call(Callee::TaskSpawn { worker, drop_result,
+            type_args: self.f.generics.iter().copied().map(Ty::Param).collect() },
+            vec![input], vec![callable.span], dest, false, true, e.span);
     }
 
     // ------------------------------------------------------------ closures

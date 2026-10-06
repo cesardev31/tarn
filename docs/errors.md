@@ -139,7 +139,7 @@ stream them:
 | E3033 | `array_length` | array length must be an integer literal |
 | E3034 | `range_outside_for` | ranges can only be used in `for` loops and slicing |
 | E3035 | `not_a_value` | struct `User` is not a value |
-| E3036 | `spawn_needs_call` | `spawn` takes a function call |
+| E3036 | `spawn_needs_call` | invalid spawn operand (legacy call or native zero-parameter owned closure) |
 | E3037 | `array_length_mismatch` | array of length 3 has 2 elements |
 | E3038 | `variant_needs_args` | variant `E.V` takes 1 value |
 | E2026 | `impl_copy` | `Copy` is not implemented with `impl` |
@@ -170,7 +170,7 @@ stream them:
 | E4203 | `reference_in_field` | `T` cannot hold a reference in its fields |
 | E4204 | `provenance_mismatch` | implementation returns a borrow its interface does not allow |
 | E4205 | `closure_escapes_borrow` | returned closure captures `k` by reference |
-| E4206 | `reference_to_spawned_task` | a spawned task cannot receive a reference |
+| E4206 | `reference_to_spawned_task` | unscoped spawn cannot receive borrowed captures/references in 11A |
 | E4207 | `borrow_escapes_through_reference` | cannot store a reference to `x` into `out.f` |
 
 Golden tests in `tests/**/fail/*.tarn` pin the rendered text of each code.
