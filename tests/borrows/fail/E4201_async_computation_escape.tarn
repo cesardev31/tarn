@@ -1,21 +1,22 @@
-import "net"
+import "io"
+import "runtime"
 struct Buffer { len usize }
-fn pause(owner &net.Execution) net.Operation<void> {
+fn pause(owner &runtime.Execution) runtime.Operation<void> {
     var polled = false
-    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
-        if polled { return net.Progress.Ready(()) }
+    return runtime.Operation.new(owner, move fn(waker &io.Waker) io.Progress<void> {
+        if polled { return io.Progress.Ready(()) }
         polled = true
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     })
 }
 // A computation cannot outlive the local storage it borrows.
-async fn fill(owner &net.Execution, buffer &mut Buffer) usize {
+async fn fill(owner &runtime.Execution, buffer &mut Buffer) usize {
     await pause(owner)
     return buffer.len
 }
-fn make(owner &net.Execution) net.Operation<usize> {
+fn make(owner &runtime.Execution) runtime.Operation<usize> {
     var b = Buffer{len: usize(0)}
-    return net.Operation.new(owner, fill(owner, &mut b))
+    return runtime.Operation.new(owner, fill(owner, &mut b))
 }
 fn main() {}

@@ -1,9 +1,11 @@
 // Async echo: `async fn` and `await` over the single-thread executor.
 // Async socket methods have distinct `*_async` names and need nonblocking
 // sockets; blocking methods keep blocking.
+import "io"
+import "runtime"
 import "net"
 
-async fn echo(stream &mut net.TcpStream) Result<usize, net.Error> {
+async fn echo(stream &mut net.TcpStream) Result<usize, io.Error> {
     var bytes = [16]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     var total = usize(0)
     for {
@@ -16,24 +18,24 @@ async fn echo(stream &mut net.TcpStream) Result<usize, net.Error> {
     }
 }
 
-async fn serve(listener &mut net.TcpListener) Result<usize, net.Error> {
+async fn serve(listener &mut net.TcpListener) Result<usize, io.Error> {
     var stream = try await listener.accept_async()
     try stream.set_nonblocking(true)
     return await echo(&mut stream)
 }
 
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     try listener.set_nonblocking(true)
     address := try listener.local_addr()
-    client := spawn move fn() Result<void, net.Error> {
+    client := spawn move fn() Result<void, io.Error> {
         var stream = try net.TcpStream.connect_addr(address)
         try stream.write_all(&[2]u8{104, 105})
         try stream.shutdown(net.Shutdown.Write)
         return Ok(())
     }
-    var app = net.Operation.new(&execution, serve(&mut listener))
+    var app = runtime.Operation.new(&execution, serve(&mut listener))
     echoed := try try execution.block_on(&mut app)
     try client.join()
     print(echoed)

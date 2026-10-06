@@ -1652,7 +1652,7 @@ impl<'a, 'l> Builder<'a, 'l> {
                 let this = self.ref_temp(true, Place::local(child), &child_ty, inner.span);
                 match with {
                     Some(id) => (Callee::Fn(id, args.clone()), vec![this, waker]),
-                    None => (Callee::Opaque("net.Operation.poll_with".into()), vec![this, waker]),
+                    None => (Callee::Opaque("runtime.Operation.poll_with".into()), vec![this, waker]),
                 }
             }
             _ => {

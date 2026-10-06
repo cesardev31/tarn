@@ -29,12 +29,14 @@ fn balanced(o: &Output) {
 
 #[test]
 fn buffered_reader_lines_exact_reads_limits_and_end_of_stream() {
-    let out = run(&compile(r#"import "net"
-fn show(result Result<Vec<u8>, net.Error>) {
+    let out = run(&compile(r#"import "io"
+import "runtime"
+import "net"
+fn show(result Result<Vec<u8>, io.Error>) {
     match result {
         Ok(line) => { print(line.len()) }
         Err(error) => match error.kind {
-            net.ErrorKind.LimitExceeded => { print("limit") }
+            io.ErrorKind.LimitExceeded => { print("limit") }
             _ => { print("error") }
         }
     }
@@ -44,7 +46,7 @@ fn sum(bytes &[]u8) u64 {
     for b in bytes { total = total + u64(b) }
     return total
 }
-async fn consume(stream net.TcpStream) Result<void, net.Error> {
+async fn consume(stream net.TcpStream) Result<void, io.Error> {
     var conn = stream
     try conn.set_nonblocking(true)
     var reader = net.BufferedReader.new(usize(4))
@@ -72,22 +74,22 @@ async fn consume(stream net.TcpStream) Result<void, net.Error> {
     match await reader.read_exact(&mut conn, &mut exact) {
         Ok(value) => { print("data") }
         Err(error) => match error.kind {
-            net.ErrorKind.UnexpectedEof => { print("eof") }
+            io.ErrorKind.UnexpectedEof => { print("eof") }
             _ => { print("error") }
         }
     }
     return Ok(())
 }
-async fn serve(listener &mut net.TcpListener) Result<void, net.Error> {
+async fn serve(listener &mut net.TcpListener) Result<void, io.Error> {
     stream := try await listener.accept_async()
     return await consume(stream)
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     try listener.set_nonblocking(true)
     address := try listener.local_addr()
-    client := spawn move fn() Result<void, net.Error> {
+    client := spawn move fn() Result<void, io.Error> {
         var stream = try net.TcpStream.connect_addr(address)
         message := [45]u8{97, 98, 10, 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 10, 1, 2, 3, 4, 5, 6, 7, 8, 10, 20, 30, 40, 50, 60, 116, 111, 111, 108, 111, 110, 103, 108, 105, 110, 101, 10, 116, 97, 105, 108}
         // One byte per write: many small chunks, delimiters split across reads.
@@ -96,7 +98,7 @@ fn main() Result<void, net.Error> {
         }
         return Ok(())
     }
-    var app = net.Operation.new(&execution, serve(&mut listener))
+    var app = runtime.Operation.new(&execution, serve(&mut listener))
     try try execution.block_on(&mut app)
     try client.join()
     return Ok(())
@@ -111,12 +113,14 @@ fn main() Result<void, net.Error> {
 
 #[test]
 fn buffered_writer_batches_flushes_explicitly_survives_would_block_and_drops_unflushed() {
-    let out = run(&compile(r#"import "net"
+    let out = run(&compile(r#"import "io"
+import "runtime"
+import "net"
 copy struct Totals {
     count u64
     sum u64
 }
-async fn produce(stream net.TcpStream) Result<void, net.Error> {
+async fn produce(stream net.TcpStream) Result<void, io.Error> {
     var conn = stream
     try conn.set_nonblocking(true)
     var writer = net.BufferedWriter.new(usize(8))
@@ -141,16 +145,16 @@ async fn produce(stream net.TcpStream) Result<void, net.Error> {
     print(dropped.pending())
     return Ok(())
 }
-async fn serve(listener &mut net.TcpListener) Result<void, net.Error> {
+async fn serve(listener &mut net.TcpListener) Result<void, io.Error> {
     stream := try await listener.accept_async()
     return await produce(stream)
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     try listener.set_nonblocking(true)
     address := try listener.local_addr()
-    client := spawn move fn() Result<Totals, net.Error> {
+    client := spawn move fn() Result<Totals, io.Error> {
         var stream = try net.TcpStream.connect_addr(address)
         var bytes = [64]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
         var totals = Totals{count: u64(0), sum: u64(0)}
@@ -161,7 +165,7 @@ fn main() Result<void, net.Error> {
             totals.count = totals.count + u64(n)
         }
     }
-    var app = net.Operation.new(&execution, serve(&mut listener))
+    var app = runtime.Operation.new(&execution, serve(&mut listener))
     try try execution.block_on(&mut app)
     totals := try client.join()
     print(totals.count)
@@ -177,8 +181,10 @@ fn main() Result<void, net.Error> {
 
 #[test]
 fn concurrent_buffered_echo_serves_every_connection_in_one_thread() {
-    let out = run(&compile(r#"import "net"
-async fn handle(stream net.TcpStream) Result<i32, net.Error> {
+    let out = run(&compile(r#"import "io"
+import "runtime"
+import "net"
+async fn handle(stream net.TcpStream) Result<i32, io.Error> {
     var conn = stream
     try conn.set_nonblocking(true)
     var reader = net.BufferedReader.new(usize(16))
@@ -196,7 +202,7 @@ async fn handle(stream net.TcpStream) Result<i32, net.Error> {
         lines = lines + 1
     }
 }
-async fn serve(owner &net.Execution, listener &mut net.TcpListener, clients i32) Result<i32, net.Error> {
+async fn serve(owner &runtime.Execution, listener &mut net.TcpListener, clients i32) Result<i32, io.Error> {
     var tasks = Vec.new()
     for i in 0..clients {
         stream := try await listener.accept_async()
@@ -210,12 +216,12 @@ async fn serve(owner &net.Execution, listener &mut net.TcpListener, clients i32)
         }
     }
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     try listener.set_nonblocking(true)
     address := try listener.local_addr()
-    client := spawn move fn() Result<i32, net.Error> {
+    client := spawn move fn() Result<i32, io.Error> {
         // Every connection is open at once; lines are interleaved across them.
         var streams = Vec.new()
         for c in 0..40 { streams.push(try net.TcpStream.connect_addr(address)) }
@@ -244,7 +250,7 @@ fn main() Result<void, net.Error> {
         }
         return Ok(verified)
     }
-    var app = net.Operation.new(&execution, serve(&execution, &mut listener, 40))
+    var app = runtime.Operation.new(&execution, serve(&execution, &mut listener, 40))
     lines := try try execution.block_on(&mut app)
     print(lines)
     print(try client.join())

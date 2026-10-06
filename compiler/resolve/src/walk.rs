@@ -254,7 +254,8 @@ impl<'c, 'a> Walker<'c, 'a> {
                     SymbolKind::Module(ModuleTarget::Local(target)) => {
                         let scope = self.cx.r.modules[target.0 as usize].scope;
                         match self.cx.r.scope(scope).get(&name.name) {
-                            Some(mid) if self.cx.sym(mid).is_pub && !matches!(self.cx.sym(mid).kind, SymbolKind::Module(_)) => Ok(Some(Res::Symbol(mid))),
+                            Some(mid) if (self.cx.sym(mid).is_pub || crate::internal_visible(&self.cx.inputs[self.m.0 as usize], &self.cx.inputs[target.0 as usize]))
+                                && !matches!(self.cx.sym(mid).kind, SymbolKind::Module(_)) => Ok(Some(Res::Symbol(mid))),
                             Some(mid) => {
                                 let def = self.cx.sym(mid).span;
                                 let mut d =

@@ -1,0 +1,291 @@
+// Cooperative execution runtime (Phases 12C-14, ADRs 0036-0038): Execution, Operation,
+// Executor and AsyncTask. Async tasks run on an executor, not on OS threads.
+import "io"
+import "time"
+import "net"
+// Phase 12C manual/internal execution surface; not stable async syntax.
+struct _ExecutionState { native usize }
+pub struct Execution {
+    state _ExecutionState
+    poll net.Poll
+}
+pub struct Operation<R> {
+    poller mut fn(&io.Waker) io.Progress<R>
+    waker io.Waker
+    complete bool
+}
+/// Handle of a cooperative task spawned into an executor (ADR 0038). Owned and
+/// non-Copy: moving it moves the only authority over the result. Destroying it
+/// destroys an unjoined result, or abandons a pending task; never detaches.
+pub struct AsyncTask<R> {
+    record usize
+    result [0]R
+}
+/// The runner's reference to a task record; its destruction releases it.
+struct _TaskRef { record usize }
+struct _Spawned {
+    operation Operation<void>
+    record usize
+}
+pub struct Executor { tasks Vec<_Spawned> }
+extern "intrinsic" fn _task_new<R>(owner &Execution) AsyncTask<R>
+extern "intrinsic" fn _task_complete<R>(task &_TaskRef, value R)
+extern "intrinsic" fn _task_take<R>(task &AsyncTask<R>) Option<R>
+extern "intrinsic" fn _task_wait(record usize, waker &io.Waker) io._Raw
+extern "intrinsic" fn _task_abandoned(record usize) bool
+extern "intrinsic" fn _inbox_push(owner &Execution, spawned _Spawned)
+extern "intrinsic" fn _inbox_pop(owner &Execution) Option<_Spawned>
+extern "intrinsic" fn _exec_new(poll usize) io._Raw
+extern "intrinsic" fn _waker_new(owner &Execution) io.Waker
+extern "intrinsic" fn _wake_link(child &io.Waker, parent &io.Waker) io._Raw
+extern "intrinsic" fn _wake_owner(waker &io.Waker, owner usize) io._Raw
+extern "intrinsic" fn _exec_wait(owner usize, timeout i32) io._Raw
+pub fn Execution.new() Result<Execution, io.Error> {
+    poll := try net.Poll.new()
+    raw := try io._check(_exec_new(poll.handle))
+    return Ok(Execution{state: _ExecutionState{native: usize(raw.value)}, poll: poll})
+}
+pub fn Operation<R>.new(owner &Execution, poller mut fn(&io.Waker) io.Progress<R>) Operation<R> {
+    return Operation{poller: poller, waker: _waker_new(owner), complete: false}
+}
+pub fn Operation<R>.wake(&self) { io._wake(&self.waker) }
+pub fn Operation<R>.runnable(&self) bool { return io._wake_take(&self.waker).value != 0 }
+pub fn Operation<R>.poll(&mut self) io.Progress<R> {
+    if self.complete { panic("operation polled after completion") }
+    result := self.poller(&self.waker)
+    match &result {
+        io.Progress.Pending => {}
+        io.Progress.Ready(value) => {
+            self.complete = true
+            io._wake_clear(&self.waker)
+        }
+    }
+    return result
+}
+// Consume the operation to release its conservative across-suspension loans.
+pub fn Operation<R>.finish(self) {}
+pub fn Executor.new() Executor { return Executor{tasks: Vec.new()} }
+// Consuming insertion returns the new loan holder through ordinary provenance.
+pub fn Executor.add(self, operation Operation<void>) Executor {
+    var executor = self
+    executor.tasks.push(_Spawned{operation: operation, record: usize(0)})
+    return executor
+}
+// Move spawned operations from the Execution mailbox into this executor.
+fn Executor.drain(&mut self, owner &Execution) {
+    for {
+        match _inbox_pop(owner) {
+            Some(spawned) => { self.tasks.push(spawned) }
+            None => { return }
+        }
+    }
+}
+// One fair turn: each live task is polled at most once if its wake bit is set.
+// Completed tasks are removed; tasks whose handle was dropped are abandoned
+// (their frame is destroyed through its verified abandonment path).
+fn Executor.step(&mut self, owner &Execution) Result<bool, io.Error> {
+    self.drain(owner)
+    var polled = false
+    var i = usize(0)
+    var count = self.tasks.len()
+    for i < count {
+        var finished = false
+        entry := self.tasks.get_mut(i)
+        if entry.record != usize(0) && _task_abandoned(entry.record) {
+            finished = true
+        } else {
+            try io._check(_wake_owner(&entry.operation.waker, owner.state.native))
+            if entry.operation.runnable() {
+                polled = true
+                match entry.operation.poll() {
+                    io.Progress.Pending => {}
+                    io.Progress.Ready(value) => { finished = true }
+                }
+            }
+        }
+        if finished {
+            // Destroys the finished or abandoned operation. The last task,
+            // not yet visited this turn, moves into slot i and is visited next.
+            self.tasks.swap_remove(i)
+            count = count - usize(1)
+        } else {
+            i = i + usize(1)
+        }
+    }
+    return Ok(polled)
+}
+pub fn Executor.turn(&mut self, owner &Execution, timeout i32) Result<usize, io.Error> {
+    // Readiness is serviced even when a task self-wakes continuously.
+    try owner.wait(0)
+    if !(try self.step(owner)) && self.tasks.len() != usize(0) { try owner.wait(timeout) }
+    return Ok(self.tasks.len())
+}
+pub fn Executor.run(self, owner &Execution) Result<void, io.Error> {
+    var executor = self
+    for {
+        if try executor.turn(owner, -1) == usize(0) {
+            executor.drain(owner)
+            if executor.tasks.len() == usize(0) { return Ok(()) }
+        }
+    }
+}
+// Runs a spawned computation; stores its result in the task record once.
+async fn _runner<R>(computation mut fn(&io.Waker) io.Progress<R>, task _TaskRef) {
+    var poller = computation
+    var poll_once = fn(waker &io.Waker) io.Progress<R> { return poller(waker) }
+    for {
+        match io._with_waker(poll_once) {
+            io.Progress.Ready(value) => {
+                _task_complete(&task, value)
+                return
+            }
+            io.Progress.Pending => {}
+        }
+        io._async_park()
+    }
+}
+// Spawn a cooperative task on this Execution (not an OS thread; see `spawn`).
+// v0: the computation may borrow only this Execution (E4209).
+pub fn Execution.spawn_async<R>(&self, computation mut fn(&io.Waker) io.Progress<R>) AsyncTask<R> {
+    task := _task_new(self)
+    runner := Operation.new(self, _runner(computation, _TaskRef{record: task.record}))
+    _inbox_push(self, _Spawned{operation: runner, record: task.record})
+    return task
+}
+// Await the result; consuming the handle makes a second join impossible.
+pub async fn AsyncTask<R>.join(self) R {
+    for {
+        match _task_take(&self) {
+            Some(value) => { return value }
+            None => {}
+        }
+        var waiting = false
+        raw := io._with_waker(fn(waker &io.Waker) io._Raw {
+            waiting = true
+            return _task_wait(self.record, waker)
+        })
+        if raw.code != 0 { panic("async task joined from another execution") }
+        io._async_park()
+    }
+}
+pub fn read_operation(owner &Execution, stream &mut net.TcpStream, buffer &mut []u8) Operation<Result<usize, io.Error>> {
+    return Operation.new(owner, move fn(waker &io.Waker) io.Progress<Result<usize, io.Error>> { return io._leaf(waker, net.poll_read(waker, stream, buffer)) })
+}
+pub fn write_operation(owner &Execution, stream &mut net.TcpStream, buffer &[]u8) Operation<Result<usize, io.Error>> {
+    return Operation.new(owner, move fn(waker &io.Waker) io.Progress<Result<usize, io.Error>> { return io._leaf(waker, net.poll_write(waker, stream, buffer)) })
+}
+pub fn write_all_operation(owner &Execution, stream &mut net.TcpStream, buffer &[]u8) Operation<Result<void, io.Error>> {
+    var offset = usize(0)
+    return Operation.new(owner, move fn(waker &io.Waker) io.Progress<Result<void, io.Error>> {
+        match net._require_nonblocking(stream.fd) { Err(error) => { return io.Progress.Ready(Err(error)) }
+            Ok(value) => {} }
+        if offset == buffer.len() { return io.Progress.Ready(Ok(())) }
+        match net.poll_write(waker, stream, &buffer[offset..]) {
+            io.Progress.Pending => { return io.Progress.Pending }
+            io.Progress.Ready(result) => match result {
+                Err(error) => { return io.Progress.Ready(Err(error)) }
+                Ok(count) => {
+                    if count == usize(0) { return io.Progress.Ready(Err(io.Error{kind: io.ErrorKind.WriteZero, code: 0, domain: 0})) }
+                    offset = offset + count
+                    if offset == buffer.len() { return io.Progress.Ready(Ok(())) }
+                    io._wake(waker)
+                    return io.Progress.Pending
+                }
+            }
+        }
+    })
+}
+pub fn accept_operation(owner &Execution, listener &mut net.TcpListener) Operation<Result<net.TcpStream, io.Error>> {
+    return Operation.new(owner, move fn(waker &io.Waker) io.Progress<Result<net.TcpStream, io.Error>> { return io._leaf(waker, net.poll_accept(waker, listener)) })
+}
+pub fn connect_operation(owner &Execution, connecting &mut net.Connecting) Operation<Result<void, io.Error>> {
+    return Operation.new(owner, move fn(waker &io.Waker) io.Progress<Result<void, io.Error>> { return io._leaf(waker, net.poll_connect(waker, connecting)) })
+}
+pub fn recv_operation(owner &Execution, socket &mut net.UdpSocket, buffer &mut []u8) Operation<Result<net.RecvFrom, io.Error>> {
+    return Operation.new(owner, move fn(waker &io.Waker) io.Progress<Result<net.RecvFrom, io.Error>> { return io._leaf(waker, net.poll_recv(waker, socket, buffer)) })
+}
+pub fn Execution.wait(&self, timeout i32) Result<void, io.Error> {
+    if timeout < -1 { return Err(io.Error{kind: io.ErrorKind.InvalidAddress, code: 22, domain: 0}) }
+    var remaining = timeout
+    var deadline = i64(0)
+    if timeout > 0 { deadline = (try io._check(io._now())).value + i64(timeout) }
+    for {
+        raw := _exec_wait(self.state.native, remaining)
+        if raw.domain == 0 && raw.code == 4 {
+            if timeout > 0 {
+                now := (try io._check(io._now())).value
+                if now >= deadline { return Ok(()) }
+                remaining = i32(deadline - now)
+            }
+            continue
+        }
+        try io._check(raw)
+        return Ok(())
+    }
+}
+pub fn Operation<R>.poll_with(&mut self, parent &io.Waker) io.Progress<R> {
+    if _wake_link(&self.waker, parent).code != 0 { panic("invalid nested wake association") }
+    io._wake_take(&self.waker)
+    return self.poll()
+}
+// Drive one top-level operation on the current thread until Ready (ADR 0037).
+// Tasks spawned meanwhile run on an internal executor with fair turns; when the
+// operation completes, unfinished spawned tasks are abandoned (structured: no
+// task outlives block_on). The caller owns the Operation.
+pub fn Execution.block_on<R>(&self, operation &mut Operation<R>) Result<R, io.Error> {
+    var executor = Executor.new()
+    try io._check(_wake_owner(&operation.waker, self.state.native))
+    operation.wake()
+    for {
+        var progressed = false
+        if operation.runnable() {
+            progressed = true
+            match operation.poll() {
+                io.Progress.Pending => {}
+                io.Progress.Ready(value) => {
+                    executor.drain(self)
+                    return Ok(value)
+                }
+            }
+        }
+        try self.wait(0)
+        if try executor.step(self) { progressed = true }
+        if !progressed { try self.wait(-1) }
+    }
+}
+// Join with a deadline. Completion is checked before the timer on every poll,
+// so when both are ready the result wins; the outcome is decided exactly once.
+// On timeout the handle is dropped: the pending task is abandoned (structured),
+// never detached. Ok(Some(R)): completed. Ok(None): timed out.
+pub async fn AsyncTask<R>.join_timeout(self, duration time.Duration) Result<Option<R>, io.Error> {
+    var timer = try time.Timer.after(duration)
+    for {
+        match _task_take(&self) {
+            Some(value) => {
+                // Release the timer's readiness registration on this Waker.
+                var released = false
+                done := io._with_waker(fn(waker &io.Waker) bool {
+                    released = true
+                    io._disarm(waker)
+                    return released
+                })
+                return Ok(Some(value))
+            }
+            None => {}
+        }
+        var waiting = false
+        raw := io._with_waker(fn(waker &io.Waker) io._Raw {
+            waiting = true
+            return _task_wait(self.record, waker)
+        })
+        if raw.code != 0 { panic("async task joined from another execution") }
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<void, io.Error>> { return io._leaf(waker, time.poll_timer(waker, &mut timer)) }) {
+            io.Progress.Ready(result) => {
+                try result
+                return Ok(None)
+            }
+            io.Progress.Pending => {}
+        }
+        io._async_park()
+    }
+}

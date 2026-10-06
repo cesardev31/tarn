@@ -133,7 +133,7 @@ impl<'a> Cx<'a> {
                     };
                     self.declare(scope, sym, m, "E2002");
                 }
-                ItemKind::Fn(f) if f.abi.as_deref() == Some("intrinsic") && !(self.inputs[m.0 as usize].trusted_stdlib && matches!(self.inputs[m.0 as usize].name.as_str(), "core" | "net")) => {
+                ItemKind::Fn(f) if f.abi.as_deref() == Some("intrinsic") && !self.inputs[m.0 as usize].trusted_stdlib => {
                     self.diags.push(
                         Diagnostic::error("E2027", "intrinsic_outside_core", "`extern \"intrinsic\"` functions require trusted embedded stdlib declarations")
                             .primary(f.name.span, "")

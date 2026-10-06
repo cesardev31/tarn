@@ -1,4 +1,5 @@
-import "net"
+import "io"
+import "runtime"
 struct Pair { first string
     second string }
 fn consume(s string) { print(s) }
@@ -10,9 +11,9 @@ async fn twice(pair Pair) i32 {
     consume(pair.second)
     return b
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
-    var app = net.Operation.new(&execution, twice(Pair{first: "a", second: "b"}))
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var app = runtime.Operation.new(&execution, twice(Pair{first: "a", second: "b"}))
     result := try execution.block_on(&mut app)
     print(result)
     return Ok(())

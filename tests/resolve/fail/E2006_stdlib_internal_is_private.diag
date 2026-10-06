@@ -1,0 +1,11 @@
+error[E2006]: `_now` is private to module `io`
+  --> tests/resolve/fail/E2006_stdlib_internal_is_private.tarn:4:18
+   |
+ 4 |     var raw = io._now()
+   |                  ^^^^ not `pub`
+  ::: stdlib/io/io.tarn:48:23
+48 | extern "intrinsic" fn _now() _Raw
+   |                       ---- declared here
+   |
+   = help: mark it `pub` in `io`
+

@@ -1,9 +1,9 @@
 error[E4201]: cannot return a reference to `b`
-  --> tests/borrows/fail/E4201_async_computation_escape.tarn:19:5
+  --> tests/borrows/fail/E4201_async_computation_escape.tarn:20:5
    |
-19 |     return net.Operation.new(owner, fill(owner, &mut b))
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ returned here
-   |                                                 ------ `b` is borrowed here
+20 |     return runtime.Operation.new(owner, fill(owner, &mut b))
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ returned here
+   |                                                     ------ `b` is borrowed here
    |
    = note: `b` belongs to this function and is dropped when it returns
    = help: return an owned value instead, or borrow from a parameter

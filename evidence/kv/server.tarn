@@ -1,8 +1,9 @@
 // Concurrent counter server: each connection sends bytes; the server counts
 // them into a shared total and replies with the running total (one byte).
+import "io"
 import "net"
 
-fn serve(stream net.TcpStream, total &AtomicUsize) Result<void, net.Error> {
+fn serve(stream net.TcpStream, total &AtomicUsize) Result<void, io.Error> {
     var conn = stream
     var buffer = [64]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     for {
@@ -13,15 +14,15 @@ fn serve(stream net.TcpStream, total &AtomicUsize) Result<void, net.Error> {
     }
 }
 
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     var listener = try net.TcpListener.bind(&"127.0.0.1:7878")
     total := AtomicUsize.new(usize(0))
     shared := &total
     scope {
-        var workers = [4]Option<Task<Result<void, net.Error>>>{None, None, None, None}
+        var workers = [4]Option<Task<Result<void, io.Error>>>{None, None, None, None}
         for i in 0..4 {
             stream := try listener.accept()
-            workers[i] = Some(spawn move fn() Result<void, net.Error> { return serve(stream, shared) })
+            workers[i] = Some(spawn move fn() Result<void, io.Error> { return serve(stream, shared) })
         }
     }
     print(total.load())

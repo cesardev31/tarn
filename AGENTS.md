@@ -859,6 +859,16 @@ Buffered I/O (14C, ADR 0040) is Tarn policy over verified async primitives, not
 a new native I/O subsystem. Buffers are owned; delimiter reads take a limit;
 destruction never performs I/O, so flushing is always explicit.
 
+## Stdlib Module Layers
+
+ADR 0041. Trusted stdlib modules are core, io, time, net and runtime, embedded
+in the driver. Layers: time and net build on io; runtime builds on io, time
+and net; no import cycles. Private access follows that graph downward only:
+never above or beside, and never from user modules. Do not hardcode a module name in compiler phases; look declarations up
+in their module through `Decls`. Native intrinsics are `<layer>._<operation>`.
+Methods live in their type's module. Avoid module names that are natural
+variable names (a local shadows a module).
+
 ---
 
 ## Drops

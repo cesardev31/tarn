@@ -1,0 +1,10 @@
+// Regression (Phase 14R): `net` loads with `io` but without time or runtime.
+import "io"
+import "net"
+
+fn main() Result<void, io.Error> {
+    listener := try net.TcpListener.bind(&"127.0.0.1:0")
+    address := try listener.local_addr()
+    print(address.is_ipv4())
+    return Ok(())
+}

@@ -11,9 +11,24 @@ use tarn_resolve::{ModuleInput, Resolved};
 
 const STRING_SOURCE: &str = include_str!("../../../stdlib/string/string.tarn");
 
-const NET_SOURCE: &str = include_str!("../../../stdlib/net/net.tarn");
-
 const CORE_SOURCE: &str = include_str!("../../../stdlib/core/core.tarn");
+
+/// Trusted standard-library modules (ADR 0041), embedded so the compiler is
+/// self-contained. Only these may declare intrinsics, and only their sources
+/// carry trusted semantic contracts. Entry files never acquire these names.
+const TRUSTED_STDLIB: &[(&str, &str)] = &[
+    ("core", CORE_SOURCE),
+    ("io", include_str!("../../../stdlib/io/io.tarn")),
+    ("time", include_str!("../../../stdlib/time/time.tarn")),
+    ("runtime", include_str!("../../../stdlib/runtime/runtime.tarn")),
+    ("net", include_str!("../../../stdlib/net/net.tarn")),
+];
+
+fn trusted_source(name: &str) -> Option<&'static str> {
+    TRUSTED_STDLIB.iter().find(|(n, _)| *n == name).map(|(_, source)| *source)
+}
+
+fn official_module(name: &str) -> bool { name == "string" || trusted_source(name).is_some() }
 
 pub struct Program {
     pub sources: SourceMap,
@@ -63,14 +78,14 @@ fn official_stdlib_path(name: &str) -> PathBuf {
 
 fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, editor: bool) -> Result<(Program, Vec<Diagnostic>), String> {
     let official_entry = if editor {
-        entry.canonicalize().ok().and_then(|entry| ["core", "net", "string"].into_iter().find(|name|
+        entry.canonicalize().ok().and_then(|entry| TRUSTED_STDLIB.iter().map(|(name, _)| *name).chain(["string"]).find(|name|
             official_stdlib_path(name).canonicalize().ok().as_ref() == Some(&entry)))
     } else { None };
     let root = entry.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     let stem = entry.file_stem().and_then(|s| s.to_str()).ok_or("invalid file name")?.to_string();
     // Entry filenames do not confer reserved stdlib module identity.
     let stem = if let Some(name) = official_entry { name.to_string() }
-        else if matches!(stem.as_str(), "core" | "net") { format!("entry/{stem}") } else { stem };
+        else if trusted_source(&stem).is_some() { format!("entry/{stem}") } else { stem };
     let mut sources = SourceMap::new();
     let mut modules: Vec<(String, Module)> = Vec::new();
     let mut diags = Vec::new();
@@ -81,16 +96,16 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
             continue;
         }
         let official_path = official_stdlib_path(&name).canonicalize().ok();
-        let editor_text = if editor && (path != entry || official_entry == Some(name.as_str())) && matches!(name.as_str(), "core" | "net" | "string") {
+        let editor_text = if editor && (path != entry || official_entry == Some(name.as_str())) && official_module(&name) {
             official_path.as_ref().and_then(|p| overlays.get(p)).cloned()
         } else { None };
         let has_editor_text = editor_text.is_some();
         let text = if let Some(text) = editor_text {
-            if matches!(name.as_str(), "core" | "net") { trusted_modules.insert(name.clone()); }
+            if trusted_source(&name).is_some() { trusted_modules.insert(name.clone()); }
             text
-        } else if matches!(name.as_str(), "core" | "net") {
+        } else if let Some(source) = trusted_source(&name) {
             trusted_modules.insert(name.clone());
-            if name == "core" { CORE_SOURCE.to_string() } else { NET_SOURCE.to_string() }
+            source.to_string()
         } else {
             match overlays.get(&path) {
                 Some(text) => text.clone(),
@@ -113,12 +128,12 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
                 _ => false,
             };
             if needs_execution {
-                queue.push(("net".to_string(), root.join("net.tarn")));
+                queue.push(("runtime".to_string(), root.join("runtime.tarn")));
             }
             if let ItemKind::Import(imp) = &item.kind {
                 let file = root.join(format!("{}.tarn", imp.path));
                 let valid = imp.path.split('/').all(|s| !s.is_empty() && s != "." && s != "..");
-                if valid && (file.is_file() || overlays.contains_key(&file) || matches!(imp.path.as_str(), "string" | "net")) {
+                if valid && (file.is_file() || overlays.contains_key(&file) || official_module(&imp.path)) {
                     queue.push((imp.path.clone(), file));
                 }
             }

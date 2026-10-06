@@ -37,8 +37,9 @@ fn real_tcp_udp_readiness_and_mode_transitions() {
 }
 #[test]
 fn poll_tasks_multiple_producers_and_socket_transfer() {
-    let src = r#"import "net"
-fn main() Result<void, net.Error> {
+    let src = r#"import "io"
+import "net"
+fn main() Result<void, io.Error> {
     var a = try net.UdpSocket.bind(&"127.0.0.1:0")
     var b = try net.UdpSocket.bind(&"127.0.0.1:0")
     pa := try a.local_addr()
@@ -48,7 +49,7 @@ fn main() Result<void, net.Error> {
     try b.set_nonblocking(true)
     at := try poll.register_udp(&a, net.Interest.Readable)
     bt := try poll.register_udp(&b, net.Interest.Readable)
-    worker := spawn move fn() Result<net.UdpSocket, net.Error> {
+    worker := spawn move fn() Result<net.UdpSocket, io.Error> {
         var events = [2]net.Event{net.Event.empty(), net.Event.empty()}
         var buffer = [1]u8{0}
         var na = usize(0)
@@ -70,12 +71,12 @@ fn main() Result<void, net.Error> {
         try poll.deregister_udp(&b, bt)
         return Ok(a)
     }
-    first := spawn move fn() Result<void, net.Error> {
+    first := spawn move fn() Result<void, io.Error> {
         var sender = try net.UdpSocket.bind(&"127.0.0.1:0")
         for i in 0..128 { try sender.send_to(&[1]u8{1}, pa) }
         return Ok(())
     }
-    second := spawn move fn() Result<void, net.Error> {
+    second := spawn move fn() Result<void, io.Error> {
         var sender = try net.UdpSocket.bind(&"127.0.0.1:0")
         for i in 0..128 { try sender.send_to(&[1]u8{2}, pb) }
         return Ok(())
@@ -91,15 +92,16 @@ fn main() Result<void, net.Error> {
 }
 #[test]
 fn poll_destruction_all_normal_exits_and_failed_connections() {
-    let src = r#"import "net"
-fn early() Result<void, net.Error> { poll := try net.Poll.new()
+    let src = r#"import "io"
+import "net"
+fn early() Result<void, io.Error> { poll := try net.Poll.new()
     return Ok(())
 }
-fn fail() Result<void, net.Error> { poll := try net.Poll.new()
+fn fail() Result<void, io.Error> { poll := try net.Poll.new()
     try net.resolve(&"invalid")
     return Ok(())
 }
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     try early()
     match fail() { Err(error) => {}
         Ok(value) => panic("expected failure") }
@@ -143,7 +145,7 @@ fn main() Result<void, net.Error> {
 #[test]
 fn readiness_metadata_and_capability_corruptions_are_rejected() {
     for mutation in 0..8 {
-        let (dir, mut res) = checked("import \"net\"\nfn main() Result<void, net.Error> { poll := try net.Poll.new()\nreturn Ok(()) }", &format!("metadata-{mutation}"));
+        let (dir, mut res) = checked("import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> { poll := try net.Poll.new()\nreturn Ok(()) }", &format!("metadata-{mutation}"));
         let typed = res.typed.as_mut().unwrap();
         let poll = typed.decls.net_poll.unwrap();
         let wait = typed.decls.net_intrinsics["net._poll_wait"];
@@ -175,8 +177,8 @@ fn readiness_metadata_and_capability_corruptions_are_rejected() {
 #[test]
 fn readiness_keeps_ordinary_move_borrow_and_intrinsic_authority_rules() {
     let cases = [
-        ("import \"net\"\nfn main() Result<void, net.Error> { poll := try net.Poll.new()\ntry poll.close()\ntry poll.close()\nreturn Ok(()) }", "E4001"),
-        ("import \"net\"\nfn main() Result<void, net.Error> { poll := try net.Poll.new()\nscope { task := spawn fn() { observe(&poll) } }\nreturn Ok(()) }\nfn observe(value &net.Poll) {}", "E3047"),
+        ("import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> { poll := try net.Poll.new()\ntry poll.close()\ntry poll.close()\nreturn Ok(()) }", "E4001"),
+        ("import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> { poll := try net.Poll.new()\nscope { task := spawn fn() { observe(&poll) } }\nreturn Ok(()) }\nfn observe(value &net.Poll) {}", "E3047"),
         ("pub extern \"intrinsic\" fn _poll_new() i32\nfn main() {}", "E2027"),
     ];
     for (index, (src, code)) in cases.iter().enumerate() {
@@ -218,8 +220,9 @@ fn fault_binary(src: &str, tag: &str) -> PathBuf {
 }
 #[test]
 fn interrupted_wait_keeps_monotonic_deadline_and_partial_write_keeps_progress() {
-    let src = r#"import "net"
-fn main() Result<void, net.Error> {
+    let src = r#"import "io"
+import "net"
+fn main() Result<void, io.Error> {
     var poll = try net.Poll.new()
     var events = [1]net.Event{net.Event.empty()}
     if try poll.wait(&mut events, 5) != usize(0) { panic("timeout") }
@@ -233,8 +236,9 @@ fn main() Result<void, net.Error> {
         assert_eq!(balanced(&command.output().unwrap()), 1);
     }
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
-    let src = r#"import "net"
-fn main() Result<void, net.Error> {
+    let src = r#"import "io"
+import "net"
+fn main() Result<void, io.Error> {
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     var connecting = try net.TcpStream.connect_nonblocking_addr(try listener.local_addr())
     var poll = try net.Poll.new()
@@ -249,7 +253,7 @@ fn main() Result<void, net.Error> {
     for i in 0..128 {
         if try client.write(&[2]u8{42, 43}) != usize(1) { panic("lost partial count") }
         match client.write(&[2]u8{42, 43}) {
-            Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+            Err(error) => match error.kind { io.ErrorKind.WouldBlock => {}
                 _ => panic("wrong retry error") }
             Ok(count) => panic("expected WouldBlock")
         }
@@ -272,7 +276,7 @@ fn immediate_connect_branch_transfers_an_actual_connected_socket() {
 
 #[test]
 fn copied_poll_consumption_and_mutable_event_buffers_fail_verification() {
-    let (dir, res) = checked("import \"net\"\nfn main() Result<void, net.Error> { poll := try net.Poll.new()\nreturn Ok(()) }", "operand-metadata");
+    let (dir, res) = checked("import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> { poll := try net.Poll.new()\nreturn Ok(()) }", "operand-metadata");
     let source = res.drops.as_ref().unwrap();
     for (operation, index) in [("net._close_poll", 0), ("net._poll_wait", 1)] {
         let mut program = tarn_ir::post_drop::Program { functions: source.functions.clone(), by_symbol: source.by_symbol.clone() };

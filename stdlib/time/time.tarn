@@ -1,0 +1,44 @@
+// Monotonic time (Phase 14B, ADR 0039). Timers are readiness sources on the
+// executor's Poll; there is no timer thread and no second wake mechanism.
+import "io"
+/// Monotonic span of time, millisecond resolution.
+pub copy struct Duration { millis u64 }
+pub fn Duration.milliseconds(count u64) Duration { return Duration{millis: count} }
+/// Overflow aborts (checked arithmetic).
+pub fn Duration.seconds(count u64) Duration { return Duration{millis: count * u64(1000)} }
+pub fn Duration.as_millis(self) u64 { return self.millis }
+/// One-shot monotonic timer: an owned Linux timerfd on the shared readiness
+/// Poll. Not Share; moving it moves the descriptor; destruction closes it once.
+pub struct Timer { fd i32 }
+extern "intrinsic" fn _timer_new(millis i64) io._Raw
+extern "intrinsic" fn _timer_read(fd i32) io._Raw
+pub fn Timer.after(duration Duration) Result<Timer, io.Error> {
+    raw := try io._check(_timer_new(i64(duration.millis)))
+    return Ok(Timer{fd: i32(raw.value)})
+}
+pub fn poll_timer(waker &io.Waker, timer &mut Timer) io.Progress<Result<void, io.Error>> {
+    match io._check(_timer_read(timer.fd)) {
+        Ok(raw) => { return io.Progress.Ready(Ok(())) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
+    }
+    match io._arm(waker, timer.fd, 1) { Err(error) => { return io.Progress.Ready(Err(error)) }
+        Ok(value) => {} }
+    match io._check(_timer_read(timer.fd)) {
+        Ok(raw) => { return io.Progress.Ready(Ok(())) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
+    }
+    return io.Progress.Pending
+}
+pub async fn Timer.wait_async(&mut self) Result<void, io.Error> {
+    for {
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<void, io.Error>> { return io._leaf(waker, poll_timer(waker, self)) }) {
+            io.Progress.Ready(result) => { return result }
+            io.Progress.Pending => {}
+        }
+        io._async_park()
+    }
+}
+pub async fn sleep(duration Duration) Result<void, io.Error> {
+    var timer = try Timer.after(duration)
+    return await timer.wait_async()
+}

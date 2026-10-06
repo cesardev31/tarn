@@ -1,4 +1,6 @@
 // Blocking and explicit nonblocking Linux networking. Opaque descriptors are owned, Transfer, not Share.
+import "io"
+// Blocking and explicit nonblocking Linux networking. Opaque descriptors are owned, Transfer, not Share.
 pub struct TcpListener { fd i32 }
 pub struct TcpStream { fd i32 }
 pub struct UdpSocket { fd i32 }
@@ -12,70 +14,25 @@ pub copy enum Shutdown {
     Write
     Both
 }
-pub copy enum ErrorKind {
-    AddressInUse
-    ConnectionRefused
-    ConnectionReset
-    BrokenPipe
-    TimedOut
-    WouldBlock
-    InvalidAddress
-    DnsFailure
-    OtherOs
-    WriteZero
-    UnexpectedEof
-    LimitExceeded
-}
-pub copy struct Error {
-    pub kind ErrorKind
-    code i32
-    domain i32
-}
 pub copy struct RecvFrom {
     pub count usize
     pub peer SocketAddr
 }
-copy struct _Raw {
-    domain i32
-    code i32
-    value i64
-    address SocketAddr
-}
-extern "intrinsic" fn _resolve(address &string) _Raw
-extern "intrinsic" fn _socket(address SocketAddr, udp bool) _Raw
-extern "intrinsic" fn _bind(fd i32, address SocketAddr) _Raw
-extern "intrinsic" fn _listen(fd i32) _Raw
-extern "intrinsic" fn _accept(fd i32) _Raw
-extern "intrinsic" fn _connect(fd i32, address SocketAddr) _Raw
-extern "intrinsic" fn _read(fd i32, buffer &mut []u8) _Raw
-extern "intrinsic" fn _write(fd i32, buffer &[]u8) _Raw
-extern "intrinsic" fn _recv(fd i32, buffer &mut []u8) _Raw
-extern "intrinsic" fn _send(fd i32, buffer &[]u8, address SocketAddr) _Raw
-extern "intrinsic" fn _addr(fd i32, peer bool) _Raw
-extern "intrinsic" fn _shutdown(fd i32, how i32) _Raw
-extern "intrinsic" fn _close_listener(value TcpListener) _Raw
-extern "intrinsic" fn _close_stream(value TcpStream) _Raw
-extern "intrinsic" fn _close_udp(value UdpSocket) _Raw
-
-fn _error(raw _Raw) Error {
-    if raw.domain == 1 { return Error{kind: ErrorKind.DnsFailure, code: raw.code, domain: raw.domain} }
-    if raw.domain == 2 { return Error{kind: ErrorKind.InvalidAddress, code: raw.code, domain: raw.domain} }
-    var kind = ErrorKind.OtherOs
-    if raw.code == 98 { kind = ErrorKind.AddressInUse }
-    if raw.code == 111 { kind = ErrorKind.ConnectionRefused }
-    if raw.code == 104 { kind = ErrorKind.ConnectionReset }
-    if raw.code == 32 { kind = ErrorKind.BrokenPipe }
-    if raw.code == 110 { kind = ErrorKind.TimedOut }
-    if raw.code == 11 { kind = ErrorKind.WouldBlock }
-    if raw.code == 22 || raw.code == 99 { kind = ErrorKind.InvalidAddress }
-    return Error{kind: kind, code: raw.code, domain: raw.domain}
-}
-fn _check(raw _Raw) Result<_Raw, Error> {
-    if raw.code != 0 || raw.domain != 0 { return Err(_error(raw)) }
-    return Ok(raw)
-}
-pub fn Error.native_code(&self) i32 { return self.code }
-pub fn Error.is_dns_code(&self) bool { return self.domain == 1 }
+extern "intrinsic" fn _resolve(address &string) io._Raw
+extern "intrinsic" fn _socket(address SocketAddr, udp bool) io._Raw
+extern "intrinsic" fn _bind(fd i32, address SocketAddr) io._Raw
+extern "intrinsic" fn _listen(fd i32) io._Raw
+extern "intrinsic" fn _accept(fd i32) io._Raw
+extern "intrinsic" fn _connect(fd i32, address SocketAddr) io._Raw
+extern "intrinsic" fn _read(fd i32, buffer &mut []u8) io._Raw
+extern "intrinsic" fn _write(fd i32, buffer &[]u8) io._Raw
+extern "intrinsic" fn _recv(fd i32, buffer &mut []u8) io._Raw
+extern "intrinsic" fn _send(fd i32, buffer &[]u8, address SocketAddr) io._Raw
+extern "intrinsic" fn _addr(fd i32, peer bool) io._Raw
+extern "intrinsic" fn _shutdown(fd i32, how i32) io._Raw
+extern "intrinsic" fn _close_listener(value TcpListener) io._Raw
+extern "intrinsic" fn _close_stream(value TcpStream) io._Raw
+extern "intrinsic" fn _close_udp(value UdpSocket) io._Raw
 pub fn SocketAddr.port(&self) u16 { return u16(self.data[16]) * u16(256) + u16(self.data[17]) }
 pub fn SocketAddr.is_ipv4(&self) bool { return self.data[18] == u8(4) }
 pub fn SocketAddr.is_ipv6(&self) bool { return self.data[18] == u8(6) }
@@ -89,59 +46,59 @@ pub fn SocketAddr.ip(&self) IpAddr {
     if self.is_ipv4() { return IpAddr.V4([4]u8{self.data[0], self.data[1], self.data[2], self.data[3]}) }
     return IpAddr.V6([16]u8{self.data[0], self.data[1], self.data[2], self.data[3], self.data[4], self.data[5], self.data[6], self.data[7], self.data[8], self.data[9], self.data[10], self.data[11], self.data[12], self.data[13], self.data[14], self.data[15]})
 }
-pub fn resolve(address &string) Result<SocketAddr, Error> {
+pub fn resolve(address &string) Result<SocketAddr, io.Error> {
     for {
         raw := _resolve(address)
         if raw.domain == 0 && raw.code == 4 { continue }
-        checked := try _check(raw)
-        return Ok(checked.address)
+        checked := try io._check(raw)
+        return Ok(SocketAddr{data: checked.address})
     }
 }
-pub fn listen_tcp(address &string) Result<TcpListener, Error> { return TcpListener.bind(address) }
-pub fn TcpListener.bind(address &string) Result<TcpListener, Error> { return TcpListener.bind_addr(try resolve(address)) }
-pub fn TcpListener.bind_addr(address SocketAddr) Result<TcpListener, Error> {
+pub fn listen_tcp(address &string) Result<TcpListener, io.Error> { return TcpListener.bind(address) }
+pub fn TcpListener.bind(address &string) Result<TcpListener, io.Error> { return TcpListener.bind_addr(try resolve(address)) }
+pub fn TcpListener.bind_addr(address SocketAddr) Result<TcpListener, io.Error> {
     raw := try _open(address, false)
     listener := TcpListener{fd: i32(raw.value)}
     try _bound(listener.fd, address)
     try _listening(listener.fd)
     return Ok(listener)
 }
-pub fn TcpListener.accept(&mut self) Result<TcpStream, Error> {
+pub fn TcpListener.accept(&mut self) Result<TcpStream, io.Error> {
     for {
         raw := _accept(self.fd)
         if raw.code == 4 && raw.domain == 0 { continue }
-        checked := try _check(raw)
+        checked := try io._check(raw)
         return Ok(TcpStream{fd: i32(checked.value)})
     }
 }
-pub fn TcpStream.connect(address &string) Result<TcpStream, Error> { return TcpStream.connect_addr(try resolve(address)) }
-pub fn TcpStream.connect_addr(address SocketAddr) Result<TcpStream, Error> {
+pub fn TcpStream.connect(address &string) Result<TcpStream, io.Error> { return TcpStream.connect_addr(try resolve(address)) }
+pub fn TcpStream.connect_addr(address SocketAddr) Result<TcpStream, io.Error> {
     for {
         raw := try _open(address, false)
         stream := TcpStream{fd: i32(raw.value)}
         status := _connect(stream.fd, address)
         if status.code == 4 && status.domain == 0 { continue }
-        try _check(status)
+        try io._check(status)
         return Ok(stream)
     }
 }
-pub fn TcpStream.write_all(&mut self, buffer &[]u8) Result<void, Error> {
+pub fn TcpStream.write_all(&mut self, buffer &[]u8) Result<void, io.Error> {
     for {
         mode := _mode(self.fd)
         if mode.code == 4 && mode.domain == 0 { continue }
-        checked := try _check(mode)
-        if checked.value != 0 { return Err(Error{kind: ErrorKind.WouldBlock, code: 11, domain: 0}) }
+        checked := try io._check(mode)
+        if checked.value != 0 { return Err(io.Error{kind: io.ErrorKind.WouldBlock, code: 11, domain: 0}) }
         break
     }
     var offset = usize(0)
     for offset < buffer.len() {
         count := try self.write(&buffer[offset..])
-        if count == usize(0) { return Err(Error{kind: ErrorKind.WriteZero, code: 0, domain: 0}) }
+        if count == usize(0) { return Err(io.Error{kind: io.ErrorKind.WriteZero, code: 0, domain: 0}) }
         offset = offset + count
     }
     return Ok(())
 }
-pub fn TcpStream.shutdown(&mut self, how Shutdown) Result<void, Error> {
+pub fn TcpStream.shutdown(&mut self, how Shutdown) Result<void, io.Error> {
     var direction = i32(2)
     match how {
         Shutdown.Read => { direction = i32(0) }
@@ -151,119 +108,116 @@ pub fn TcpStream.shutdown(&mut self, how Shutdown) Result<void, Error> {
     for {
         raw := _shutdown(self.fd, direction)
         if raw.code == 4 && raw.domain == 0 { continue }
-        try _check(raw)
+        try io._check(raw)
         return Ok(())
     }
 }
-pub fn UdpSocket.bind(address &string) Result<UdpSocket, Error> { return UdpSocket.bind_addr(try resolve(address)) }
-pub fn UdpSocket.bind_addr(address SocketAddr) Result<UdpSocket, Error> {
+pub fn UdpSocket.bind(address &string) Result<UdpSocket, io.Error> { return UdpSocket.bind_addr(try resolve(address)) }
+pub fn UdpSocket.bind_addr(address SocketAddr) Result<UdpSocket, io.Error> {
     raw := try _open(address, true)
     socket := UdpSocket{fd: i32(raw.value)}
     try _bound(socket.fd, address)
     return Ok(socket)
 }
-pub fn UdpSocket.recv_from(&mut self, buffer &mut []u8) Result<RecvFrom, Error> {
+pub fn UdpSocket.recv_from(&mut self, buffer &mut []u8) Result<RecvFrom, io.Error> {
     for {
         raw := _recv(self.fd, buffer)
         if raw.code == 4 && raw.domain == 0 { continue }
-        checked := try _check(raw)
-        return Ok(RecvFrom{count: usize(checked.value), peer: checked.address})
+        checked := try io._check(raw)
+        return Ok(RecvFrom{count: usize(checked.value), peer: SocketAddr{data: checked.address}})
     }
 }
-pub fn UdpSocket.send_to(&mut self, buffer &[]u8, peer SocketAddr) Result<usize, Error> {
+pub fn UdpSocket.send_to(&mut self, buffer &[]u8, peer SocketAddr) Result<usize, io.Error> {
     for {
         raw := _send(self.fd, buffer, peer)
         if raw.code == 4 && raw.domain == 0 { continue }
-        checked := try _check(raw)
+        checked := try io._check(raw)
         return Ok(usize(checked.value))
     }
 }
-pub fn TcpListener.local_addr(&self) Result<SocketAddr, Error> {
+pub fn TcpListener.local_addr(&self) Result<SocketAddr, io.Error> {
     for {
         raw := _addr(self.fd, false)
         if raw.code == 4 && raw.domain == 0 { continue }
-        checked := try _check(raw)
-        return Ok(checked.address)
+        checked := try io._check(raw)
+        return Ok(SocketAddr{data: checked.address})
     }
 }
-pub fn TcpListener.close(self) Result<void, Error> {
-    try _check(_close_listener(self))
+pub fn TcpListener.close(self) Result<void, io.Error> {
+    try io._check(_close_listener(self))
     return Ok(())
 }
-pub fn TcpStream.local_addr(&self) Result<SocketAddr, Error> {
+pub fn TcpStream.local_addr(&self) Result<SocketAddr, io.Error> {
     for {
         raw := _addr(self.fd, false)
         if raw.code == 4 && raw.domain == 0 { continue }
-        checked := try _check(raw)
-        return Ok(checked.address)
+        checked := try io._check(raw)
+        return Ok(SocketAddr{data: checked.address})
     }
 }
-pub fn TcpStream.peer_addr(&self) Result<SocketAddr, Error> {
+pub fn TcpStream.peer_addr(&self) Result<SocketAddr, io.Error> {
     for {
         raw := _addr(self.fd, true)
         if raw.code == 4 && raw.domain == 0 { continue }
-        checked := try _check(raw)
-        return Ok(checked.address)
+        checked := try io._check(raw)
+        return Ok(SocketAddr{data: checked.address})
     }
 }
-pub fn TcpStream.close(self) Result<void, Error> {
-    try _check(_close_stream(self))
+pub fn TcpStream.close(self) Result<void, io.Error> {
+    try io._check(_close_stream(self))
     return Ok(())
 }
-pub fn UdpSocket.local_addr(&self) Result<SocketAddr, Error> {
+pub fn UdpSocket.local_addr(&self) Result<SocketAddr, io.Error> {
     for {
         raw := _addr(self.fd, false)
         if raw.code == 4 && raw.domain == 0 { continue }
-        checked := try _check(raw)
-        return Ok(checked.address)
+        checked := try io._check(raw)
+        return Ok(SocketAddr{data: checked.address})
     }
 }
-pub fn UdpSocket.close(self) Result<void, Error> {
-    try _check(_close_udp(self))
+pub fn UdpSocket.close(self) Result<void, io.Error> {
+    try io._check(_close_udp(self))
     return Ok(())
 }
-pub fn TcpStream.read(&mut self, buffer &mut []u8) Result<usize, Error> {
+pub fn TcpStream.read(&mut self, buffer &mut []u8) Result<usize, io.Error> {
     for {
         raw := _read(self.fd, buffer)
         if raw.code == 4 && raw.domain == 0 { continue }
-        checked := try _check(raw)
+        checked := try io._check(raw)
         return Ok(usize(checked.value))
     }
 }
-pub fn TcpStream.write(&mut self, buffer &[]u8) Result<usize, Error> {
+pub fn TcpStream.write(&mut self, buffer &[]u8) Result<usize, io.Error> {
     for {
         raw := _write(self.fd, buffer)
         if raw.code == 4 && raw.domain == 0 { continue }
-        checked := try _check(raw)
+        checked := try io._check(raw)
         return Ok(usize(checked.value))
     }
 }
-
-fn _open(address SocketAddr, udp bool) Result<_Raw, Error> {
+fn _open(address SocketAddr, udp bool) Result<io._Raw, io.Error> {
     for {
         raw := _socket(address, udp)
         if raw.code == 4 && raw.domain == 0 { continue }
-        return _check(raw)
+        return io._check(raw)
     }
 }
-
-fn _bound(fd i32, address SocketAddr) Result<void, Error> {
+fn _bound(fd i32, address SocketAddr) Result<void, io.Error> {
     for {
         raw := _bind(fd, address)
         if raw.code == 4 && raw.domain == 0 { continue }
-        try _check(raw)
+        try io._check(raw)
         return Ok(())
     }
 }
-fn _listening(fd i32) Result<void, Error> {
+fn _listening(fd i32) Result<void, io.Error> {
     for {
         raw := _listen(fd)
         if raw.code == 4 && raw.domain == 0 { continue }
-        try _check(raw)
+        try io._check(raw)
         return Ok(())
     }
 }
-
 // Level-triggered readiness. Tokens are observations, never socket authority.
 pub struct Poll { handle usize }
 pub copy struct Token { value u64 }
@@ -283,32 +237,30 @@ pub struct Connecting {
     stream TcpStream
     status i32
 }
-extern "intrinsic" fn _nonblocking(fd i32, enabled bool) _Raw
-extern "intrinsic" fn _mode(fd i32) _Raw
-extern "intrinsic" fn _connected(fd i32) _Raw
-extern "intrinsic" fn _now() _Raw
-extern "intrinsic" fn _poll_new() _Raw
-extern "intrinsic" fn _poll_ctl(handle usize, fd i32, operation i32, interest i32, token u64) _Raw
-extern "intrinsic" fn _poll_wait(handle usize, events &mut []Event, timeout i32) _Raw
-extern "intrinsic" fn _close_poll(value Poll) _Raw
-
+extern "intrinsic" fn _nonblocking(fd i32, enabled bool) io._Raw
+extern "intrinsic" fn _mode(fd i32) io._Raw
+extern "intrinsic" fn _connected(fd i32) io._Raw
+extern "intrinsic" fn _poll_new() io._Raw
+extern "intrinsic" fn _poll_ctl(handle usize, fd i32, operation i32, interest i32, token u64) io._Raw
+extern "intrinsic" fn _poll_wait(handle usize, events &mut []Event, timeout i32) io._Raw
+extern "intrinsic" fn _close_poll(value Poll) io._Raw
 pub fn Event.empty() Event {
     return Event{token: Token{value: u64(0)}, readable: false, writable: false, error: false, hangup: false}
 }
 pub fn Token.same(self, other Token) bool { return self.value == other.value }
-fn _set_nonblocking(fd i32, enabled bool) Result<void, Error> {
+fn _set_nonblocking(fd i32, enabled bool) Result<void, io.Error> {
     for {
         raw := _nonblocking(fd, enabled)
         if raw.code == 4 && raw.domain == 0 { continue }
-        try _check(raw)
+        try io._check(raw)
         return Ok(())
     }
 }
-pub fn TcpListener.set_nonblocking(&mut self, enabled bool) Result<void, Error> { return _set_nonblocking(self.fd, enabled) }
-pub fn TcpStream.set_nonblocking(&mut self, enabled bool) Result<void, Error> { return _set_nonblocking(self.fd, enabled) }
-pub fn UdpSocket.set_nonblocking(&mut self, enabled bool) Result<void, Error> { return _set_nonblocking(self.fd, enabled) }
-pub fn TcpStream.connect_nonblocking(address &string) Result<Connecting, Error> { return TcpStream.connect_nonblocking_addr(try resolve(address)) }
-pub fn TcpStream.connect_nonblocking_addr(address SocketAddr) Result<Connecting, Error> {
+pub fn TcpListener.set_nonblocking(&mut self, enabled bool) Result<void, io.Error> { return _set_nonblocking(self.fd, enabled) }
+pub fn TcpStream.set_nonblocking(&mut self, enabled bool) Result<void, io.Error> { return _set_nonblocking(self.fd, enabled) }
+pub fn UdpSocket.set_nonblocking(&mut self, enabled bool) Result<void, io.Error> { return _set_nonblocking(self.fd, enabled) }
+pub fn TcpStream.connect_nonblocking(address &string) Result<Connecting, io.Error> { return TcpStream.connect_nonblocking_addr(try resolve(address)) }
+pub fn TcpStream.connect_nonblocking_addr(address SocketAddr) Result<Connecting, io.Error> {
     raw := try _open(address, false)
     var stream = TcpStream{fd: i32(raw.value)}
     try stream.set_nonblocking(true)
@@ -316,10 +268,10 @@ pub fn TcpStream.connect_nonblocking_addr(address SocketAddr) Result<Connecting,
     if status.domain == 0 && (status.code == 115 || status.code == 4) {
         return Ok(Connecting{stream: stream, status: 115})
     }
-    try _check(status)
+    try io._check(status)
     return Ok(Connecting{stream: stream, status: 0})
 }
-pub fn Connecting.poll_connected(&mut self) Result<bool, Error> {
+pub fn Connecting.poll_connected(&mut self) Result<bool, io.Error> {
     if self.status == 0 { return Ok(true) }
     if self.status != 115 { return Err(_connection_error(self.status)) }
     for {
@@ -327,19 +279,19 @@ pub fn Connecting.poll_connected(&mut self) Result<bool, Error> {
         if raw.domain == 0 && raw.code == 4 { continue }
         if raw.domain == 0 && raw.code == 11 { return Ok(false) }
         self.status = raw.code
-        try _check(raw)
+        try io._check(raw)
         return Ok(true)
     }
 }
-pub fn Connecting.into_stream(self) Result<TcpStream, Error> {
+pub fn Connecting.into_stream(self) Result<TcpStream, io.Error> {
     if self.status != 0 { return Err(_connection_error(self.status)) }
     return Ok(self.stream)
 }
-pub fn Poll.new() Result<Poll, Error> {
+pub fn Poll.new() Result<Poll, io.Error> {
     for {
         raw := _poll_new()
         if raw.domain == 0 && raw.code == 4 { continue }
-        checked := try _check(raw)
+        checked := try io._check(raw)
         return Ok(Poll{handle: usize(checked.value)})
     }
 }
@@ -350,627 +302,235 @@ fn _interest(value Interest) i32 {
         Interest.ReadableWritable => { return 3 }
     }
 }
-fn _registration(handle usize, fd i32, op i32, interest Interest, token Token) Result<Token, Error> {
+fn _registration(handle usize, fd i32, op i32, interest Interest, token Token) Result<Token, io.Error> {
     for {
         raw := _poll_ctl(handle, fd, op, _interest(interest), token.value)
         if raw.domain == 0 && raw.code == 4 { continue }
-        checked := try _check(raw)
+        checked := try io._check(raw)
         return Ok(Token{value: u64(checked.value)})
     }
 }
-pub fn Poll.register_listener(&mut self, socket &TcpListener, interest Interest) Result<Token, Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
-pub fn Poll.register_stream(&mut self, socket &TcpStream, interest Interest) Result<Token, Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
-pub fn Poll.register_udp(&mut self, socket &UdpSocket, interest Interest) Result<Token, Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
-pub fn Poll.register_connecting(&mut self, socket &Connecting) Result<Token, Error> { return _registration(self.handle, socket.stream.fd, 0, Interest.Writable, Token{value: u64(0)}) }
-pub fn Poll.modify_listener(&mut self, socket &TcpListener, token Token, interest Interest) Result<void, Error> {
+pub fn Poll.register_listener(&mut self, socket &TcpListener, interest Interest) Result<Token, io.Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
+pub fn Poll.register_stream(&mut self, socket &TcpStream, interest Interest) Result<Token, io.Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
+pub fn Poll.register_udp(&mut self, socket &UdpSocket, interest Interest) Result<Token, io.Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
+pub fn Poll.register_connecting(&mut self, socket &Connecting) Result<Token, io.Error> { return _registration(self.handle, socket.stream.fd, 0, Interest.Writable, Token{value: u64(0)}) }
+pub fn Poll.modify_listener(&mut self, socket &TcpListener, token Token, interest Interest) Result<void, io.Error> {
     try _registration(self.handle, socket.fd, 1, interest, token)
     return Ok(())
 }
-pub fn Poll.modify_stream(&mut self, socket &TcpStream, token Token, interest Interest) Result<void, Error> {
+pub fn Poll.modify_stream(&mut self, socket &TcpStream, token Token, interest Interest) Result<void, io.Error> {
     try _registration(self.handle, socket.fd, 1, interest, token)
     return Ok(())
 }
-pub fn Poll.modify_udp(&mut self, socket &UdpSocket, token Token, interest Interest) Result<void, Error> {
+pub fn Poll.modify_udp(&mut self, socket &UdpSocket, token Token, interest Interest) Result<void, io.Error> {
     try _registration(self.handle, socket.fd, 1, interest, token)
     return Ok(())
 }
-pub fn Poll.deregister_listener(&mut self, socket &TcpListener, token Token) Result<void, Error> {
+pub fn Poll.deregister_listener(&mut self, socket &TcpListener, token Token) Result<void, io.Error> {
     try _registration(self.handle, socket.fd, 2, Interest.Readable, token)
     return Ok(())
 }
-pub fn Poll.deregister_stream(&mut self, socket &TcpStream, token Token) Result<void, Error> {
+pub fn Poll.deregister_stream(&mut self, socket &TcpStream, token Token) Result<void, io.Error> {
     try _registration(self.handle, socket.fd, 2, Interest.Readable, token)
     return Ok(())
 }
-pub fn Poll.deregister_udp(&mut self, socket &UdpSocket, token Token) Result<void, Error> {
+pub fn Poll.deregister_udp(&mut self, socket &UdpSocket, token Token) Result<void, io.Error> {
     try _registration(self.handle, socket.fd, 2, Interest.Readable, token)
     return Ok(())
 }
-pub fn Poll.deregister_connecting(&mut self, socket &Connecting, token Token) Result<void, Error> {
+pub fn Poll.deregister_connecting(&mut self, socket &Connecting, token Token) Result<void, io.Error> {
     try _registration(self.handle, socket.stream.fd, 2, Interest.Readable, token)
     return Ok(())
 }
-pub fn Poll.wait(&mut self, events &mut []Event, timeout i32) Result<usize, Error> {
-    if timeout < -1 || events.len() == usize(0) { return Err(Error{kind: ErrorKind.InvalidAddress, code: 22, domain: 0}) }
+pub fn Poll.wait(&mut self, events &mut []Event, timeout i32) Result<usize, io.Error> {
+    if timeout < -1 || events.len() == usize(0) { return Err(io.Error{kind: io.ErrorKind.InvalidAddress, code: 22, domain: 0}) }
     var remaining = timeout
     var deadline = i64(0)
-    if timeout > 0 { deadline = (try _check(_now())).value + i64(timeout) }
+    if timeout > 0 { deadline = (try io._check(io._now())).value + i64(timeout) }
     for {
         raw := _poll_wait(self.handle, events, remaining)
         if raw.domain == 0 && raw.code == 4 {
             if timeout > 0 {
-                now := (try _check(_now())).value
+                now := (try io._check(io._now())).value
                 if now >= deadline { return Ok(usize(0)) }
                 remaining = i32(deadline - now)
             }
             continue
         }
-        checked := try _check(raw)
+        checked := try io._check(raw)
         return Ok(usize(checked.value))
     }
 }
-pub fn Poll.close(self) Result<void, Error> {
-    try _check(_close_poll(self))
+pub fn Poll.close(self) Result<void, io.Error> {
+    try io._check(_close_poll(self))
     return Ok(())
 }
-
-fn _connection_error(code i32) Error {
-    var kind = ErrorKind.OtherOs
-    if code == 115 { kind = ErrorKind.WouldBlock }
-    if code == 111 { kind = ErrorKind.ConnectionRefused }
-    if code == 104 { kind = ErrorKind.ConnectionReset }
-    if code == 110 { kind = ErrorKind.TimedOut }
-    return Error{kind: kind, code: code, domain: 0}
+fn _connection_error(code i32) io.Error {
+    var kind = io.ErrorKind.OtherOs
+    if code == 115 { kind = io.ErrorKind.WouldBlock }
+    if code == 111 { kind = io.ErrorKind.ConnectionRefused }
+    if code == 104 { kind = io.ErrorKind.ConnectionReset }
+    if code == 110 { kind = io.ErrorKind.TimedOut }
+    return io.Error{kind: kind, code: code, domain: 0}
 }
-
-// Phase 12C manual/internal execution surface; not stable async syntax.
-struct _ExecutionState { native usize }
-pub struct Execution {
-    state _ExecutionState
-    poll Poll
-}
-pub struct Waker { native usize }
-pub enum Progress<R> {
-    Pending
-    Ready(R)
-}
-pub struct Operation<R> {
-    poller mut fn(&Waker) Progress<R>
-    waker Waker
-    complete bool
-}
-/// Handle of a cooperative task spawned into an executor (ADR 0038). Owned and
-/// non-Copy: moving it moves the only authority over the result. Destroying it
-/// destroys an unjoined result, or abandons a pending task; never detaches.
-pub struct AsyncTask<R> {
-    record usize
-    result [0]R
-}
-/// The runner's reference to a task record; its destruction releases it.
-struct _TaskRef { record usize }
-struct _Spawned {
-    operation Operation<void>
-    record usize
-}
-pub struct Executor { tasks Vec<_Spawned> }
-extern "intrinsic" fn _task_new<R>(owner &Execution) AsyncTask<R>
-extern "intrinsic" fn _task_complete<R>(task &_TaskRef, value R)
-extern "intrinsic" fn _task_take<R>(task &AsyncTask<R>) Option<R>
-extern "intrinsic" fn _task_wait(record usize, waker &Waker) _Raw
-extern "intrinsic" fn _task_abandoned(record usize) bool
-extern "intrinsic" fn _inbox_push(owner &Execution, spawned _Spawned)
-extern "intrinsic" fn _inbox_pop(owner &Execution) Option<_Spawned>
-extern "intrinsic" fn _exec_new(poll usize) _Raw
-extern "intrinsic" fn _waker_new(owner &Execution) Waker
-extern "intrinsic" fn _wake(waker &Waker) _Raw
-extern "intrinsic" fn _wake_link(child &Waker, parent &Waker) _Raw
-extern "intrinsic" fn _wake_owner(waker &Waker, owner usize) _Raw
-extern "intrinsic" fn _wake_take(waker &Waker) _Raw
-extern "intrinsic" fn _wake_arm(waker &Waker, fd i32, interest i32) _Raw
-extern "intrinsic" fn _wake_clear(waker &Waker) _Raw
-extern "intrinsic" fn _exec_wait(owner usize, timeout i32) _Raw
-
-pub fn Execution.new() Result<Execution, Error> {
-    poll := try Poll.new()
-    raw := try _check(_exec_new(poll.handle))
-    return Ok(Execution{state: _ExecutionState{native: usize(raw.value)}, poll: poll})
-}
-pub fn Operation<R>.new(owner &Execution, poller mut fn(&Waker) Progress<R>) Operation<R> {
-    return Operation{poller: poller, waker: _waker_new(owner), complete: false}
-}
-pub fn Operation<R>.wake(&self) { _wake(&self.waker) }
-pub fn Operation<R>.runnable(&self) bool { return _wake_take(&self.waker).value != 0 }
-pub fn Operation<R>.poll(&mut self) Progress<R> {
-    if self.complete { panic("operation polled after completion") }
-    result := self.poller(&self.waker)
-    match &result {
-        Progress.Pending => {}
-        Progress.Ready(value) => {
-            self.complete = true
-            _wake_clear(&self.waker)
-        }
-    }
-    return result
-}
-// Consume the operation to release its conservative across-suspension loans.
-pub fn Operation<R>.finish(self) {}
-pub fn Executor.new() Executor { return Executor{tasks: Vec.new()} }
-// Consuming insertion returns the new loan holder through ordinary provenance.
-pub fn Executor.add(self, operation Operation<void>) Executor {
-    var executor = self
-    executor.tasks.push(_Spawned{operation: operation, record: usize(0)})
-    return executor
-}
-// Move spawned operations from the Execution mailbox into this executor.
-fn Executor.drain(&mut self, owner &Execution) {
-    for {
-        match _inbox_pop(owner) {
-            Some(spawned) => { self.tasks.push(spawned) }
-            None => { return }
-        }
-    }
-}
-// One fair turn: each live task is polled at most once if its wake bit is set.
-// Completed tasks are removed; tasks whose handle was dropped are abandoned
-// (their frame is destroyed through its verified abandonment path).
-fn Executor.step(&mut self, owner &Execution) Result<bool, Error> {
-    self.drain(owner)
-    var polled = false
-    var i = usize(0)
-    var count = self.tasks.len()
-    for i < count {
-        var finished = false
-        entry := self.tasks.get_mut(i)
-        if entry.record != usize(0) && _task_abandoned(entry.record) {
-            finished = true
-        } else {
-            try _check(_wake_owner(&entry.operation.waker, owner.state.native))
-            if entry.operation.runnable() {
-                polled = true
-                match entry.operation.poll() {
-                    Progress.Pending => {}
-                    Progress.Ready(value) => { finished = true }
-                }
-            }
-        }
-        if finished {
-            // Destroys the finished or abandoned operation. The last task,
-            // not yet visited this turn, moves into slot i and is visited next.
-            self.tasks.swap_remove(i)
-            count = count - usize(1)
-        } else {
-            i = i + usize(1)
-        }
-    }
-    return Ok(polled)
-}
-pub fn Executor.turn(&mut self, owner &Execution, timeout i32) Result<usize, Error> {
-    // Readiness is serviced even when a task self-wakes continuously.
-    try owner.wait(0)
-    if !(try self.step(owner)) && self.tasks.len() != usize(0) { try owner.wait(timeout) }
-    return Ok(self.tasks.len())
-}
-pub fn Executor.run(self, owner &Execution) Result<void, Error> {
-    var executor = self
-    for {
-        if try executor.turn(owner, -1) == usize(0) {
-            executor.drain(owner)
-            if executor.tasks.len() == usize(0) { return Ok(()) }
-        }
-    }
-}
-
-// Runs a spawned computation; stores its result in the task record once.
-async fn _runner<R>(computation mut fn(&Waker) Progress<R>, task _TaskRef) {
-    var poller = computation
-    var poll_once = fn(waker &Waker) Progress<R> { return poller(waker) }
-    for {
-        match _with_waker(poll_once) {
-            Progress.Ready(value) => {
-                _task_complete(&task, value)
-                return
-            }
-            Progress.Pending => {}
-        }
-        _async_park()
-    }
-}
-// Spawn a cooperative task on this Execution (not an OS thread; see `spawn`).
-// v0: the computation may borrow only this Execution (E4209).
-pub fn Execution.spawn_async<R>(&self, computation mut fn(&Waker) Progress<R>) AsyncTask<R> {
-    task := _task_new(self)
-    runner := Operation.new(self, _runner(computation, _TaskRef{record: task.record}))
-    _inbox_push(self, _Spawned{operation: runner, record: task.record})
-    return task
-}
-// Await the result; consuming the handle makes a second join impossible.
-pub async fn AsyncTask<R>.join(self) R {
-    for {
-        match _task_take(&self) {
-            Some(value) => { return value }
-            None => {}
-        }
-        var waiting = false
-        raw := _with_waker(fn(waker &Waker) _Raw {
-            waiting = true
-            return _task_wait(self.record, waker)
-        })
-        if raw.code != 0 { panic("async task joined from another execution") }
-        _async_park()
-    }
-}
-
-fn _require_nonblocking(fd i32) Result<void, Error> {
+fn _require_nonblocking(fd i32) Result<void, io.Error> {
     for {
         raw := _mode(fd)
         if raw.domain == 0 && raw.code == 4 { continue }
-        checked := try _check(raw)
-        if checked.value == 0 { return Err(Error{kind: ErrorKind.InvalidAddress, code: 22, domain: 0}) }
+        checked := try io._check(raw)
+        if checked.value == 0 { return Err(io.Error{kind: io.ErrorKind.InvalidAddress, code: 22, domain: 0}) }
         return Ok(())
     }
 }
-fn _arm(waker &Waker, fd i32, interest i32) Result<void, Error> {
-    for {
-        raw := _wake_arm(waker, fd, interest)
-        if raw.domain == 0 && raw.code == 4 { continue }
-        try _check(raw)
-        return Ok(())
-    }
-}
-fn _would_block(error Error) bool {
-    match error.kind { ErrorKind.WouldBlock => { return true }
-        _ => { return false } }
-}
-pub fn poll_read(waker &Waker, stream &mut TcpStream, buffer &mut []u8) Progress<Result<usize, Error>> {
-    match _require_nonblocking(stream.fd) { Err(error) => { return Progress.Ready(Err(error)) }
+pub fn poll_read(waker &io.Waker, stream &mut TcpStream, buffer &mut []u8) io.Progress<Result<usize, io.Error>> {
+    match _require_nonblocking(stream.fd) { Err(error) => { return io.Progress.Ready(Err(error)) }
         Ok(value) => {} }
     match stream.read(buffer) {
-        Ok(count) => { return Progress.Ready(Ok(count)) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+        Ok(count) => { return io.Progress.Ready(Ok(count)) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
     }
-    match _arm(waker, stream.fd, 1) { Err(error) => { return Progress.Ready(Err(error)) }
+    match io._arm(waker, stream.fd, 1) { Err(error) => { return io.Progress.Ready(Err(error)) }
         Ok(value) => {} }
     match stream.read(buffer) {
-        Ok(count) => { return Progress.Ready(Ok(count)) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+        Ok(count) => { return io.Progress.Ready(Ok(count)) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
     }
-    return Progress.Pending
+    return io.Progress.Pending
 }
-pub fn read_operation(owner &Execution, stream &mut TcpStream, buffer &mut []u8) Operation<Result<usize, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<usize, Error>> { return _leaf(waker, poll_read(waker, stream, buffer)) })
-}
-pub fn poll_write(waker &Waker, stream &mut TcpStream, buffer &[]u8) Progress<Result<usize, Error>> {
-    match _require_nonblocking(stream.fd) { Err(error) => { return Progress.Ready(Err(error)) }
+pub fn poll_write(waker &io.Waker, stream &mut TcpStream, buffer &[]u8) io.Progress<Result<usize, io.Error>> {
+    match _require_nonblocking(stream.fd) { Err(error) => { return io.Progress.Ready(Err(error)) }
         Ok(value) => {} }
     match stream.write(buffer) {
-        Ok(count) => { return Progress.Ready(Ok(count)) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+        Ok(count) => { return io.Progress.Ready(Ok(count)) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
     }
-    match _arm(waker, stream.fd, 2) { Err(error) => { return Progress.Ready(Err(error)) }
+    match io._arm(waker, stream.fd, 2) { Err(error) => { return io.Progress.Ready(Err(error)) }
         Ok(value) => {} }
     match stream.write(buffer) {
-        Ok(count) => { return Progress.Ready(Ok(count)) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+        Ok(count) => { return io.Progress.Ready(Ok(count)) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
     }
-    return Progress.Pending
+    return io.Progress.Pending
 }
-pub fn write_operation(owner &Execution, stream &mut TcpStream, buffer &[]u8) Operation<Result<usize, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<usize, Error>> { return _leaf(waker, poll_write(waker, stream, buffer)) })
-}
-pub fn write_all_operation(owner &Execution, stream &mut TcpStream, buffer &[]u8) Operation<Result<void, Error>> {
-    var offset = usize(0)
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<void, Error>> {
-        match _require_nonblocking(stream.fd) { Err(error) => { return Progress.Ready(Err(error)) }
-            Ok(value) => {} }
-        if offset == buffer.len() { return Progress.Ready(Ok(())) }
-        match poll_write(waker, stream, &buffer[offset..]) {
-            Progress.Pending => { return Progress.Pending }
-            Progress.Ready(result) => match result {
-                Err(error) => { return Progress.Ready(Err(error)) }
-                Ok(count) => {
-                    if count == usize(0) { return Progress.Ready(Err(Error{kind: ErrorKind.WriteZero, code: 0, domain: 0})) }
-                    offset = offset + count
-                    if offset == buffer.len() { return Progress.Ready(Ok(())) }
-                    _wake(waker)
-                    return Progress.Pending
-                }
-            }
-        }
-    })
-}
-pub fn poll_accept(waker &Waker, listener &mut TcpListener) Progress<Result<TcpStream, Error>> {
-    match _require_nonblocking(listener.fd) { Err(error) => { return Progress.Ready(Err(error)) }
+pub fn poll_accept(waker &io.Waker, listener &mut TcpListener) io.Progress<Result<TcpStream, io.Error>> {
+    match _require_nonblocking(listener.fd) { Err(error) => { return io.Progress.Ready(Err(error)) }
         Ok(value) => {} }
     match listener.accept() {
-        Ok(stream) => { return Progress.Ready(Ok(stream)) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+        Ok(stream) => { return io.Progress.Ready(Ok(stream)) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
     }
-    match _arm(waker, listener.fd, 1) { Err(error) => { return Progress.Ready(Err(error)) }
+    match io._arm(waker, listener.fd, 1) { Err(error) => { return io.Progress.Ready(Err(error)) }
         Ok(value) => {} }
     match listener.accept() {
-        Ok(stream) => { return Progress.Ready(Ok(stream)) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+        Ok(stream) => { return io.Progress.Ready(Ok(stream)) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
     }
-    return Progress.Pending
+    return io.Progress.Pending
 }
-pub fn accept_operation(owner &Execution, listener &mut TcpListener) Operation<Result<TcpStream, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<TcpStream, Error>> { return _leaf(waker, poll_accept(waker, listener)) })
-}
-pub fn poll_connect(waker &Waker, connecting &mut Connecting) Progress<Result<void, Error>> {
+pub fn poll_connect(waker &io.Waker, connecting &mut Connecting) io.Progress<Result<void, io.Error>> {
     match connecting.poll_connected() {
-        Ok(complete) => { if complete { return Progress.Ready(Ok(())) } }
-        Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(complete) => { if complete { return io.Progress.Ready(Ok(())) } }
+        Err(error) => { return io.Progress.Ready(Err(error)) }
     }
-    match _arm(waker, connecting.stream.fd, 2) { Err(error) => { return Progress.Ready(Err(error)) }
+    match io._arm(waker, connecting.stream.fd, 2) { Err(error) => { return io.Progress.Ready(Err(error)) }
         Ok(value) => {} }
     match connecting.poll_connected() {
-        Ok(complete) => { if complete { return Progress.Ready(Ok(())) } }
-        Err(error) => { return Progress.Ready(Err(error)) }
+        Ok(complete) => { if complete { return io.Progress.Ready(Ok(())) } }
+        Err(error) => { return io.Progress.Ready(Err(error)) }
     }
-    return Progress.Pending
+    return io.Progress.Pending
 }
-pub fn connect_operation(owner &Execution, connecting &mut Connecting) Operation<Result<void, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<void, Error>> { return _leaf(waker, poll_connect(waker, connecting)) })
-}
-pub fn poll_recv(waker &Waker, socket &mut UdpSocket, buffer &mut []u8) Progress<Result<RecvFrom, Error>> {
-    match _require_nonblocking(socket.fd) { Err(error) => { return Progress.Ready(Err(error)) }
+pub fn poll_recv(waker &io.Waker, socket &mut UdpSocket, buffer &mut []u8) io.Progress<Result<RecvFrom, io.Error>> {
+    match _require_nonblocking(socket.fd) { Err(error) => { return io.Progress.Ready(Err(error)) }
         Ok(value) => {} }
     match socket.recv_from(buffer) {
-        Ok(packet) => { return Progress.Ready(Ok(packet)) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+        Ok(packet) => { return io.Progress.Ready(Ok(packet)) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
     }
-    match _arm(waker, socket.fd, 1) { Err(error) => { return Progress.Ready(Err(error)) }
+    match io._arm(waker, socket.fd, 1) { Err(error) => { return io.Progress.Ready(Err(error)) }
         Ok(value) => {} }
     match socket.recv_from(buffer) {
-        Ok(packet) => { return Progress.Ready(Ok(packet)) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
+        Ok(packet) => { return io.Progress.Ready(Ok(packet)) }
+        Err(error) => { if !io._would_block(error) { return io.Progress.Ready(Err(error)) } }
     }
-    return Progress.Pending
+    return io.Progress.Pending
 }
-pub fn recv_operation(owner &Execution, socket &mut UdpSocket, buffer &mut []u8) Operation<Result<RecvFrom, Error>> {
-    return Operation.new(owner, move fn(waker &Waker) Progress<Result<RecvFrom, Error>> { return _leaf(waker, poll_recv(waker, socket, buffer)) })
-}
-pub fn Execution.wait(&self, timeout i32) Result<void, Error> {
-    if timeout < -1 { return Err(Error{kind: ErrorKind.InvalidAddress, code: 22, domain: 0}) }
-    var remaining = timeout
-    var deadline = i64(0)
-    if timeout > 0 { deadline = (try _check(_now())).value + i64(timeout) }
-    for {
-        raw := _exec_wait(self.state.native, remaining)
-        if raw.domain == 0 && raw.code == 4 {
-            if timeout > 0 {
-                now := (try _check(_now())).value
-                if now >= deadline { return Ok(()) }
-                remaining = i32(deadline - now)
-            }
-            continue
-        }
-        try _check(raw)
-        return Ok(())
-    }
-}
-pub fn Waker.wake(&self) { _wake(self) }
-
-pub fn Operation<R>.poll_with(&mut self, parent &Waker) Progress<R> {
-    if _wake_link(&self.waker, parent).code != 0 { panic("invalid nested wake association") }
-    _wake_take(&self.waker)
-    return self.poll()
-}
-
-// Drive one top-level operation on the current thread until Ready (ADR 0037).
-// Tasks spawned meanwhile run on an internal executor with fair turns; when the
-// operation completes, unfinished spawned tasks are abandoned (structured: no
-// task outlives block_on). The caller owns the Operation.
-pub fn Execution.block_on<R>(&self, operation &mut Operation<R>) Result<R, Error> {
-    var executor = Executor.new()
-    try _check(_wake_owner(&operation.waker, self.state.native))
-    operation.wake()
-    for {
-        var progressed = false
-        if operation.runnable() {
-            progressed = true
-            match operation.poll() {
-                Progress.Pending => {}
-                Progress.Ready(value) => {
-                    executor.drain(self)
-                    return Ok(value)
-                }
-            }
-        }
-        try self.wait(0)
-        if try executor.step(self) { progressed = true }
-        if !progressed { try self.wait(-1) }
-    }
-}
-
-// Async-body primitives (ADR 0037), private to this trusted module. Lowering
-// calls `body` with the current poll's Waker, and turns `_async_park` into a
-// bare suspension edge. The Waker loan cannot outlive the callback.
-extern "intrinsic" fn _with_waker<R>(body mut fn(&Waker) R) R
-extern "intrinsic" fn _async_park()
-
-// A completed async leaf releases its readiness registration, as a completed
-// Operation does. Source computations share one Waker sequentially, so the next
-// leaf may arm another descriptor. A wake already queued is preserved.
-fn _disarm(waker &Waker) {
-    queued := _wake_take(waker).value != 0
-    _wake_clear(waker)
-    if queued { _wake(waker) }
-}
-fn _leaf<R>(waker &Waker, progress Progress<R>) Progress<R> {
-    match &progress {
-        Progress.Ready(value) => { _disarm(waker) }
-        Progress.Pending => {}
-    }
-    return progress
-}
-
 // Explicit async I/O over the Phase-12C poll functions. Blocking methods keep
 // their names and behavior; these never block the executor. They require
 // nonblocking sockets, exactly like the manual operations.
-pub async fn TcpStream.read_async(&mut self, buffer &mut []u8) Result<usize, Error> {
+pub async fn TcpStream.read_async(&mut self, buffer &mut []u8) Result<usize, io.Error> {
     for {
-        match _with_waker(fn(waker &Waker) Progress<Result<usize, Error>> { return _leaf(waker, poll_read(waker, self, buffer)) }) {
-            Progress.Ready(result) => { return result }
-            Progress.Pending => {}
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<usize, io.Error>> { return io._leaf(waker, poll_read(waker, self, buffer)) }) {
+            io.Progress.Ready(result) => { return result }
+            io.Progress.Pending => {}
         }
-        _async_park()
+        io._async_park()
     }
 }
-pub async fn TcpStream.write_async(&mut self, buffer &[]u8) Result<usize, Error> {
+pub async fn TcpStream.write_async(&mut self, buffer &[]u8) Result<usize, io.Error> {
     for {
-        match _with_waker(fn(waker &Waker) Progress<Result<usize, Error>> { return _leaf(waker, poll_write(waker, self, buffer)) }) {
-            Progress.Ready(result) => { return result }
-            Progress.Pending => {}
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<usize, io.Error>> { return io._leaf(waker, poll_write(waker, self, buffer)) }) {
+            io.Progress.Ready(result) => { return result }
+            io.Progress.Pending => {}
         }
-        _async_park()
+        io._async_park()
     }
 }
 // At most one successful write per poll; partial progress wakes the same
 // Waker before parking, so the next executor turn continues (fairness).
-pub async fn TcpStream.write_all_async(&mut self, buffer &[]u8) Result<void, Error> {
+pub async fn TcpStream.write_all_async(&mut self, buffer &[]u8) Result<void, io.Error> {
     var offset = usize(0)
     for {
         if offset == buffer.len() { return Ok(()) }
-        match _with_waker(fn(waker &Waker) Progress<Result<usize, Error>> {
-            match _leaf(waker, poll_write(waker, self, &buffer[offset..])) {
-                Progress.Ready(result) => match result {
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<usize, io.Error>> {
+            match io._leaf(waker, poll_write(waker, self, &buffer[offset..])) {
+                io.Progress.Ready(result) => match result {
                     Ok(count) => {
-                        if count != usize(0) && offset + count != buffer.len() { _wake(waker) }
-                        return Progress.Ready(Ok(count))
+                        if count != usize(0) && offset + count != buffer.len() { io._wake(waker) }
+                        return io.Progress.Ready(Ok(count))
                     }
-                    Err(error) => { return Progress.Ready(Err(error)) }
+                    Err(error) => { return io.Progress.Ready(Err(error)) }
                 }
-                Progress.Pending => { return Progress.Pending }
+                io.Progress.Pending => { return io.Progress.Pending }
             }
         }) {
-            Progress.Ready(result) => {
+            io.Progress.Ready(result) => {
                 count := try result
-                if count == usize(0) { return Err(Error{kind: ErrorKind.WriteZero, code: 0, domain: 0}) }
+                if count == usize(0) { return Err(io.Error{kind: io.ErrorKind.WriteZero, code: 0, domain: 0}) }
                 offset = offset + count
             }
-            Progress.Pending => {}
+            io.Progress.Pending => {}
         }
-        if offset != buffer.len() { _async_park() }
+        if offset != buffer.len() { io._async_park() }
     }
 }
-pub async fn TcpListener.accept_async(&mut self) Result<TcpStream, Error> {
+pub async fn TcpListener.accept_async(&mut self) Result<TcpStream, io.Error> {
     for {
-        match _with_waker(fn(waker &Waker) Progress<Result<TcpStream, Error>> { return _leaf(waker, poll_accept(waker, self)) }) {
-            Progress.Ready(result) => { return result }
-            Progress.Pending => {}
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<TcpStream, io.Error>> { return io._leaf(waker, poll_accept(waker, self)) }) {
+            io.Progress.Ready(result) => { return result }
+            io.Progress.Pending => {}
         }
-        _async_park()
+        io._async_park()
     }
 }
-pub async fn Connecting.finish_async(&mut self) Result<void, Error> {
+pub async fn Connecting.finish_async(&mut self) Result<void, io.Error> {
     for {
-        match _with_waker(fn(waker &Waker) Progress<Result<void, Error>> { return _leaf(waker, poll_connect(waker, self)) }) {
-            Progress.Ready(result) => { return result }
-            Progress.Pending => {}
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<void, io.Error>> { return io._leaf(waker, poll_connect(waker, self)) }) {
+            io.Progress.Ready(result) => { return result }
+            io.Progress.Pending => {}
         }
-        _async_park()
+        io._async_park()
     }
 }
-pub async fn UdpSocket.recv_from_async(&mut self, buffer &mut []u8) Result<RecvFrom, Error> {
+pub async fn UdpSocket.recv_from_async(&mut self, buffer &mut []u8) Result<RecvFrom, io.Error> {
     for {
-        match _with_waker(fn(waker &Waker) Progress<Result<RecvFrom, Error>> { return _leaf(waker, poll_recv(waker, self, buffer)) }) {
-            Progress.Ready(result) => { return result }
-            Progress.Pending => {}
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<RecvFrom, io.Error>> { return io._leaf(waker, poll_recv(waker, self, buffer)) }) {
+            io.Progress.Ready(result) => { return result }
+            io.Progress.Pending => {}
         }
-        _async_park()
+        io._async_park()
     }
 }
-
-// ------------------------------------------------ time (Phase 14B, ADR 0039)
-
-/// Monotonic span of time, millisecond resolution.
-pub copy struct Duration { millis u64 }
-pub fn Duration.milliseconds(count u64) Duration { return Duration{millis: count} }
-/// Overflow aborts (checked arithmetic).
-pub fn Duration.seconds(count u64) Duration { return Duration{millis: count * u64(1000)} }
-pub fn Duration.as_millis(self) u64 { return self.millis }
-
-/// One-shot monotonic timer: an owned Linux timerfd on the shared readiness
-/// Poll. Not Share; moving it moves the descriptor; destruction closes it once.
-pub struct Timer { fd i32 }
-extern "intrinsic" fn _timer_new(millis i64) _Raw
-extern "intrinsic" fn _timer_read(fd i32) _Raw
-pub fn Timer.after(duration Duration) Result<Timer, Error> {
-    raw := try _check(_timer_new(i64(duration.millis)))
-    return Ok(Timer{fd: i32(raw.value)})
-}
-pub fn poll_timer(waker &Waker, timer &mut Timer) Progress<Result<void, Error>> {
-    match _check(_timer_read(timer.fd)) {
-        Ok(raw) => { return Progress.Ready(Ok(())) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
-    }
-    match _arm(waker, timer.fd, 1) { Err(error) => { return Progress.Ready(Err(error)) }
-        Ok(value) => {} }
-    match _check(_timer_read(timer.fd)) {
-        Ok(raw) => { return Progress.Ready(Ok(())) }
-        Err(error) => { if !_would_block(error) { return Progress.Ready(Err(error)) } }
-    }
-    return Progress.Pending
-}
-pub async fn Timer.wait_async(&mut self) Result<void, Error> {
-    for {
-        match _with_waker(fn(waker &Waker) Progress<Result<void, Error>> { return _leaf(waker, poll_timer(waker, self)) }) {
-            Progress.Ready(result) => { return result }
-            Progress.Pending => {}
-        }
-        _async_park()
-    }
-}
-pub async fn sleep(duration Duration) Result<void, Error> {
-    var timer = try Timer.after(duration)
-    return await timer.wait_async()
-}
-
-// Join with a deadline. Completion is checked before the timer on every poll,
-// so when both are ready the result wins; the outcome is decided exactly once.
-// On timeout the handle is dropped: the pending task is abandoned (structured),
-// never detached. Ok(Some(R)): completed. Ok(None): timed out.
-pub async fn AsyncTask<R>.join_timeout(self, duration Duration) Result<Option<R>, Error> {
-    var timer = try Timer.after(duration)
-    for {
-        match _task_take(&self) {
-            Some(value) => {
-                // Release the timer's readiness registration on this Waker.
-                var released = false
-                done := _with_waker(fn(waker &Waker) bool {
-                    released = true
-                    _disarm(waker)
-                    return released
-                })
-                return Ok(Some(value))
-            }
-            None => {}
-        }
-        var waiting = false
-        raw := _with_waker(fn(waker &Waker) _Raw {
-            waiting = true
-            return _task_wait(self.record, waker)
-        })
-        if raw.code != 0 { panic("async task joined from another execution") }
-        match _with_waker(fn(waker &Waker) Progress<Result<void, Error>> { return _leaf(waker, poll_timer(waker, &mut timer)) }) {
-            Progress.Ready(result) => {
-                try result
-                return Ok(None)
-            }
-            Progress.Pending => {}
-        }
-        _async_park()
-    }
-}
-
-// ------------------------------------------------ buffered I/O (Phase 14C, ADR 0040)
-
-// Buffers are owned `Vec<u8>` storage; the stream is passed to every call
-// because structs cannot hold references in v0, which also lets one stream
-// carry a reader and a writer at the same time. All I/O goes through
-// `read_async`/`write_async`; this layer only decides when a syscall happens.
-
 fn _zero_fill(buffer &mut Vec<u8>, size usize) {
     for {
         if buffer.len() >= size { return }
@@ -985,8 +545,6 @@ fn _copy_bytes(target &mut []u8, source &[]u8) {
         index = index + usize(1)
     }
 }
-fn _fail(kind ErrorKind) Error { return Error{kind: kind, code: 0, domain: 0} }
-
 /// Owned read buffer. Buffered bytes are `buffer[start..end]`.
 pub struct BufferedReader {
     buffer Vec<u8>
@@ -1028,7 +586,7 @@ fn BufferedReader._reserve(&mut self) {
     self.end = count
 }
 // One read into free space; Ok(0) is end of stream.
-async fn BufferedReader._fill(&mut self, stream &mut TcpStream) Result<usize, Error> {
+async fn BufferedReader._fill(&mut self, stream &mut TcpStream) Result<usize, io.Error> {
     self._reserve()
     end := self.end
     count := try await stream.read_async(&mut self.buffer.as_mut_slice()[end..])
@@ -1056,7 +614,7 @@ fn BufferedReader._split(&mut self, end usize) Vec<u8> {
 }
 /// Buffered bytes first; otherwise at most one read. A request at least as
 /// large as the buffer bypasses it. Ok(0) is end of stream.
-pub async fn BufferedReader.read(&mut self, stream &mut TcpStream, target &mut []u8) Result<usize, Error> {
+pub async fn BufferedReader.read(&mut self, stream &mut TcpStream, target &mut []u8) Result<usize, io.Error> {
     if target.len() == usize(0) { return Ok(usize(0)) }
     if self.start == self.end {
         if target.len() >= self.buffer.len() { return await stream.read_async(target) }
@@ -1067,13 +625,13 @@ pub async fn BufferedReader.read(&mut self, stream &mut TcpStream, target &mut [
 }
 /// Fills `target` completely. End of stream first is UnexpectedEof; bytes
 /// already copied into `target` stay consumed.
-pub async fn BufferedReader.read_exact(&mut self, stream &mut TcpStream, target &mut []u8) Result<void, Error> {
+pub async fn BufferedReader.read_exact(&mut self, stream &mut TcpStream, target &mut []u8) Result<void, io.Error> {
     var done = usize(0)
     for {
         if done == target.len() { return Ok(()) }
         if self.start == self.end {
             count := try await self._fill(stream)
-            if count == usize(0) { return Err(_fail(ErrorKind.UnexpectedEof)) }
+            if count == usize(0) { return Err(io._fail(io.ErrorKind.UnexpectedEof)) }
         }
         done = done + self._take(&mut target[done..])
     }
@@ -1082,25 +640,24 @@ pub async fn BufferedReader.read_exact(&mut self, stream &mut TcpStream, target 
 /// `max` bytes; a longer line is LimitExceeded and stays buffered. At end of
 /// stream the remaining bytes are returned without a delimiter; an empty
 /// vector means the stream had ended.
-pub async fn BufferedReader.read_until(&mut self, stream &mut TcpStream, delimiter u8, max usize) Result<Vec<u8>, Error> {
+pub async fn BufferedReader.read_until(&mut self, stream &mut TcpStream, delimiter u8, max usize) Result<Vec<u8>, io.Error> {
     var scanned = usize(0)
     for {
         var index = self.start + scanned
         for {
             if index == self.end { break }
             if self.buffer.at(index) == delimiter {
-                if index + usize(1) - self.start > max { return Err(_fail(ErrorKind.LimitExceeded)) }
+                if index + usize(1) - self.start > max { return Err(io._fail(io.ErrorKind.LimitExceeded)) }
                 return Ok(self._split(index + usize(1)))
             }
             index = index + usize(1)
         }
         scanned = self.end - self.start
-        if scanned >= max { return Err(_fail(ErrorKind.LimitExceeded)) }
+        if scanned >= max { return Err(io._fail(io.ErrorKind.LimitExceeded)) }
         count := try await self._fill(stream)
         if count == usize(0) { return Ok(self._split(self.end)) }
     }
 }
-
 /// Owned write buffer. Pending bytes are `buffer[start..end]`. Writes are
 /// copied in and reach the stream only when the buffer is full, a write is at
 /// least as large as the buffer, or `flush` is called. Destruction discards
@@ -1121,7 +678,7 @@ pub fn BufferedWriter.pending(&self) usize { return self.end - self.start }
 pub fn BufferedWriter.capacity(&self) usize { return self.buffer.len() }
 /// Accepts at least one byte of a non-empty `data`. Flushes first only when
 /// the buffer is full; an empty buffer and a large `data` write directly.
-pub async fn BufferedWriter.write(&mut self, stream &mut TcpStream, data &[]u8) Result<usize, Error> {
+pub async fn BufferedWriter.write(&mut self, stream &mut TcpStream, data &[]u8) Result<usize, io.Error> {
     if data.len() == usize(0) { return Ok(usize(0)) }
     if self.end == self.buffer.len() { try await self.flush(stream) }
     if self.start == self.end && data.len() >= self.buffer.len() { return await stream.write_async(data) }
@@ -1132,18 +689,18 @@ pub async fn BufferedWriter.write(&mut self, stream &mut TcpStream, data &[]u8) 
     self.end = end + count
     return Ok(count)
 }
-pub async fn BufferedWriter.write_all(&mut self, stream &mut TcpStream, data &[]u8) Result<void, Error> {
+pub async fn BufferedWriter.write_all(&mut self, stream &mut TcpStream, data &[]u8) Result<void, io.Error> {
     var offset = usize(0)
     for {
         if offset == data.len() { return Ok(()) }
         count := try await self.write(stream, &data[offset..])
-        if count == usize(0) { return Err(_fail(ErrorKind.WriteZero)) }
+        if count == usize(0) { return Err(io._fail(io.ErrorKind.WriteZero)) }
         offset = offset + count
     }
 }
 /// Writes every pending byte. Partial writes continue where they stopped; on
 /// an error exactly the unwritten bytes remain pending.
-pub async fn BufferedWriter.flush(&mut self, stream &mut TcpStream) Result<void, Error> {
+pub async fn BufferedWriter.flush(&mut self, stream &mut TcpStream) Result<void, io.Error> {
     for {
         if self.start == self.end {
             self.start = usize(0)
@@ -1153,7 +710,7 @@ pub async fn BufferedWriter.flush(&mut self, stream &mut TcpStream) Result<void,
         start := self.start
         end := self.end
         count := try await stream.write_async(&self.buffer.as_slice()[start..end])
-        if count == usize(0) { return Err(_fail(ErrorKind.WriteZero)) }
+        if count == usize(0) { return Err(io._fail(io.ErrorKind.WriteZero)) }
         self.start = start + count
     }
 }

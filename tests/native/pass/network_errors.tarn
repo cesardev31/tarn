@@ -1,10 +1,11 @@
+import "io"
 import "net"
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     listener := try net.TcpListener.bind(&"127.0.0.1:0")
     address := try listener.local_addr()
     match net.TcpListener.bind_addr(address) {
         Err(error) => match error.kind {
-            net.ErrorKind.AddressInUse => print("address in use")
+            io.ErrorKind.AddressInUse => print("address in use")
             _ => panic("wrong bind error")
         }
         Ok(other) => panic("duplicate bind succeeded")
@@ -12,14 +13,14 @@ fn main() Result<void, net.Error> {
     try listener.close()
     match net.TcpStream.connect_addr(address) {
         Err(error) => match error.kind {
-            net.ErrorKind.ConnectionRefused => print("refused")
+            io.ErrorKind.ConnectionRefused => print("refused")
             _ => panic("wrong connect error")
         }
         Ok(conn) => panic("connect succeeded without listener")
     }
     match net.resolve(&"bad endpoint") {
         Err(error) => match error.kind {
-            net.ErrorKind.InvalidAddress => print("invalid")
+            io.ErrorKind.InvalidAddress => print("invalid")
             _ => panic("wrong address error")
         }
         Ok(addr) => panic("invalid endpoint resolved")

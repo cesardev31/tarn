@@ -1,7 +1,8 @@
+import "io"
 import "net"
 
 // Blocking loopback echo; EOF ends this connection.
-fn echo(conn net.TcpStream) Result<void, net.Error> {
+fn echo(conn net.TcpStream) Result<void, io.Error> {
     var stream = conn
     var buffer = [64]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     for {
@@ -12,10 +13,10 @@ fn echo(conn net.TcpStream) Result<void, net.Error> {
 }
 
 // One native task per accepted connection. Join is explicit; no detach.
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     var listener = try net.listen_tcp(&"127.0.0.1:8080")
     conn := try listener.accept()
-    task := spawn move fn() Result<void, net.Error> { return echo(conn) }
+    task := spawn move fn() Result<void, io.Error> { return echo(conn) }
     try task.join()
     return Ok(())
 }

@@ -54,8 +54,8 @@ impl Cx<'_, '_> {
     }
 
     pub(super) fn tasks(&mut self, name: &str, args: &[Val], dest: &Ty) -> Result<Option<Val>> {
-        let Some(operation) = name.strip_prefix("net._") else { return Ok(None) };
-        if !tarn_types::TASK_INTRINSICS.contains(&name.trim_start_matches("net.")) {
+        let Some(operation) = name.strip_prefix("runtime._") else { return Ok(None) };
+        if !tarn_types::TASK_INTRINSICS.contains(&name.trim_start_matches("runtime.")) {
             return Ok(None);
         }
         let value = match (operation, args) {

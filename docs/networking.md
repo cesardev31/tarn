@@ -1,13 +1,16 @@
 # Native networking (Phases 12A, 12B and 12C)
 
-`import "net"` loads the embedded `stdlib/net/net.tarn`. The current target is
+`import "net"` loads the embedded `stdlib/net/net.tarn`. Errors are `io.Error`;
+execution (Execution, Operation, AsyncTask) lives in `runtime` and timers in
+`time` (module layers: [ADR 0041](adr/0041-stdlib-module-layers.md)). The current target is
 Linux x86_64. Blocking operations, including DNS, may block the calling native task.
 The API uses ordinary Tarn ownership, `Result`, `try` and borrowed byte slices.
 
 ```tarn
+import "io"
 import "net"
 
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     var listener = try net.listen_tcp(&"127.0.0.1:8080")
     var stream = try listener.accept()
     var buffer = [8]u8{0, 0, 0, 0, 0, 0, 0, 0}
@@ -24,7 +27,7 @@ are not part of the current syntax; examples use explicit initializers. Passing
 
 ## Public surface
 
-All fallible operations return `Result<..., net.Error>`.
+All fallible operations return `Result<..., io.Error>`.
 
 | Type | Operations | Receiver/result |
 | --- | --- | --- |
@@ -94,7 +97,7 @@ internet. Address display/formatting and public scope-ID access are deferred.
 and `WriteZero`. `native_code()` and `is_dns_code()` preserve diagnostic access
 to the original errno or resolver code. There is no public errno-based API or
 implicit error conversion in `try`. Network errors do not abort. A main returning
-`Result<void, net.Error>` prints the error category/native code and exits with
+`Result<void, io.Error>` prints the error category/native code and exits with
 status 1 on failure, or 0 on success.
 
 Safe EINTR retries live in Tarn: resolution, socket creation, bind/listen,
@@ -146,8 +149,9 @@ and `deregister_listener/stream/udp` require the socket and token. All Poll meth
 mutate `&mut self`, preventing unsynchronized registry access.
 
 ```tarn
+import "io"
 import "net"
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     var socket = try net.UdpSocket.bind(&"127.0.0.1:8080")
     try socket.set_nonblocking(true)
     var poll = try net.Poll.new()
@@ -159,7 +163,7 @@ fn main() Result<void, net.Error> {
         match socket.recv_from(&mut bytes) {
             Ok(packet) => print(packet.count)
             Err(error) => match error.kind {
-                net.ErrorKind.WouldBlock => {}
+                io.ErrorKind.WouldBlock => {}
                 _ => { return Err(error) }
             }
         }

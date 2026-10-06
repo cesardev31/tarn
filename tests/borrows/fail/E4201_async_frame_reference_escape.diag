@@ -1,7 +1,7 @@
 error[E4201]: cannot return a reference to `s`
-  --> tests/borrows/fail/E4201_async_frame_reference_escape.tarn:15:5
+  --> tests/borrows/fail/E4201_async_frame_reference_escape.tarn:16:5
    |
-15 |     return &s
+16 |     return &s
    |     ^^^^^^^^^ returned here
    |            -- `s` is borrowed here
    |

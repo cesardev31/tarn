@@ -181,55 +181,60 @@ impl<'a> Env<'a> {
             if let Some(id) = ps.get(name) { decls.atomics.insert(id, primitive(ty)); }
         }
         let mut env = Env { inputs, r, decls, prelude, diags: Vec::new() };
-        for (index, input) in inputs.iter().enumerate() {
-            if input.name == "net" && input.trusted_stdlib {
-                let scope = r.scope(r.modules[index].scope);
-                env.decls.exec_waker = scope.get("Waker");
-                env.decls.exec_owner = scope.get("Execution");
-                env.decls.exec_operation = scope.get("Operation");
-                env.decls.exec_state = scope.get("_ExecutionState");
-                env.decls.exec_progress = scope.get("Progress");
-                env.decls.exec_async_waker = scope.get("_with_waker");
-                env.decls.exec_async_park = scope.get("_async_park");
-                env.decls.async_task = scope.get("AsyncTask");
-                env.decls.task_ref = scope.get("_TaskRef");
-                env.decls.task_intrinsics = TASK_INTRINSICS.iter().filter_map(|n| scope.get(n)).collect();
-                env.decls.exec_spawn = r.symbols.iter().enumerate().find(|(_, s)| {
-                    s.name == "spawn_async" && s.module == Some(ModuleId(index as u32))
-                        && matches!(s.kind, SymbolKind::Method { owner } if Some(owner) == env.decls.exec_owner)
-                }).map(|(i, _)| SymbolId(i as u32));
-                env.decls.exec_poll_with = r.symbols.iter().enumerate().find(|(_, s)| {
-                    s.name == "poll_with" && s.module == Some(ModuleId(index as u32))
-                        && matches!(s.kind, SymbolKind::Method { owner } if Some(owner) == env.decls.exec_operation)
-                }).map(|(i, _)| SymbolId(i as u32));
-                for name in ["Waker", "_ExecutionState", "Execution"] {
-                    if let Some(id) = scope.get(name) {
-                        env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: false, share: false });
-                    }
+        // Trusted stdlib declarations are found in their own modules (ADR 0041);
+        // a user module with the same name is never trusted.
+        let stdlib = |name: &str| inputs.iter().position(|input| input.name == name && input.trusted_stdlib).map(|index| (index, r.scope(r.modules[index].scope)));
+        let method = |module: usize, owner: Option<SymbolId>, name: &str| r.symbols.iter().enumerate().find(|(_, s)| {
+            s.name == name && s.module == Some(ModuleId(module as u32)) && matches!(s.kind, SymbolKind::Method { owner: o } if Some(o) == owner)
+        }).map(|(i, _)| SymbolId(i as u32));
+        if let Some((_, io)) = stdlib("io") {
+            env.decls.exec_waker = io.get("Waker");
+            env.decls.exec_progress = io.get("Progress");
+            env.decls.exec_async_waker = io.get("_with_waker");
+            env.decls.exec_async_park = io.get("_async_park");
+            if let Some(id) = env.decls.exec_waker {
+                env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: false, share: false });
+            }
+        }
+        if let Some((index, runtime)) = stdlib("runtime") {
+            env.decls.exec_owner = runtime.get("Execution");
+            env.decls.exec_operation = runtime.get("Operation");
+            env.decls.exec_state = runtime.get("_ExecutionState");
+            env.decls.async_task = runtime.get("AsyncTask");
+            env.decls.task_ref = runtime.get("_TaskRef");
+            env.decls.task_intrinsics = TASK_INTRINSICS.iter().filter_map(|n| runtime.get(n)).collect();
+            env.decls.exec_spawn = method(index, env.decls.exec_owner, "spawn_async");
+            env.decls.exec_poll_with = method(index, env.decls.exec_operation, "poll_with");
+            for name in ["_ExecutionState", "Execution"] {
+                if let Some(id) = runtime.get(name) {
+                    env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: false, share: false });
                 }
             }
         }
         env.collect();
-        for (index, input) in inputs.iter().enumerate() {
-            if input.name == "net" && input.trusted_stdlib {
-                let scope = r.scope(r.modules[index].scope);
-                env.decls.net_error = scope.get("Error");
-                env.decls.net_poll = scope.get("Poll");
-                if let Some(id) = env.decls.net_poll {
-                    env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });
-                }
-                for name in ["TcpListener", "TcpStream", "UdpSocket", "Timer"] {
-                    if let Some(id) = scope.get(name) {
-                        env.decls.net_sockets.push(id);
-                        env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });
-                    }
-                }
-                for id in &scope.symbols {
-                    let symbol = r.symbol(*id);
-                    let async_primitive = Some(*id) == env.decls.exec_async_waker || Some(*id) == env.decls.exec_async_park || env.decls.task_intrinsics.contains(id);
-                    if !async_primitive && symbol.name.starts_with("_") && env.decls.fns.get(id).is_some_and(|sig| sig.abi.as_deref() == Some("intrinsic")) {
-                        env.decls.net_intrinsics.insert(format!("net.{}", symbol.name), *id);
-                    }
+        if let Some((_, io)) = stdlib("io") {
+            env.decls.net_error = io.get("Error");
+        }
+        if let Some((_, net)) = stdlib("net") {
+            env.decls.net_poll = net.get("Poll");
+            if let Some(id) = env.decls.net_poll {
+                env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });
+            }
+        }
+        // Descriptor owners; the order is part of the verified native ABI.
+        for (module, name) in [("net", "TcpListener"), ("net", "TcpStream"), ("net", "UdpSocket"), ("time", "Timer")] {
+            if let Some(id) = stdlib(module).and_then(|(_, scope)| scope.get(name)) {
+                env.decls.net_sockets.push(id);
+                env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });
+            }
+        }
+        for module in tarn_resolve::STDLIB_LAYERS {
+            let Some((_, scope)) = stdlib(module) else { continue };
+            for id in &scope.symbols {
+                let symbol = r.symbol(*id);
+                let async_primitive = Some(*id) == env.decls.exec_async_waker || Some(*id) == env.decls.exec_async_park || env.decls.task_intrinsics.contains(id);
+                if !async_primitive && symbol.name.starts_with("_") && env.decls.fns.get(id).is_some_and(|sig| sig.abi.as_deref() == Some("intrinsic")) {
+                    env.decls.net_intrinsics.insert(format!("{module}.{}", symbol.name), *id);
                 }
             }
         }

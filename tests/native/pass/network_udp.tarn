@@ -1,5 +1,6 @@
+import "io"
 import "net"
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     var receiver = try net.UdpSocket.bind(&"127.0.0.1:0")
     var sender = try net.UdpSocket.bind(&"127.0.0.1:0")
     peer := try receiver.local_addr()

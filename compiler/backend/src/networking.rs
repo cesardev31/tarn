@@ -3,7 +3,7 @@ use super::*;
 impl Cx<'_, '_> {
     pub(super) fn networking(&mut self, name: &str, args: &[Val], dest: &Ty) -> Result<Option<Val>> {
         let Some(id) = self.t.decls.net_intrinsics.get(name) else {
-            if name.starts_with("net._") {
+            if tarn_types::stdlib_intrinsic_operation(name).is_some() {
                 return Err(Error::bug("unregistered network intrinsic"));
             }
             return Ok(None);
@@ -22,7 +22,7 @@ impl Cx<'_, '_> {
             }
         }
         let result_layout = layout::layout(self.t, dest)?;
-        let wake_result = name == "net._waker_new";
+        let wake_result = name == "runtime._waker_new";
         if wake_result && (result_layout.size != 8 || result_layout.align != 8) {
             return Err(Error::bug("waker result ABI mismatch"));
         }
@@ -40,14 +40,14 @@ impl Cx<'_, '_> {
                     values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 8));
                 }
                 Ty::Ref(_, inner) if matches!(inner.as_ref(), Ty::Adt(id, _) if Some(*id) == self.t.decls.exec_waker) => values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0)),
-                Ty::Ref(_, inner) if name == "net._waker_new" && matches!(inner.as_ref(), Ty::Adt(id, _) if Some(*id) == self.t.decls.exec_owner) => values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0)),
+                Ty::Ref(_, inner) if name == "runtime._waker_new" && matches!(inner.as_ref(), Ty::Adt(id, _) if Some(*id) == self.t.decls.exec_owner) => values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0)),
                 Ty::Ref(_, inner) if **inner == Ty::Str => values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0)),
                 Ty::Adt(id, _) if Some(*id) == self.t.decls.net_poll => values.push(self.b.ins().load(types::I64, cl::MemFlags::new(), value, 0)),
                 Ty::Adt(id, _) if self.t.decls.net_sockets.contains(id) => values.push(self.b.ins().load(types::I32, cl::MemFlags::new(), value, 0)),
                 _ => values.push(value),
             }
         }
-        let operation = name.strip_prefix("net._").ok_or_else(|| Error::bug("network intrinsic name"))?;
+        let operation = tarn_types::stdlib_intrinsic_operation(name).ok_or_else(|| Error::bug("network intrinsic name"))?;
         let operation = if operation.starts_with("close_") && operation != "close_poll" { "close" } else { operation };
         self.runtime(&format!("tarn_rt_net_{operation}"), &values);
         Ok(Some(Val { value: Some(out), ty: dest.clone() }))

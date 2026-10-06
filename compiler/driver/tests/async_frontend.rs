@@ -45,7 +45,7 @@ fn await_requires_async_context_and_does_not_leak_into_ordinary_closures() {
 
 #[test]
 fn await_uses_trusted_operation_identity_and_stores_the_pending_child() {
-    let result = check("import \"net\"\nasync fn read(owner &net.Execution, stream &mut net.TcpStream, bytes &mut []u8) Result<usize, net.Error> { return await net.read_operation(owner, stream, bytes) }\nfn main() {}\n", "operation");
+    let result = check("import \"io\"\nimport \"runtime\"\nimport \"net\"\nasync fn read(owner &runtime.Execution, stream &mut net.TcpStream, bytes &mut []u8) Result<usize, io.Error> { return await runtime.read_operation(owner, stream, bytes) }\nfn main() {}\n", "operation");
     assert!(!result.has_errors(), "{:?}", result.diagnostics.iter().map(|d| (&d.code, &d.message)).collect::<Vec<_>>());
     let drops = result.drops.as_ref().unwrap();
     let read = drops.functions.iter().find(|f| f.decl.name == "read").unwrap();

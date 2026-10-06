@@ -1,26 +1,27 @@
-import "net"
+import "io"
+import "runtime"
 struct Buffer { len usize }
-fn pause(owner &net.Execution) net.Operation<void> {
+fn pause(owner &runtime.Execution) runtime.Operation<void> {
     var polled = false
-    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
-        if polled { return net.Progress.Ready(()) }
+    return runtime.Operation.new(owner, move fn(waker &io.Waker) io.Progress<void> {
+        if polled { return io.Progress.Ready(()) }
         polled = true
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     })
 }
 // A pending computation keeps its captured mutable loan until it is destroyed.
-async fn fill(owner &net.Execution, buffer &mut Buffer) usize {
+async fn fill(owner &runtime.Execution, buffer &mut Buffer) usize {
     await pause(owner)
     buffer.len = buffer.len + usize(1)
     return buffer.len
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
     var buffer = Buffer{len: usize(0)}
     computation := fill(&execution, &mut buffer)
     print(buffer.len)
-    var op = net.Operation.new(&execution, computation)
+    var op = runtime.Operation.new(&execution, computation)
     count := try execution.block_on(&mut op)
     return Ok(())
 }

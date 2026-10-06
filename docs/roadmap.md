@@ -25,6 +25,12 @@ tested and documented.
 | 12B | Nonblocking I/O and level-triggered epoll (ADR 0035) | **done within documented Linux v0 subset** |
 | 12C | Manual suspended operations and single-thread execution (ADR 0036) | **done within documented bootstrap limits; no async syntax** |
 | 13 | Source async lowering over Phase 12C (ADR 0037) | **done within documented v0 limits; see [the Phase 13 report](phase-13-report.md)** |
+| 14A | Vec, cooperative async tasks, AsyncTask join and executor storage (ADR 0038) | **done; [report](phase-14a-report.md)** |
+| 14B | Monotonic timers and timeouts (ADR 0039) | **done; [report](phase-14b-report.md)** |
+| 14C | Buffered async I/O and a concurrent buffered server (ADR 0040) | **done; [report](phase-14c-report.md)** |
+| 14R | Trusted stdlib module layers: io, time, net, runtime (ADR 0041) | **done; [report](phase-14r-report.md)** |
+| 15 | System and text: string essentials, fs, path, process (milestone 5) | planned: 15A string, 15B fs, 15C path, 15D process |
+| 16 | Async HTTP/1.1 over buffered I/O | planned after 15 |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
 | 19 | Formatter (basic) | |
 | 20 | VS Code extension (TextMate) | **started**: language + highlighting |

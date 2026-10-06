@@ -44,22 +44,23 @@ fn balanced(out: &Output) -> usize {
 }
 #[test]
 fn native_socket_destruction_covers_moves_control_flow_and_try() {
-    let src = r#"import "net"
-fn early() Result<void, net.Error> {
+    let src = r#"import "io"
+import "net"
+fn early() Result<void, io.Error> {
     socket := try net.UdpSocket.bind(&"127.0.0.1:0")
     return Ok(())
 }
-fn conditional(flag bool) Result<void, net.Error> {
+fn conditional(flag bool) Result<void, io.Error> {
     var socket: net.UdpSocket
     if flag { socket = try net.UdpSocket.bind(&"127.0.0.1:0") }
     return Ok(())
 }
-fn failed() Result<void, net.Error> {
+fn failed() Result<void, io.Error> {
     socket := try net.UdpSocket.bind(&"127.0.0.1:0")
     try net.resolve(&"invalid")
     return Ok(())
 }
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     try early()
     try conditional(true)
     try conditional(false)
@@ -111,16 +112,18 @@ fn ipv6_loopback_and_task_owned_results() {
 }
 #[test]
 fn sigpipe_becomes_a_broken_pipe_result() {
-    let src = r#"import "net"
-fn main() Result<void, net.Error> {
+    let src = r#"import "io"
+import "runtime"
+import "net"
+fn main() Result<void, io.Error> {
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     address := try listener.local_addr()
-    task := spawn move fn() Result<bool, net.Error> {
+    task := spawn move fn() Result<bool, io.Error> {
         var stream = try net.TcpStream.connect_addr(address)
         try stream.shutdown(net.Shutdown.Write)
         match stream.write(&[1]u8{42}) {
             Err(error) => match error.kind {
-                net.ErrorKind.BrokenPipe => return Ok(true)
+                io.ErrorKind.BrokenPipe => return Ok(true)
                 _ => panic("wrong error")
             }
             Ok(count) => panic("write after shutdown succeeded")
@@ -148,7 +151,7 @@ fn main() Result<void, net.Error> {
 #[test]
 fn result_main_reports_errors_and_cleans_up_without_abort() {
     let exe = compile(
-        "import \"net\"\nfn main() Result<void, net.Error> {\n socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n try net.resolve(&\"invalid\")\n return Ok(()) }",
+        "import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> {\n socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n try net.resolve(&\"invalid\")\n return Ok(()) }",
         "main-error",
     );
     let out = run(&exe);
@@ -217,17 +220,19 @@ fn interrupted_operations_and_partial_writes_preserve_results_and_owners() {
 }
 #[test]
 fn zero_progress_is_a_write_zero_error() {
-    let src = r#"import "net"
-fn main() Result<void, net.Error> {
+    let src = r#"import "io"
+import "runtime"
+import "net"
+fn main() Result<void, io.Error> {
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     address := try listener.local_addr()
-    task := spawn move fn() Result<void, net.Error> {
+    task := spawn move fn() Result<void, io.Error> {
         var stream = try net.TcpStream.connect_addr(address)
         return stream.write_all(&[1]u8{42})
     }
     accepted := try listener.accept()
     match task.join() {
-        Err(error) => match error.kind { net.ErrorKind.WriteZero => print("zero")
+        Err(error) => match error.kind { io.ErrorKind.WriteZero => print("zero")
             _ => panic("wrong error") }
         Ok(value) => panic("zero write succeeded")
     }
@@ -242,7 +247,7 @@ fn main() Result<void, net.Error> {
 }
 #[test]
 fn native_error_mapping_dns_and_close_eintr_are_explicit() {
-    let src = "import \"net\"\nfn main() Result<void, net.Error> { socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n return Ok(()) }";
+    let src = "import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> { socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n return Ok(()) }";
     let exe = fault_binary(src, "mapping");
     for (code, label) in [
         (98, "address in use"),
@@ -264,7 +269,7 @@ fn native_error_mapping_dns_and_close_eintr_are_explicit() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("network error: DNS failure"));
     assert_eq!(balanced(&out), 0);
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
-    let src = "import \"net\"\nfn main() Result<void, net.Error> { socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n try socket.close()\n return Ok(()) }";
+    let src = "import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> { socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n try socket.close()\n return Ok(()) }";
     let exe = fault_binary(src, "close-eintr");
     let out = Command::new(&exe).env("TEST_CLOSE_EINTR", "1").env("TARN_TRACE_NET", "1").output().unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -276,7 +281,7 @@ fn native_error_mapping_dns_and_close_eintr_are_explicit() {
 #[test]
 fn malformed_network_metadata_is_rejected_without_panics() {
     let (dir, res) =
-        checked("import \"net\"\nfn main() Result<void, net.Error> { socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n return Ok(()) }", "metadata");
+        checked("import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> { socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n return Ok(()) }", "metadata");
     let source = res.drops.as_ref().unwrap();
     let typed = res.typed.as_ref().unwrap();
     for mutation in 0..5 {
@@ -331,7 +336,7 @@ fn malformed_network_metadata_is_rejected_without_panics() {
 #[test]
 fn fd_trace_oracle_detects_missing_close_and_double_close_mutations() {
     let (dir, res) =
-        checked("import \"net\"\nfn main() Result<void, net.Error> { socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n return Ok(()) }", "drop-mutants");
+        checked("import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> { socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n return Ok(()) }", "drop-mutants");
     let source = res.drops.as_ref().unwrap();
     let typed = res.typed.as_ref().unwrap();
     let exe = dir.join("program");
@@ -415,8 +420,10 @@ fn main() { core.stolen() }
 }
 #[test]
 fn udp_truncation_zero_capacity_and_owned_task_roundtrip() {
-    let src = r#"import "net"
-fn main() Result<void, net.Error> {
+    let src = r#"import "io"
+import "runtime"
+import "net"
+fn main() Result<void, io.Error> {
     var receiver = try net.UdpSocket.bind(&"127.0.0.1:0")
     sender := try net.UdpSocket.bind(&"127.0.0.1:0")
     task := spawn move fn() net.UdpSocket { return sender }
@@ -444,11 +451,12 @@ fn main() Result<void, net.Error> {
 }
 #[test]
 fn invalid_endpoints_and_private_address_representation() {
-    let src = r#"import "net"
-fn main() Result<void, net.Error> {
+    let src = r#"import "io"
+import "net"
+fn main() Result<void, io.Error> {
     for address in &[8]string{"127.0.0.1:65536", "[::1]", "127.0.0.1:-1", "::1:80", ":", ":x", "x:80:90", "127.0.0.1:"} {
         match net.resolve(address) { Err(error) => match error.kind {
-            net.ErrorKind.InvalidAddress => print("invalid")
+            io.ErrorKind.InvalidAddress => print("invalid")
             _ => panic("wrong error") }
             Ok(value) => panic("invalid endpoint accepted") }
     }
@@ -511,11 +519,13 @@ fn shipped_echo_examples_serve_real_external_clients() {
 
 #[test]
 fn tcp_stream_can_return_from_a_task_and_empty_read_does_not_block() {
-    let src = r#"import "net"
-fn main() Result<void, net.Error> {
+    let src = r#"import "io"
+import "runtime"
+import "net"
+fn main() Result<void, io.Error> {
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     address := try listener.local_addr()
-    task := spawn move fn() Result<net.TcpStream, net.Error> { return net.TcpStream.connect_addr(address) }
+    task := spawn move fn() Result<net.TcpStream, io.Error> { return net.TcpStream.connect_addr(address) }
     var accepted = try listener.accept()
     var client = try task.join()
     print((try accepted.local_addr()).port() == address.port())
@@ -541,13 +551,14 @@ fn main() Result<void, net.Error> {
 
 #[test]
 fn mutex_serializes_a_non_share_socket_and_destroys_its_payload_once() {
-    let src = r#"import "net"
-fn main() Result<void, net.Error> {
+    let src = r#"import "io"
+import "net"
+fn main() Result<void, io.Error> {
     var receiver = try net.UdpSocket.bind(&"127.0.0.1:0")
     peer := try receiver.local_addr()
     sender := try net.UdpSocket.bind(&"127.0.0.1:0")
     mutex := Mutex.new(sender)
-    receiving := spawn move fn() Result<u64, net.Error> {
+    receiving := spawn move fn() Result<u64, io.Error> {
         var buffer = [1]u8{0}
         var total = u64(0)
         for i in 0..64 {
@@ -557,14 +568,14 @@ fn main() Result<void, net.Error> {
         return Ok(total)
     }
     scope {
-        first := spawn fn() Result<void, net.Error> {
+        first := spawn fn() Result<void, io.Error> {
             for i in 0..32 {
                 var guard = mutex.lock()
                 try guard.value().send_to(&[1]u8{1}, peer)
             }
             return Ok(())
         }
-        second := spawn fn() Result<void, net.Error> {
+        second := spawn fn() Result<void, io.Error> {
             for i in 0..32 {
                 var guard = mutex.lock()
                 try guard.value().send_to(&[1]u8{1}, peer)

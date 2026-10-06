@@ -377,7 +377,7 @@ impl<'a> Fx<'a> {
         // Elements moved out of a vector carry the loans the vector stores,
         // never the call's own borrow of the vector.
         if let Callee::Intrinsic(name) = callee
-            && matches!(name.as_str(), "Vec.pop" | "Vec.replace" | "Vec.swap_remove" | "net._task_take")
+            && matches!(name.as_str(), "Vec.pop" | "Vec.replace" | "Vec.swap_remove" | "runtime._task_take")
             && let Some(receiver) = args.first().and_then(operand_place)
         {
             let mut held = BitSet::new(self.loans.len());

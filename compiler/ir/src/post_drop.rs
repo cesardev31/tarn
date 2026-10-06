@@ -186,11 +186,11 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
         }
         for b in &f.blocks {
             if let Terminator::Call { callee: Callee::Intrinsic(name), args, dest, .. } = &b.term {
-                let task = name.strip_prefix("net.").is_some_and(|n| tarn_types::TASK_INTRINSICS.contains(&n));
+                let task = name.strip_prefix("runtime.").is_some_and(|n| tarn_types::TASK_INTRINSICS.contains(&n));
                 if task && t.decls.task_intrinsics.len() != tarn_types::TASK_INTRINSICS.len() {
                     err("missing task intrinsic declarations".into());
                 }
-                if name.starts_with("net._") && !task {
+                if tarn_types::stdlib_intrinsic_operation(name).is_some() && !task {
                     let valid = t.decls.net_intrinsics.get(name).and_then(|id| t.decls.fns.get(id)).is_some_and(|sig| {
                         sig.abi.as_deref() == Some("intrinsic") && sig.generics.is_empty() && sig.receiver.is_none()
                         && sig.params.len() == args.len() && place_ty(&f.decl, t, dest) == Some(sig.ret.clone())

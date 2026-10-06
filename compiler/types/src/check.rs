@@ -61,6 +61,10 @@ pub fn subst(t: &Ty, map: &HashMap<ParamId, Ty>) -> Ty {
 }
 
 impl<'e, 'a> FnCx<'e, 'a> {
+    fn internal_visible(&self, owner: ModuleId) -> bool {
+        tarn_resolve::internal_visible(&self.env.inputs[self.m.0 as usize], &self.env.inputs[owner.0 as usize])
+    }
+
     pub fn new(env: &'e Env<'a>, m: ModuleId) -> Self {
         FnCx {
             env,
@@ -1047,7 +1051,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     self.err(d);
                     return Ty::Error;
                 };
-                if def.module != self.m && !f.is_pub {
+                if def.module != self.m && !f.is_pub && !self.internal_visible(def.module) {
                     let tname = self.env.r.symbol(*s).name.clone();
                     self.err(
                         Diagnostic::error("E3014", "private_field", format!("field `{}` of `{tname}` is private", name.name))
@@ -1362,7 +1366,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                         .secondary(prev, "first given here"),
                 );
             }
-            if def.module != self.m && !fd.is_pub {
+            if def.module != self.m && !fd.is_pub && !self.internal_visible(def.module) {
                 self.err(Diagnostic::error("E3014", "private_field", format!("field `{}` of `{name}` is private", f.name.name)).primary(f.name.span, ""));
             }
             self.coerce(&vt, &expected.unwrap(), f.span, f.value.as_ref().map(|v| v.id));

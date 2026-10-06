@@ -1,26 +1,27 @@
-import "net"
+import "io"
+import "runtime"
 struct Counter { value i32 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
     var first = Counter{value: 0}
     var second = Counter{value: 0}
     a := &mut first
     b := &mut second
-    var executor = net.Executor.new()
-    executor = executor.add(net.Operation.new(&execution, move fn(waker &net.Waker) net.Progress<void> {
+    var executor = runtime.Executor.new()
+    executor = executor.add(runtime.Operation.new(&execution, move fn(waker &io.Waker) io.Progress<void> {
         a.value = a.value + 1
         print("a")
-        if a.value == 3 { return net.Progress.Ready(()) }
+        if a.value == 3 { return io.Progress.Ready(()) }
         waker.wake()
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     }))
-    executor = executor.add(net.Operation.new(&execution, move fn(waker &net.Waker) net.Progress<void> {
+    executor = executor.add(runtime.Operation.new(&execution, move fn(waker &io.Waker) io.Progress<void> {
         b.value = b.value + 1
         print("b")
-        if b.value == 3 { return net.Progress.Ready(()) }
+        if b.value == 3 { return io.Progress.Ready(()) }
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     }))
     try executor.run(&execution)
     print(first.value)

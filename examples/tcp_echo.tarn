@@ -1,7 +1,8 @@
+import "io"
 import "net"
 
 // Blocking loopback echo; EOF ends this connection.
-fn echo(conn net.TcpStream) Result<void, net.Error> {
+fn echo(conn net.TcpStream) Result<void, io.Error> {
     var stream = conn
     var buffer = [64]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     for {
@@ -11,7 +12,7 @@ fn echo(conn net.TcpStream) Result<void, net.Error> {
     }
 }
 
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     var listener = try net.listen_tcp(&"127.0.0.1:8080")
     print("Listening on 127.0.0.1:8080")
     conn := try listener.accept()

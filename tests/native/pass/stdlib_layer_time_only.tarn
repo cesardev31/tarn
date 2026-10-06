@@ -1,0 +1,9 @@
+// Regression (Phase 14R): `time` loads with `io` but without net or runtime.
+import "io"
+import "time"
+
+fn main() Result<void, io.Error> {
+    var timer = try time.Timer.after(time.Duration.milliseconds(u64(0)))
+    print(time.Duration.seconds(u64(2)).as_millis())
+    return Ok(())
+}

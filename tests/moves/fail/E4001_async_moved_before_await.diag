@@ -1,9 +1,9 @@
 error[E4001]: use of moved value `s`
-  --> tests/moves/fail/E4001_async_moved_before_await.tarn:17:11
+  --> tests/moves/fail/E4001_async_moved_before_await.tarn:18:11
    |
-15 |     take(s)
+16 |     take(s)
    |          - value moved here
-17 |     print(&s)
+18 |     print(&s)
    |           ^^ value used here after move
    |
    = note: `string` is not a copy type, so assigning or passing it moves it

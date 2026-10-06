@@ -1,0 +1,11 @@
+// Regression (Phase 14R): a program may load only the `io` layer.
+import "io"
+
+fn fails() Result<i32, io.Error> {
+    return Ok(7)
+}
+
+fn main() Result<void, io.Error> {
+    print(try fails())
+    return Ok(())
+}

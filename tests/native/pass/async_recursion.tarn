@@ -1,4 +1,5 @@
-import "net"
+import "io"
+import "runtime"
 async fn countdown(n i32) i32 {
     if n == 0 { return 0 }
     rest := await countdown(n - 1)
@@ -9,11 +10,11 @@ async fn ping(n i32) i32 {
     return await pong(n - 1)
 }
 async fn pong(n i32) i32 { return 1 + await ping(n) }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
-    var app = net.Operation.new(&execution, countdown(100))
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var app = runtime.Operation.new(&execution, countdown(100))
     print(try execution.block_on(&mut app))
-    var other = net.Operation.new(&execution, ping(10))
+    var other = runtime.Operation.new(&execution, ping(10))
     print(try execution.block_on(&mut other))
     return Ok(())
 }

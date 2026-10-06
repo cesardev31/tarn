@@ -1,6 +1,7 @@
+import "io"
 import "net"
 fn require(value bool) { if !value { panic("readiness assertion") } }
-fn main() Result<void, net.Error> {
+fn main() Result<void, io.Error> {
     var poll = try net.Poll.new()
     var events = [2]net.Event{net.Event.empty(), net.Event.empty()}
     require(try poll.wait(&mut events, 0) == usize(0))
@@ -8,7 +9,7 @@ fn main() Result<void, net.Error> {
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     try listener.set_nonblocking(true)
     match listener.accept() {
-        Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+        Err(error) => match error.kind { io.ErrorKind.WouldBlock => {}
             _ => panic("accept error") }
         Ok(stream) => panic("unexpected accept")
     }
@@ -25,7 +26,7 @@ fn main() Result<void, net.Error> {
     require(try poll.wait(&mut events, -1) > usize(0))
     var server = try listener.accept()
     match listener.accept() {
-        Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+        Err(error) => match error.kind { io.ErrorKind.WouldBlock => {}
             _ => panic("accept readiness race error") }
         Ok(stream) => panic("unexpected second accept")
     }
@@ -35,12 +36,12 @@ fn main() Result<void, net.Error> {
     st := try poll.register_stream(&server, net.Interest.Readable)
     var buffer = [2]u8{0, 0}
     match server.read(&mut buffer) {
-        Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+        Err(error) => match error.kind { io.ErrorKind.WouldBlock => {}
             _ => panic("read error") }
         Ok(count) => panic("unexpected read")
     }
     match client.write_all(&buffer) {
-        Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+        Err(error) => match error.kind { io.ErrorKind.WouldBlock => {}
             _ => panic("write_all error") }
         Ok(value) => panic("nonblocking write_all accepted")
     }
@@ -70,7 +71,7 @@ fn main() Result<void, net.Error> {
         require(events[0].token.same(ut) && events[0].readable)
         require((try receiver.recv_from(&mut buffer)).count == usize(0))
         match receiver.recv_from(&mut buffer) {
-            Err(error) => match error.kind { net.ErrorKind.WouldBlock => {}
+            Err(error) => match error.kind { io.ErrorKind.WouldBlock => {}
             _ => panic("udp error") }
             Ok(packet) => panic("udp readiness guaranteed progress")
         }

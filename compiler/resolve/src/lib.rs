@@ -43,6 +43,19 @@ pub struct ModuleInput<'a> {
     pub trusted_stdlib: bool,
 }
 
+/// Trusted stdlib layers and the layers each one builds on (ADR 0041), lowest
+/// first. A trusted module may use private items and fields only of the layers
+/// it builds on, never of layers above or beside it; user modules never see
+/// private stdlib items.
+pub const STDLIB_LAYERS: &[&str] = &["io", "time", "net", "runtime"];
+const STDLIB_BELOW: &[(&str, &[&str])] = &[("io", &[]), ("time", &["io"]), ("net", &["io"]), ("runtime", &["io", "time", "net"])];
+
+/// Whether `from` may use a private item or field declared in `to`.
+pub fn internal_visible(from: &ModuleInput, to: &ModuleInput) -> bool {
+    from.trusted_stdlib && to.trusted_stdlib
+        && STDLIB_BELOW.iter().any(|(layer, below)| *layer == from.name && below.contains(&to.name.as_str()))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ModuleTarget {
     Local(ModuleId),
@@ -315,5 +328,23 @@ mod tests {
         assert!(matches!(r.symbol(fsym).kind, crate::SymbolKind::Method { .. }));
         let rsym = r.tables[0].defs[&f.receiver.as_ref().unwrap().id];
         assert!(matches!(r.symbol(rsym).kind, crate::SymbolKind::SelfParam));
+    }
+
+    #[test]
+    fn private_stdlib_access_flows_only_down_the_layers() {
+        use tarn_diagnostics::SourceMap;
+        let mut map = SourceMap::new();
+        let id = map.add("t.tarn", "");
+        let ast = tarn_parser::parse_file(id, map.file(id)).module;
+        let module = |name: &str, trusted_stdlib| crate::ModuleInput { name: name.into(), ast: &ast, trusted_stdlib };
+        let (io, time, net, runtime) = (module("io", true), module("time", true), module("net", true), module("runtime", true));
+        assert!(crate::internal_visible(&time, &io) && crate::internal_visible(&net, &io) && crate::internal_visible(&runtime, &net));
+        // Never upward, sideways, to itself, from user code or into a user module named like a layer.
+        assert!(!crate::internal_visible(&io, &net) && !crate::internal_visible(&net, &runtime));
+        assert!(!crate::internal_visible(&net, &time) && !crate::internal_visible(&time, &net));
+        assert!(!crate::internal_visible(&io, &io));
+        assert!(!crate::internal_visible(&module("main", false), &io));
+        assert!(!crate::internal_visible(&runtime, &module("io", false)));
+        assert!(!crate::internal_visible(&module("runtime", false), &io));
     }
 }

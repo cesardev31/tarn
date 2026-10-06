@@ -15,6 +15,13 @@ mod ty;
 pub use check::subst;
 pub use env::{Decls, EnumDef, Env, FieldDef, FnSig, PassingMode, Prelude, ResultContract, SemanticContract, StructDef, TASK_INTRINSICS, VariantDef};
 pub use tarn_ast::{CallMode, ReceiverKind};
+
+/// The native operation named by a private trusted-stdlib intrinsic call,
+/// `<layer>._<operation>` (ADR 0041), e.g. `net._read` -> `read`.
+pub fn stdlib_intrinsic_operation(name: &str) -> Option<&str> {
+    let (module, operation) = name.split_once("._")?;
+    tarn_resolve::STDLIB_LAYERS.contains(&module).then_some(operation)
+}
 pub use ty::{FloatTy, IntTy, ParamId, Ty};
 
 use std::collections::HashMap;

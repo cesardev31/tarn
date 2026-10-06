@@ -379,7 +379,7 @@ See [ADR 0033](adr/0033-safe-native-tasks.md), accepted for Phase 11, and
 ## 13c. Async functions (Phase 13)
 
 ```tarn
-async fn handle(stream &mut net.TcpStream) Result<usize, net.Error> {
+async fn handle(stream &mut net.TcpStream) Result<usize, io.Error> {
     var bytes = [16]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
     count := try await stream.read_async(&mut bytes)
     try await stream.write_all_async(&bytes[0..count])
@@ -391,7 +391,7 @@ An `async fn f(...) T` declares its output `T`; calling it runs no body code and
 returns an owned `async computation<T>` holding the moved arguments (and the
 loans they carry) in a stable heap frame. `await e` polls `e` with the current
 waker until Ready and evaluates to `T`; it is only valid in an async body (E3060)
-and only on a source computation or the trusted `net.Operation<R>` (E3061).
+and only on a source computation or the trusted `runtime.Operation<R>` (E3061).
 `try await e` is `try (await e)`.
 
 Suspension does not change ownership rules: a value moved before an `await` is
@@ -403,12 +403,12 @@ current state owns. A completed computation must not be polled again (abort).
 Computations run on the Phase-12C executor model. Drive one explicitly:
 
 ```tarn
-execution := try net.Execution.new()
-var app = net.Operation.new(&execution, handle(&mut stream))
+execution := try runtime.Execution.new()
+var app = runtime.Operation.new(&execution, handle(&mut stream))
 count := try try execution.block_on(&mut app)
 ```
 
-or add `net.Operation.new(&execution, task())` to a `net.Executor`. Async socket
+or add `runtime.Operation.new(&execution, task())` to a `runtime.Executor`. Async socket
 operations have distinct names (`read_async`, `write_async`, `write_all_async`,
 `accept_async`, `finish_async`, `recv_from_async`) and require nonblocking
 sockets; blocking methods (and DNS) keep blocking the whole executor if called

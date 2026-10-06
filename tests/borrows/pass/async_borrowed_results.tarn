@@ -1,26 +1,27 @@
-import "net"
+import "io"
+import "runtime"
 struct Buffer { len usize }
-fn pause(owner &net.Execution) net.Operation<void> {
+fn pause(owner &runtime.Execution) runtime.Operation<void> {
     var polled = false
-    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
-        if polled { return net.Progress.Ready(()) }
+    return runtime.Operation.new(owner, move fn(waker &io.Waker) io.Progress<void> {
+        if polled { return io.Progress.Ready(()) }
         polled = true
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     })
 }
 // Results borrow caller storage through the computation's captured loans,
 // never the generated frame; references to frame locals survive suspension.
-async fn first(owner &net.Execution, a &Buffer, b &Buffer) &Buffer {
+async fn first(owner &runtime.Execution, a &Buffer, b &Buffer) &Buffer {
     await pause(owner)
     if a.len >= b.len { return a }
     return b
 }
-async fn forward(owner &net.Execution, a &Buffer, b &Buffer) &Buffer {
+async fn forward(owner &runtime.Execution, a &Buffer, b &Buffer) &Buffer {
     chosen := await first(owner, a, b)
     return chosen
 }
-async fn local(owner &net.Execution) usize {
+async fn local(owner &runtime.Execution) usize {
     b := Buffer{len: usize(3)}
     r := &b
     await pause(owner)

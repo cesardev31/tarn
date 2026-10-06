@@ -30,13 +30,15 @@ fn balanced(o: &Output) {
 
 #[test]
 fn timers_order_races_and_abandon_losers_exactly_once() {
-    let (out, elapsed) = run(&compile(r#"import "net"
-async fn nap(ms u64, name string) Result<string, net.Error> {
-    try await net.sleep(net.Duration.milliseconds(ms))
+    let (out, elapsed) = run(&compile(r#"import "io"
+import "time"
+import "runtime"
+async fn nap(ms u64, name string) Result<string, io.Error> {
+    try await time.sleep(time.Duration.milliseconds(ms))
     return Ok(name)
 }
-async fn instant(name string) Result<string, net.Error> { return Ok(name) }
-async fn app(owner &net.Execution) Result<i32, net.Error> {
+async fn instant(name string) Result<string, io.Error> { return Ok(name) }
+async fn app(owner &runtime.Execution) Result<i32, io.Error> {
     // Ordering: shorter sleep finishes first, independent of spawn order.
     slow := owner.spawn_async(nap(u64(60), "slow"))
     quick := owner.spawn_async(nap(u64(10), "quick"))
@@ -45,19 +47,19 @@ async fn app(owner &net.Execution) Result<i32, net.Error> {
     b := try await slow.join()
     print(&b)
     // Operation wins.
-    match try await owner.spawn_async(nap(u64(5), "op-wins")).join_timeout(net.Duration.milliseconds(500)) {
+    match try await owner.spawn_async(nap(u64(5), "op-wins")).join_timeout(time.Duration.milliseconds(500)) {
         Some(r) => { print(&(try r)) }
         None => { print("unexpected timeout") }
     }
     // Timeout wins: the pending task is abandoned, its string destroyed once.
-    match try await owner.spawn_async(nap(u64(5000), "abandoned")).join_timeout(net.Duration.milliseconds(20)) {
+    match try await owner.spawn_async(nap(u64(5000), "abandoned")).join_timeout(time.Duration.milliseconds(20)) {
         Some(r) => { print("unexpected result") }
         None => { print("timed out") }
     }
     // Both ready in the same poll: completion has priority.
     tie := owner.spawn_async(instant("tie"))
-    try await net.sleep(net.Duration.milliseconds(5))
-    match try await tie.join_timeout(net.Duration.milliseconds(0)) {
+    try await time.sleep(time.Duration.milliseconds(5))
+    match try await tie.join_timeout(time.Duration.milliseconds(0)) {
         Some(r) => { print(&(try r)) }
         None => { print("tie lost") }
     }
@@ -79,9 +81,9 @@ async fn app(owner &net.Execution) Result<i32, net.Error> {
     owner.spawn_async(nap(u64(10000), "left-at-exit"))
     return Ok(0)
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
-    var op = net.Operation.new(&execution, app(&execution))
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var op = runtime.Operation.new(&execution, app(&execution))
     print(try try execution.block_on(&mut op))
     return Ok(())
 }
@@ -100,18 +102,20 @@ fn main() Result<void, net.Error> {
 
 #[test]
 fn dropped_timer_closes_without_firing_and_zero_fires_immediately() {
-    let (out, _) = run(&compile(r#"import "net"
-async fn app() Result<i32, net.Error> {
+    let (out, _) = run(&compile(r#"import "io"
+import "time"
+import "runtime"
+async fn app() Result<i32, io.Error> {
     {
-        unused := try net.Timer.after(net.Duration.seconds(u64(60)))
+        unused := try time.Timer.after(time.Duration.seconds(u64(60)))
     }
-    var now = try net.Timer.after(net.Duration.milliseconds(u64(0)))
+    var now = try time.Timer.after(time.Duration.milliseconds(u64(0)))
     try await now.wait_async()
     return Ok(1)
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
-    var op = net.Operation.new(&execution, app())
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var op = runtime.Operation.new(&execution, app())
     print(try try execution.block_on(&mut op))
     return Ok(())
 }

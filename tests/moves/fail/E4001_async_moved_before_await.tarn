@@ -1,17 +1,18 @@
-import "net"
+import "io"
+import "runtime"
 struct Buffer { len usize }
-fn pause(owner &net.Execution) net.Operation<void> {
+fn pause(owner &runtime.Execution) runtime.Operation<void> {
     var polled = false
-    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
-        if polled { return net.Progress.Ready(()) }
+    return runtime.Operation.new(owner, move fn(waker &io.Waker) io.Progress<void> {
+        if polled { return io.Progress.Ready(()) }
         polled = true
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     })
 }
 // Ownership moved before a suspension stays moved after resumption.
 fn take(s string) {}
-async fn f(owner &net.Execution, s string) {
+async fn f(owner &runtime.Execution, s string) {
     take(s)
     await pause(owner)
     print(&s)

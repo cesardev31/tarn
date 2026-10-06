@@ -1,0 +1,91 @@
+// Shared I/O vocabulary and the trusted readiness/wake boundary (ADR 0041).
+// Public: Error, ErrorKind, Waker, Progress. Private items are visible only to
+// trusted stdlib modules layered above `io`, never to user modules.
+pub copy enum ErrorKind {
+    AddressInUse
+    ConnectionRefused
+    ConnectionReset
+    BrokenPipe
+    TimedOut
+    WouldBlock
+    InvalidAddress
+    DnsFailure
+    OtherOs
+    WriteZero
+    UnexpectedEof
+    LimitExceeded
+}
+pub copy struct Error {
+    pub kind ErrorKind
+    code i32
+    domain i32
+}
+copy struct _Raw {
+    domain i32
+    code i32
+    value i64
+    address [24]u8
+}
+fn _error(raw _Raw) Error {
+    if raw.domain == 1 { return Error{kind: ErrorKind.DnsFailure, code: raw.code, domain: raw.domain} }
+    if raw.domain == 2 { return Error{kind: ErrorKind.InvalidAddress, code: raw.code, domain: raw.domain} }
+    var kind = ErrorKind.OtherOs
+    if raw.code == 98 { kind = ErrorKind.AddressInUse }
+    if raw.code == 111 { kind = ErrorKind.ConnectionRefused }
+    if raw.code == 104 { kind = ErrorKind.ConnectionReset }
+    if raw.code == 32 { kind = ErrorKind.BrokenPipe }
+    if raw.code == 110 { kind = ErrorKind.TimedOut }
+    if raw.code == 11 { kind = ErrorKind.WouldBlock }
+    if raw.code == 22 || raw.code == 99 { kind = ErrorKind.InvalidAddress }
+    return Error{kind: kind, code: raw.code, domain: raw.domain}
+}
+fn _check(raw _Raw) Result<_Raw, Error> {
+    if raw.code != 0 || raw.domain != 0 { return Err(_error(raw)) }
+    return Ok(raw)
+}
+pub fn Error.native_code(&self) i32 { return self.code }
+pub fn Error.is_dns_code(&self) bool { return self.domain == 1 }
+extern "intrinsic" fn _now() _Raw
+pub struct Waker { native usize }
+pub enum Progress<R> {
+    Pending
+    Ready(R)
+}
+extern "intrinsic" fn _wake(waker &Waker) _Raw
+extern "intrinsic" fn _wake_take(waker &Waker) _Raw
+extern "intrinsic" fn _wake_arm(waker &Waker, fd i32, interest i32) _Raw
+extern "intrinsic" fn _wake_clear(waker &Waker) _Raw
+fn _arm(waker &Waker, fd i32, interest i32) Result<void, Error> {
+    for {
+        raw := _wake_arm(waker, fd, interest)
+        if raw.domain == 0 && raw.code == 4 { continue }
+        try _check(raw)
+        return Ok(())
+    }
+}
+fn _would_block(error Error) bool {
+    match error.kind { ErrorKind.WouldBlock => { return true }
+        _ => { return false } }
+}
+pub fn Waker.wake(&self) { _wake(self) }
+// Async-body primitives (ADR 0037), private to this trusted module. Lowering
+// calls `body` with the current poll's Waker, and turns `_async_park` into a
+// bare suspension edge. The Waker loan cannot outlive the callback.
+extern "intrinsic" fn _with_waker<R>(body mut fn(&Waker) R) R
+extern "intrinsic" fn _async_park()
+// A completed async leaf releases its readiness registration, as a completed
+// Operation does. Source computations share one Waker sequentially, so the next
+// leaf may arm another descriptor. A wake already queued is preserved.
+fn _disarm(waker &Waker) {
+    queued := _wake_take(waker).value != 0
+    _wake_clear(waker)
+    if queued { _wake(waker) }
+}
+fn _leaf<R>(waker &Waker, progress Progress<R>) Progress<R> {
+    match &progress {
+        Progress.Ready(value) => { _disarm(waker) }
+        Progress.Pending => {}
+    }
+    return progress
+}
+fn _fail(kind ErrorKind) Error { return Error{kind: kind, code: 0, domain: 0} }

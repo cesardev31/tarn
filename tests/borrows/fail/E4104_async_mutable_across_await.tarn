@@ -1,16 +1,17 @@
-import "net"
+import "io"
+import "runtime"
 struct Buffer { len usize }
-fn pause(owner &net.Execution) net.Operation<void> {
+fn pause(owner &runtime.Execution) runtime.Operation<void> {
     var polled = false
-    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
-        if polled { return net.Progress.Ready(()) }
+    return runtime.Operation.new(owner, move fn(waker &io.Waker) io.Progress<void> {
+        if polled { return io.Progress.Ready(()) }
         polled = true
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     })
 }
 // Suspension does not end a mutable loan that is used after resumption.
-async fn f(owner &net.Execution) {
+async fn f(owner &runtime.Execution) {
     var b = Buffer{len: usize(3)}
     r := &mut b
     await pause(owner)

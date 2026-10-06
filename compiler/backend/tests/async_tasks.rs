@@ -34,24 +34,25 @@ fn balanced(o: &Output) {
 
 #[test]
 fn spawned_tasks_interleave_fairly_and_join_owned_results_once() {
-    let out = run(&compile(r#"import "net"
-fn pause(owner &net.Execution) net.Operation<void> {
+    let out = run(&compile(r#"import "io"
+import "runtime"
+fn pause(owner &runtime.Execution) runtime.Operation<void> {
     var polled = false
-    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
-        if polled { return net.Progress.Ready(()) }
+    return runtime.Operation.new(owner, move fn(waker &io.Waker) io.Progress<void> {
+        if polled { return io.Progress.Ready(()) }
         polled = true
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     })
 }
-async fn work(owner &net.Execution, name string, n i32) string {
+async fn work(owner &runtime.Execution, name string, n i32) string {
     for i in 0..n {
         print(&name)
         await pause(owner)
     }
     return name
 }
-async fn parent(owner &net.Execution) i32 {
+async fn parent(owner &runtime.Execution) i32 {
     a := owner.spawn_async(work(owner, "a", 3))
     b := owner.spawn_async(work(owner, "b", 2))
     first := await a.join()
@@ -60,9 +61,9 @@ async fn parent(owner &net.Execution) i32 {
     print(&second)
     return 7
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
-    var app = net.Operation.new(&execution, parent(&execution))
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var app = runtime.Operation.new(&execution, parent(&execution))
     print(try execution.block_on(&mut app))
     return Ok(())
 }
@@ -74,27 +75,28 @@ fn main() Result<void, net.Error> {
 
 #[test]
 fn dropped_handles_destroy_results_or_abandon_pending_tasks_and_hundreds_complete() {
-    let out = run(&compile(r#"import "net"
-fn pause(owner &net.Execution) net.Operation<void> {
+    let out = run(&compile(r#"import "io"
+import "runtime"
+fn pause(owner &runtime.Execution) runtime.Operation<void> {
     var polled = false
-    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
-        if polled { return net.Progress.Ready(()) }
+    return runtime.Operation.new(owner, move fn(waker &io.Waker) io.Progress<void> {
+        if polled { return io.Progress.Ready(()) }
         polled = true
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     })
 }
-async fn slow(owner &net.Execution, name string) string {
+async fn slow(owner &runtime.Execution, name string) string {
     await pause(owner)
     await pause(owner)
     return name
 }
 async fn fast(name string) string { return name }
-async fn counter(owner &net.Execution, n i32) i32 {
+async fn counter(owner &runtime.Execution, n i32) i32 {
     await pause(owner)
     return n
 }
-async fn parent(owner &net.Execution) i32 {
+async fn parent(owner &runtime.Execution) i32 {
     pending := owner.spawn_async(slow(owner, "pending-dropped"))
     done := owner.spawn_async(fast("completed-dropped"))
     await pause(owner)
@@ -110,9 +112,9 @@ async fn parent(owner &net.Execution) i32 {
         }
     }
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
-    var app = net.Operation.new(&execution, parent(&execution))
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var app = runtime.Operation.new(&execution, parent(&execution))
     print(try execution.block_on(&mut app))
     return Ok(())
 }
@@ -126,8 +128,10 @@ fn main() Result<void, net.Error> {
 
 #[test]
 fn async_server_serves_connections_concurrently_without_threads_per_connection() {
-    let out = run(&compile(r#"import "net"
-async fn handle(stream net.TcpStream) Result<usize, net.Error> {
+    let out = run(&compile(r#"import "io"
+import "runtime"
+import "net"
+async fn handle(stream net.TcpStream) Result<usize, io.Error> {
     var conn = stream
     try conn.set_nonblocking(true)
     var bytes = [16]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -139,7 +143,7 @@ async fn handle(stream net.TcpStream) Result<usize, net.Error> {
         total = total + count
     }
 }
-async fn serve(owner &net.Execution, listener &mut net.TcpListener, clients i32) Result<usize, net.Error> {
+async fn serve(owner &runtime.Execution, listener &mut net.TcpListener, clients i32) Result<usize, io.Error> {
     var tasks = Vec.new()
     for i in 0..clients {
         stream := try await listener.accept_async()
@@ -153,12 +157,12 @@ async fn serve(owner &net.Execution, listener &mut net.TcpListener, clients i32)
         }
     }
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
     var listener = try net.TcpListener.bind(&"127.0.0.1:0")
     try listener.set_nonblocking(true)
     address := try listener.local_addr()
-    clients := spawn move fn() Result<void, net.Error> {
+    clients := spawn move fn() Result<void, io.Error> {
         // First client stays connected while the others are served.
         var first = try net.TcpStream.connect_addr(address)
         try first.write_all(&[2]u8{1, 2})
@@ -178,7 +182,7 @@ fn main() Result<void, net.Error> {
         print(last[0])
         return Ok(())
     }
-    var app = net.Operation.new(&execution, serve(&execution, &mut listener, 3))
+    var app = runtime.Operation.new(&execution, serve(&execution, &mut listener, 3))
     total := try try execution.block_on(&mut app)
     try clients.join()
     print(total)
@@ -192,25 +196,26 @@ fn main() Result<void, net.Error> {
 
 #[test]
 fn tasks_outliving_block_on_are_abandoned_structurally() {
-    let out = run(&compile(r#"import "net"
-fn forever(owner &net.Execution) net.Operation<void> {
+    let out = run(&compile(r#"import "io"
+import "runtime"
+fn forever(owner &runtime.Execution) runtime.Operation<void> {
     var turns = 0
-    return net.Operation.new(owner, move fn(waker &net.Waker) net.Progress<void> {
+    return runtime.Operation.new(owner, move fn(waker &io.Waker) io.Progress<void> {
         turns = turns + 1
         waker.wake()
-        return net.Progress.Pending
+        return io.Progress.Pending
     })
 }
-async fn background(owner &net.Execution, name string) {
+async fn background(owner &runtime.Execution, name string) {
     await forever(owner)
 }
-async fn app(owner &net.Execution) i32 {
+async fn app(owner &runtime.Execution) i32 {
     owner.spawn_async(background(owner, "abandoned-at-exit"))
     return 3
 }
-fn main() Result<void, net.Error> {
-    execution := try net.Execution.new()
-    var op = net.Operation.new(&execution, app(&execution))
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var op = runtime.Operation.new(&execution, app(&execution))
     print(try execution.block_on(&mut op))
     print("after")
     return Ok(())
@@ -223,14 +228,15 @@ fn main() Result<void, net.Error> {
 
 #[test]
 fn joining_from_another_execution_aborts() {
-    let out = run(&compile(r#"import "net"
+    let out = run(&compile(r#"import "io"
+import "runtime"
 async fn seven() i32 { return 7 }
-async fn waiter(task net.AsyncTask<i32>) i32 { return await task.join() }
-fn main() Result<void, net.Error> {
-    first := try net.Execution.new()
-    second := try net.Execution.new()
+async fn waiter(task runtime.AsyncTask<i32>) i32 { return await task.join() }
+fn main() Result<void, io.Error> {
+    first := try runtime.Execution.new()
+    second := try runtime.Execution.new()
     task := first.spawn_async(seven())
-    var op = net.Operation.new(&second, waiter(task))
+    var op = runtime.Operation.new(&second, waiter(task))
     print(try second.block_on(&mut op))
     return Ok(())
 }
@@ -241,9 +247,9 @@ fn main() Result<void, net.Error> {
 #[test]
 fn task_handles_are_owned_and_borrowing_tasks_are_rejected() {
     for (tag, source, code) in [
-        ("double-join", "import \"net\"\nasync fn one() i32 { return 1 }\nasync fn f(owner &net.Execution) i32 {\n t := owner.spawn_async(one())\n a := await t.join()\n b := await t.join()\n return a + b\n}\nfn main() {}\n", "E4001"),
-        ("moved-handle", "import \"net\"\nasync fn one() i32 { return 1 }\nasync fn f(owner &net.Execution) i32 {\n t := owner.spawn_async(one())\n moved := t\n return await t.join()\n}\nfn main() {}\n", "E4001"),
-        ("borrowing-task", "import \"net\"\nasync fn uses(value &i32) i32 { return 1 }\nasync fn f(owner &net.Execution) i32 {\n x := 5\n t := owner.spawn_async(uses(&x))\n return await t.join()\n}\nfn main() {}\n", "E4209"),
+        ("double-join", "import \"runtime\"\nasync fn one() i32 { return 1 }\nasync fn f(owner &runtime.Execution) i32 {\n t := owner.spawn_async(one())\n a := await t.join()\n b := await t.join()\n return a + b\n}\nfn main() {}\n", "E4001"),
+        ("moved-handle", "import \"runtime\"\nasync fn one() i32 { return 1 }\nasync fn f(owner &runtime.Execution) i32 {\n t := owner.spawn_async(one())\n moved := t\n return await t.join()\n}\nfn main() {}\n", "E4001"),
+        ("borrowing-task", "import \"runtime\"\nasync fn uses(value &i32) i32 { return 1 }\nasync fn f(owner &runtime.Execution) i32 {\n x := 5\n t := owner.spawn_async(uses(&x))\n return await t.join()\n}\nfn main() {}\n", "E4209"),
     ] {
         let (dir, result) = checked(source, tag);
         std::fs::remove_dir_all(dir).unwrap();
