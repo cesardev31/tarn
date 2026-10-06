@@ -159,11 +159,7 @@ impl<'a> Env<'a> {
                     ItemKind::Struct(s) => {
                         let Some(sym) = self.def(m, item.id) else { continue };
                         let generics = self.params_of(m, &s.generics);
-                        let fields = s
-                            .fields
-                            .iter()
-                            .map(|f| FieldDef { name: f.name.name.clone(), ty: self.lower(m, &f.ty), is_pub: f.is_pub })
-                            .collect();
+                        let fields = s.fields.iter().map(|f| FieldDef { name: f.name.name.clone(), ty: self.lower(m, &f.ty), is_pub: f.is_pub }).collect();
                         self.decls.structs.insert(sym, StructDef { module: m, generics, fields, is_copy: s.is_copy });
                     }
                     ItemKind::Enum(e) => {
@@ -237,16 +233,7 @@ impl<'a> Env<'a> {
         generics.extend(self.params_of(m, &f.generics));
         let params = f.params.iter().map(|p| self.lower(m, &p.ty)).collect();
         let ret = f.ret.as_ref().map(|t| self.lower(m, t)).unwrap_or(Ty::Void);
-        let sig = FnSig {
-            generics,
-            receiver: f.receiver.as_ref().map(|r| r.kind),
-            self_ty,
-            params,
-            ret,
-            abi: f.abi.clone(),
-            module: m,
-            span: f.name.span,
-        };
+        let sig = FnSig { generics, receiver: f.receiver.as_ref().map(|r| r.kind), self_ty, params, ret, abi: f.abi.clone(), module: m, span: f.name.span };
         self.decls.fns.insert(sym, sig);
     }
 
@@ -273,7 +260,11 @@ impl<'a> Env<'a> {
                             args.resize(arity, Ty::Error);
                             // The prelude `Error` is a placeholder until the stdlib defines it.
                             if matches!(sym.kind, SymbolKind::PreludeType) && sym.name == "Error" {
-                                return Ty::Opaque;
+                                diags.push(
+                                    Diagnostic::error("E3040", "unmodeled_std_api", "prelude `Error` has no ownership/provenance contract")
+                                        .primary(p.span, "define a concrete error type instead"),
+                                );
+                                return Ty::Error;
                             }
                             Ty::Adt(s, args)
                         }
@@ -289,7 +280,14 @@ impl<'a> Env<'a> {
                         _ => Ty::Error,
                     }
                 }
-                Some(Res::External { .. }) => Ty::Opaque,
+                Some(Res::External { .. }) => {
+                    diags.push(
+                        Diagnostic::error("E3040", "unmodeled_std_api", "standard-library type has no ownership/provenance contract")
+                            .primary(p.span, "cannot safely type-check this type")
+                            .help("use a module with explicit Tarn declarations"),
+                    );
+                    Ty::Error
+                }
                 _ => Ty::Error,
             },
             TypeKind::Ref { mutable, inner } => Ty::Ref(*mutable, Box::new(self.lower_with(m, inner, diags))),
@@ -308,10 +306,9 @@ impl<'a> Env<'a> {
                     }
                 }
             }
-            TypeKind::Fn { params, ret } => Ty::Fn(
-                params.iter().map(|p| self.lower_with(m, p, diags)).collect(),
-                Box::new(ret.as_ref().map(|r| self.lower_with(m, r, diags)).unwrap_or(Ty::Void)),
-            ),
+            TypeKind::Fn { params, ret } => {
+                Ty::Fn(params.iter().map(|p| self.lower_with(m, p, diags)).collect(), Box::new(ret.as_ref().map(|r| self.lower_with(m, r, diags)).unwrap_or(Ty::Void)))
+            }
             TypeKind::Any(_) => match uses.get(&t.id).map(|u| &u.res) {
                 Some(Res::Symbol(i)) => Ty::Any(*i),
                 _ => Ty::Error,

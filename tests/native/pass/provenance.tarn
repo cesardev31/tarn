@@ -1,0 +1,7 @@
+fn observe(x &string) &string { return x }
+fn main() {
+    s := "borrowed"
+    r := observe(&s)
+    print(r)
+    print(s)
+}

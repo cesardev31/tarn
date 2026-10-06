@@ -10,4 +10,10 @@ fn main() {
     print(i8(-128.9))
     print(u8(-0.5))
     print(u64(42.8))
+    small: f32 := -12.9
+    print(i16(small))
+    top: u64 := 1
+    print(top << 63)
+    minimum: f64 := -9223372036854775808.0
+    print(i64(minimum))
 }

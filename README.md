@@ -42,6 +42,14 @@ cargo run -p tarn -- build tests/native/pass/milestone.tarn -o /tmp/tarn-milesto
 
 `tarn build file.tarn` writes `file` beside the source; `tarn run` uses a temporary
 executable and removes it. Scalars, concrete structs/enums/arrays, thin references,
-direct calls and executable drops are supported. Generics requiring monomorphization,
-closures, virtual calls, slices, spawn and opaque std APIs report backend limitations.
+direct calls and executable drops are supported. Reachable generic instances, borrowed
+slices and borrowed nonescaping closures also execute. Virtual calls and spawn report
+backend limitations; unmodeled std APIs are rejected semantically with E3040.
 See [ADR 0027](docs/adr/0027-native-backend.md) for exact ABI, layout and restrictions.
+
+Native feature completion after phase 7 adds reachable generic specialization,
+concrete generic ADTs, borrowed fat slices, nonescaping borrowed closures and
+checked shifts/float-to-int casts. Unknown bootstrap stdlib APIs now fail with
+E3040. See [ADR 0028](docs/adr/0028-native-feature-completeness.md) and
+[ADR 0029](docs/adr/0029-checked-shifts-and-float-casts.md). Dynamic dispatch and
+optimization remain deferred; callable locals retain current consuming semantics.

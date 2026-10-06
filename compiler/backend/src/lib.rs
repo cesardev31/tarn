@@ -1,8 +1,8 @@
 //! Ahead-of-time Linux x86_64 backend. Ownership semantics come exclusively
 //! from post-drop IR. No move checker, loans or provenance enter this crate.
 mod codegen;
-pub mod mono;
 pub mod layout;
+pub mod mono;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -40,7 +40,9 @@ pub fn emit_object(p: &post_drop::Program, t: &Typed) -> Result<Vec<u8>> {
     }
     let concrete = mono::specialize(p, t)?;
     let bugs = post_drop::verify(&concrete, t);
-    if !bugs.is_empty() { return Err(Error::bug(bugs.join("\n"))); }
+    if !bugs.is_empty() {
+        return Err(Error::bug(bugs.join("\n")));
+    }
     codegen::emit(&concrete, t)
 }
 

@@ -1,6 +1,6 @@
 fn sum(s &[]i64) i64 {
     var total: i64 = 0
-    for x in s {
+    for x in &s {
         total = total + x
     }
     return total

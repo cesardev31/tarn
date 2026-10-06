@@ -70,7 +70,10 @@ fn unsupported_valid_features_fail_without_panics() {
             continue;
         }
         let res = tarn_driver::check(&path).unwrap();
-        if path.ends_with("opaque.tarn") {assert!(res.diagnostics.iter().any(|d|d.code=="E3040"));continue;}
+        if path.ends_with("opaque.tarn") {
+            assert!(res.diagnostics.iter().any(|d| d.code == "E3040"));
+            continue;
+        }
         assert!(!res.has_errors(), "{} must be frontend-valid", path.display());
         let error = tarn_backend::emit_object(res.drops.as_ref().unwrap(), res.typed.as_ref().unwrap()).unwrap_err();
         assert!(error.to_string().starts_with("backend not implemented:"), "{error}");
@@ -85,6 +88,18 @@ fn checked_arithmetic_and_panic_abort() {
         ("divide_zero", "a := 10\n    b := 0\n    print(a / b)"),
         ("divide_min", "a: i64 := -9223372036854775808\n    b: i64 := -1\n    print(a / b)"),
         ("cast_range", "a: i16 := 300\n    print(u8(a))"),
+        ("shift_width", "a: u8 := 1\n    print(a << 8)"),
+        ("shift_negative", "a := 1\n    print(a >> -1)"),
+        ("float_u64_boundary", "a: f64 := 18446744073709551616.0\n    print(u64(a))"),
+        ("float_i64_boundary", "a: f64 := 9223372036854775808.0\n    print(i64(a))"),
+        ("float_f32_range", "a: f32 := 128.0\n    print(i8(a))"),
+        ("float_negative_unsigned", "a: f64 := -1.0\n    print(u64(a))"),
+        ("slice_reversed", "a := [2]i64{1, 2}\n    s := &a[2..1]\n    print(s.len())"),
+        ("float_range", "a: f64 := 256.0\n    print(u8(a))"),
+        ("float_nan", "a: f64 := 0.0\n    print(i64(a / a))"),
+        ("float_infinity", "a: f64 := 1.0\n    b: f64 := 0.0\n    print(i64(a / b))"),
+        ("slice_bounds", "a := [2]i64{1, 2}\n    s := &a[0..2]\n    print(s[2])"),
+        ("slice_range", "a := [2]i64{1, 2}\n    s := &a[1..3]\n    print(s.len())"),
         ("panic", "x := \"live\"\n    panic(\"stop\")"),
     ] {
         let (exe, _) = compile(&format!("fn main() {{\n    {body}\n}}\n"), name);
@@ -172,4 +187,43 @@ fn native_line_deletions_never_panic_or_emit_invalid_code() {
     }
     assert!(runs > 40);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn generic_instances_are_reused_and_deterministic() {
+    let (exe, res) = compile(
+        "fn a<T>(x T, n i64) T { if n == 0 { return x }\n return b(x, n - 1) }\nfn b<T>(x T, n i64) T { return a(x, n) }\nfn unused<T>(x T) T { return x }\nfn main() { print(a(42, 2))\n print(a(1, 0))\n print(a(true, 0)) }",
+        "mono-reuse",
+    );
+    let p = tarn_backend::mono::specialize(res.drops.as_ref().unwrap(), res.typed.as_ref().unwrap()).unwrap();
+    assert_eq!(p.functions.len(), 5); // main, a<i64>, a<bool>, b<i64>, b<bool>
+    assert!(p.functions.iter().all(|f| !f.decl.name.starts_with("unused")));
+    let again = tarn_backend::mono::specialize(res.drops.as_ref().unwrap(), res.typed.as_ref().unwrap()).unwrap();
+    assert_eq!(p.functions.iter().map(|f| &f.decl.name).collect::<Vec<_>>(), again.functions.iter().map(|f| &f.decl.name).collect::<Vec<_>>());
+    let out = Command::new(&exe).output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"42\n1\ntrue\n");
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}
+#[test]
+fn generic_owned_drops_match_interpreter() {
+    let source = std::fs::read_to_string("../../tests/native/pass/generic_adts.tarn")
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().starts_with("print("))
+        .map(|line| line.to_owned() + "\n")
+        .collect::<String>()
+        .replace("Some(x) => print(x)", "Some(x) => {}")
+        .replace("None => print(0)", "None => {}")
+        .replace("Ok(x) => print(x)", "Ok(x) => {}")
+        .replace("Err(e) => print(e.message)", "Err(e) => {}");
+    let (exe, res) = compile(&source, "generic-drops");
+    let p = tarn_backend::mono::specialize(res.drops.as_ref().unwrap(), res.typed.as_ref().unwrap()).unwrap();
+    let (expected, aborted) = drop_machine::execute(&p, p.functions[0].decl.id, &[]);
+    assert!(!aborted);
+    let out = Command::new(&exe).env("TARN_TRACE_DROPS", "1").output().unwrap();
+    assert!(out.status.success());
+    let trace: Vec<_> = String::from_utf8_lossy(&out.stderr).lines().filter_map(|s| s.strip_prefix("drop:").map(str::to_owned)).collect();
+    assert_eq!(trace, expected);
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
 }

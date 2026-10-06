@@ -6,6 +6,14 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("opaque std return rejected", Some("E3040"), "import \"fs\"\nfn main() {\n    x := fs.open(\"file\")\n}"),
+    ("opaque std type rejected", Some("E3040"), "import \"fs\"\nfn observe(x &fs.File) {}"),
+    ("opaque prelude error rejected", Some("E3040"), "fn observe(x &Error) {}"),
+    (
+        "modeled result loan remains live",
+        Some("E4102"),
+        "fn view(x &Buffer) &Buffer { return x }\nfn main() {\n    var b = Buffer.new()\n    r := view(&b)\n    b = Buffer.new()\n    read(r)\n}",
+    ),
     ("use after move", Some("E4001"), "fn main() {\n    a := Buffer.new()\n    b := a\n    read(&a)\n}"),
     ("double move", Some("E4001"), "fn main() {\n    a := Buffer.new()\n    consume(a)\n    consume(a)\n}"),
     ("possibly moved at join", Some("E4001"), "fn main(c bool) {\n    x := Buffer.new()\n    if c {\n        consume(x)\n    }\n    read(&x)\n}"),

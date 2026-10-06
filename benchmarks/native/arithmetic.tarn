@@ -1,0 +1,9 @@
+fn main() {
+    var i: i64 = 0
+    var sum: i64 = 0
+    for i < 1000000 {
+        sum = sum + i
+        i = i + 1
+    }
+    print(sum)
+}

@@ -1,98 +1,196 @@
 //! Reachable specialization of already typed post-drop semantics.
 use crate::{Error, Result};
+use std::collections::HashMap;
 use tarn_ir::{post_drop as post, *};
 use tarn_types::{Ty, Typed};
-use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Key { pub function: FunctionId, pub args: Vec<Ty> }
-struct Instances<'a> { source: &'a post::Program, keys: Vec<Key>, functions: Vec<post::Function> }
+pub struct Key {
+    pub function: FunctionId,
+    pub args: Vec<Ty>,
+}
+struct Instances<'a> {
+    source: &'a post::Program,
+    keys: Vec<Key>,
+    functions: Vec<post::Function>,
+}
 impl Instances<'_> {
     fn intern(&mut self, function: FunctionId, args: Vec<Ty>) -> Result<FunctionId> {
         let key = Key { function, args };
-        if let Some(i)=self.keys.iter().position(|k| *k==key) { return Ok(FunctionId(i as u32)); }
-        if self.keys.len()>=256 { return Err(Error::unsupported("monomorphization exceeds 256 reachable instances (possible expanding recursion)")); }
-        let template=self.source.functions.get(function.0 as usize).ok_or_else(|| Error::bug("missing specialization template"))?;
-        if template.decl.generics.len()!=key.args.len() { return Err(Error::bug(format!("{}: generic argument arity",template.decl.name))); }
-        for ty in &key.args { concrete(ty)?; }
-        let id=FunctionId(self.keys.len() as u32);
-        self.keys.push(key); self.functions.push(template.clone()); Ok(id)
+        if let Some(i) = self.keys.iter().position(|k| *k == key) {
+            return Ok(FunctionId(i as u32));
+        }
+        if self.keys.len() >= 256 {
+            return Err(Error::unsupported("monomorphization exceeds 256 reachable instances (possible expanding recursion)"));
+        }
+        let template = self.source.functions.get(function.0 as usize).ok_or_else(|| Error::bug("missing specialization template"))?;
+        if template.decl.generics.len() != key.args.len() {
+            return Err(Error::bug(format!("{}: generic argument arity", template.decl.name)));
+        }
+        for ty in &key.args {
+            concrete(ty)?;
+        }
+        let id = FunctionId(self.keys.len() as u32);
+        self.keys.push(key);
+        self.functions.push(template.clone());
+        Ok(id)
     }
 }
-fn concrete(ty:&Ty)->Result<()> {
-    match ty {
-        Ty::Param(_) | Ty::Var(_) | Ty::Opaque | Ty::Error | Ty::Slice(_) | Ty::Any(_) => return Err(Error::unsupported(format!("nonconcrete/unsized monomorphization argument {ty:?}"))),
-        Ty::Adt(_,args)=>for ty in args { concrete(ty)?; },
-        Ty::Array(ty,_)=>concrete(ty)?,
-        Ty::Ref(_,ty)=>if let Ty::Slice(elem)=ty.as_ref() { concrete(elem)?; } else { concrete(ty)?; },
-        Ty::Fn(args,ret)=>{for ty in args {concrete(ty)?;} concrete(ret)?;},
-        _=>{}
-    } Ok(())
+fn concrete(ty: &Ty) -> Result<()> {
+    concrete_inner(ty, 0, &mut 0)
 }
-pub fn specialize(p:&post::Program,t:&Typed)->Result<post::Program> {
-    let main=p.functions.iter().find(|f| f.decl.name=="main").ok_or_else(|| Error::unsupported("program requires fn main()"))?;
-    let mut cx=Instances { source:p,keys:Vec::new(),functions:Vec::new() };
-    cx.intern(main.decl.id,Vec::new())?;
-    let mut i=0;
-    while i<cx.keys.len() {
-        let key=cx.keys[i].clone(); let mut f=cx.functions[i].clone();
-        let map:HashMap<_,_>=f.decl.generics.iter().copied().zip(key.args.iter().cloned()).collect();
-        f.decl.id=FunctionId(i as u32); f.decl.generics.clear();
-        f.decl.ret=tarn_types::subst(&f.decl.ret,&map);
-        for l in &mut f.decl.locals { l.ty=tarn_types::subst(&l.ty,&map); }
+fn concrete_inner(ty: &Ty, depth: usize, nodes: &mut usize) -> Result<()> {
+    *nodes += 1;
+    if depth >= 64 || *nodes > 4096 {
+        return Err(Error::unsupported("monomorphization type exceeds 64 levels or 4096 nodes"));
+    }
+    match ty {
+        Ty::Param(_) | Ty::Var(_) | Ty::Opaque | Ty::Error | Ty::Slice(_) | Ty::Any(_) => {
+            return Err(Error::unsupported(format!("nonconcrete/unsized monomorphization argument {ty:?}")));
+        }
+        Ty::Adt(_, args) => {
+            for ty in args {
+                concrete_inner(ty, depth + 1, nodes)?;
+            }
+        }
+        Ty::Array(ty, _) => concrete_inner(ty, depth + 1, nodes)?,
+        Ty::Ref(_, ty) => {
+            if let Ty::Slice(elem) = ty.as_ref() {
+                concrete_inner(elem, depth + 1, nodes)?;
+            } else {
+                concrete_inner(ty, depth + 1, nodes)?;
+            }
+        }
+        Ty::Fn(args, ret) => {
+            for ty in args {
+                concrete_inner(ty, depth + 1, nodes)?;
+            }
+            concrete_inner(ret, depth + 1, nodes)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
+    let main = p.functions.iter().find(|f| f.decl.name == "main").ok_or_else(|| Error::unsupported("program requires fn main()"))?;
+    let mut cx = Instances { source: p, keys: Vec::new(), functions: Vec::new() };
+    cx.intern(main.decl.id, Vec::new())?;
+    let mut i = 0;
+    while i < cx.keys.len() {
+        let key = cx.keys[i].clone();
+        let mut f = cx.functions[i].clone();
+        let map: HashMap<_, _> = f.decl.generics.iter().copied().zip(key.args.iter().cloned()).collect();
+        f.decl.id = FunctionId(i as u32);
+        f.decl.generics.clear();
+        f.decl.ret = tarn_types::subst(&f.decl.ret, &map);
+        for l in &mut f.decl.locals {
+            l.ty = tarn_types::subst(&l.ty, &map);
+        }
         // IDs follow deterministic FIFO traversal, never hash iteration.
-        if i!=0 { f.decl.name=format!("{}::instance#{i}",f.decl.name); }
+        if i != 0 {
+            f.decl.name = format!("{}::instance#{i}", f.decl.name);
+        }
         for b in &mut f.blocks {
             for stmt in &mut b.stmts {
-                if let post::Op::Plain(StatementKind::Assign(_,rv))=&mut stmt.op {
+                if let post::Op::Plain(StatementKind::Assign(_, rv)) = &mut stmt.op {
                     match rv {
-                        Rvalue::Use(o)|Rvalue::Unary(_,o)=>operand(o,&map,&mut cx)?,
-                        Rvalue::Binary(_,a,b)=>{operand(a,&map,&mut cx)?;operand(b,&map,&mut cx)?;},
-                        Rvalue::Cast(o,ty)|Rvalue::Coerce(_,o,ty)=>{operand(o,&map,&mut cx)?;*ty=tarn_types::subst(ty,&map);},
-                        Rvalue::Aggregate(a,os)=>{
-                            match a {
-                                Aggregate::Struct(_,ts)|Aggregate::Variant(_,_,ts)=>for ty in ts {*ty=tarn_types::subst(ty,&map);},
-                                Aggregate::Array(ty)=>*ty=tarn_types::subst(ty,&map),
-                                Aggregate::Closure(id)=>{ let def=&p.functions[id.0 as usize].decl; let args=def.generics.iter().map(|p| map.get(p).cloned().unwrap_or(Ty::Param(*p))).collect(); *id=cx.intern(*id,args)?; }
-                            }
-                            for o in os {operand(o,&map,&mut cx)?;}
+                        Rvalue::Use(o) | Rvalue::Unary(_, o) => operand(o, &map, &mut cx)?,
+                        Rvalue::Binary(_, a, b) => {
+                            operand(a, &map, &mut cx)?;
+                            operand(b, &map, &mut cx)?;
                         }
-                        Rvalue::SliceRef {start,end,..}=>for o in start.iter_mut().chain(end.iter_mut()) {operand(o,&map,&mut cx)?;},
-                        _=>{}
+                        Rvalue::Cast(o, ty) | Rvalue::Coerce(_, o, ty) => {
+                            operand(o, &map, &mut cx)?;
+                            *ty = tarn_types::subst(ty, &map);
+                        }
+                        Rvalue::Aggregate(a, os) => {
+                            match a {
+                                Aggregate::Struct(_, ts) | Aggregate::Variant(_, _, ts) => {
+                                    for ty in ts {
+                                        *ty = tarn_types::subst(ty, &map);
+                                    }
+                                }
+                                Aggregate::Array(ty) => *ty = tarn_types::subst(ty, &map),
+                                Aggregate::Closure(id) => {
+                                    let def = &p.functions[id.0 as usize].decl;
+                                    let args = def.generics.iter().map(|p| map.get(p).cloned().unwrap_or(Ty::Param(*p))).collect();
+                                    *id = cx.intern(*id, args)?;
+                                }
+                            }
+                            for o in os {
+                                operand(o, &map, &mut cx)?;
+                            }
+                        }
+                        Rvalue::SliceRef { start, end, .. } => {
+                            for o in start.iter_mut().chain(end.iter_mut()) {
+                                operand(o, &map, &mut cx)?;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
             match &mut b.term {
-                Terminator::Call {callee,args,..}=>{
+                Terminator::Call { callee, args, .. } => {
                     match callee {
-                        Callee::Fn(id,ts)=>{for ty in ts.iter_mut(){*ty=tarn_types::subst(ty,&map);} *id=cx.intern(*id,ts.clone())?;ts.clear();},
-                        Callee::Value(o)=>operand(o,&map,&mut cx)?,
-                        Callee::Virtual {type_args,..}=>for ty in type_args {*ty=tarn_types::subst(ty,&map);},
-                        _=>{}
+                        Callee::Fn(id, ts) => {
+                            for ty in ts.iter_mut() {
+                                *ty = tarn_types::subst(ty, &map);
+                            }
+                            *id = cx.intern(*id, ts.clone())?;
+                            ts.clear();
+                        }
+                        Callee::Value(o) => operand(o, &map, &mut cx)?,
+                        Callee::Virtual { type_args, .. } => {
+                            for ty in type_args {
+                                *ty = tarn_types::subst(ty, &map);
+                            }
+                        }
+                        _ => {}
                     }
-                    for o in args {operand(o,&map,&mut cx)?;}
+                    for o in args {
+                        operand(o, &map, &mut cx)?;
+                    }
                 }
-                Terminator::Switch {discr,..}=>operand(discr,&map,&mut cx)?,
-                _=>{}
+                Terminator::Switch { discr, .. } => operand(discr, &map, &mut cx)?,
+                _ => {}
             }
         }
         // A generic owned T may specialize to Copy: remove resource glue using
         // concrete type semantics, never initialization or borrow information.
-        let decl=f.decl.clone();
-        for b in &mut f.blocks { b.stmts.retain_mut(|s| if let post::Op::Destroy(d)=&mut s.op { prune(d,&decl,t) } else {true}); }
-        cx.functions[i]=f; i+=1;
+        let decl = f.decl.clone();
+        for b in &mut f.blocks {
+            b.stmts.retain_mut(|s| if let post::Op::Destroy(d) = &mut s.op { prune(d, &decl, t) } else { true });
+        }
+        cx.functions[i] = f;
+        i += 1;
     }
-    Ok(post::Program {functions:cx.functions,by_symbol:HashMap::new()})
+    Ok(post::Program { functions: cx.functions, by_symbol: HashMap::new() })
 }
-fn operand(o:&mut Operand,map:&HashMap<tarn_types::ParamId,Ty>,cx:&mut Instances<'_>)->Result<()> {
-    if let Operand::Const(Const::Fn(id,ts))=o {for ty in ts.iter_mut(){*ty=tarn_types::subst(ty,map);} *id=cx.intern(*id,ts.clone())?;ts.clear();} Ok(())
+fn operand(o: &mut Operand, map: &HashMap<tarn_types::ParamId, Ty>, cx: &mut Instances<'_>) -> Result<()> {
+    if let Operand::Const(Const::Fn(id, ts)) = o {
+        for ty in ts.iter_mut() {
+            *ty = tarn_types::subst(ty, map);
+        }
+        *id = cx.intern(*id, ts.clone())?;
+        ts.clear();
+    }
+    Ok(())
 }
-fn prune(d:&mut post::Drop,f:&tarn_ir::Function,t:&Typed)->bool {
+fn prune(d: &mut post::Drop, f: &tarn_ir::Function, t: &Typed) -> bool {
     match d {
-        post::Drop::Value(p)=>post::place_ty(f,t,p).is_none_or(|ty| !t.decls.is_copy(&ty) && !matches!(ty,Ty::Fn(..)|Ty::Ref(..))),
-        post::Drop::Guard(_,d)=>prune(d,f,t),
-        post::Drop::Fields {fields,..}=>{fields.retain_mut(|(_,d)|prune(d,f,t));!fields.is_empty()},
-        post::Drop::Variants {variants,..}=>{for fs in variants.iter_mut(){fs.retain_mut(|(_,d)|prune(d,f,t));} variants.iter().any(|fs|!fs.is_empty())},
-        post::Drop::Remaining {place,..}=>post::place_ty(f,t,place).is_none_or(|ty|!t.decls.is_copy(&ty)),
+        post::Drop::Value(p) => post::place_ty(f, t, p).is_none_or(|ty| !t.decls.is_copy(&ty) && !matches!(ty, Ty::Fn(..) | Ty::Ref(..))),
+        post::Drop::Guard(_, d) => prune(d, f, t),
+        post::Drop::Fields { fields, .. } => {
+            fields.retain_mut(|(_, d)| prune(d, f, t));
+            !fields.is_empty()
+        }
+        post::Drop::Variants { variants, .. } => {
+            for fs in variants.iter_mut() {
+                fs.retain_mut(|(_, d)| prune(d, f, t));
+            }
+            variants.iter().any(|fs| !fs.is_empty())
+        }
+        post::Drop::Remaining { place, .. } => post::place_ty(f, t, place).is_none_or(|ty| !t.decls.is_copy(&ty)),
     }
 }

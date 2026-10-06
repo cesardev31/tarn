@@ -112,18 +112,7 @@ struct Builder<'a, 'l> {
 impl<'a, 'l> Builder<'a, 'l> {
     fn new(lx: &'l Lx<'a>, m: ModuleId, id: FunctionId, name: String, span: Span) -> Self {
         let kind = lx.kinds.get(&id).cloned().unwrap_or(FnKind::Body);
-        let f = Function {
-            id,
-            name,
-            symbol: None,
-            kind,
-            generics: Vec::new(),
-            param_count: 0,
-            ret: Ty::Void,
-            locals: Vec::new(),
-            blocks: Vec::new(),
-            span,
-        };
+        let f = Function { id, name, symbol: None, kind, generics: Vec::new(), param_count: 0, ret: Ty::Void, locals: Vec::new(), blocks: Vec::new(), span };
         let mut b = Builder {
             lx,
             m,
@@ -456,7 +445,14 @@ impl<'a, 'l> Builder<'a, 'l> {
                     let t = self.temp(Ty::Void, span);
                     let next = self.new_block();
                     self.terminate(
-                        Terminator::Call { callee: Callee::Builtin(Builtin::JoinScope), args: Vec::new(), arg_spans: Vec::new(), dest: Place::local(t), next: Some(next), spawn: false },
+                        Terminator::Call {
+                            callee: Callee::Builtin(Builtin::JoinScope),
+                            args: Vec::new(),
+                            arg_spans: Vec::new(),
+                            dest: Place::local(t),
+                            next: Some(next),
+                            spawn: false,
+                        },
                         span,
                     );
                     self.switch_to(next);
@@ -611,10 +607,12 @@ impl<'a, 'l> Builder<'a, 'l> {
         if owned_noncopy {
             self.scopes.last_mut().unwrap().push(it);
         }
-        let base = match it_ty {
-            Ty::Ref(..) => Place::local(it).project(Proj::Deref),
-            _ => Place::local(it),
-        };
+        let mut base = Place::local(it);
+        let mut element_base = &it_ty;
+        while let Ty::Ref(_, inner) = element_base {
+            base = base.project(Proj::Deref);
+            element_base = inner;
+        }
         let usize_ = Ty::Int(tarn_types::IntTy::Usize);
         let len = self.new_local(usize_.clone(), LocalKind::Temp, None, None, false, span);
         self.assign(Place::local(len), Rvalue::Len(base.clone()), span);
@@ -640,11 +638,7 @@ impl<'a, 'l> Builder<'a, 'l> {
             }
         });
         self.switch_to(latch);
-        self.assign(
-            Place::local(idx),
-            Rvalue::Binary(BinOp::Add, Operand::Copy(Place::local(idx)), Operand::Const(Const::Int(1, tarn_types::IntTy::Usize))),
-            span,
-        );
+        self.assign(Place::local(idx), Rvalue::Binary(BinOp::Add, Operand::Copy(Place::local(idx)), Operand::Const(Const::Int(1, tarn_types::IntTy::Usize))), span);
         self.goto(head, span);
     }
 
@@ -974,10 +968,13 @@ impl<'a, 'l> Builder<'a, 'l> {
         let ty = self.ty(e);
         match &e.kind {
             ExprKind::Int(v) => Operand::Const(int_const(*v as i128, &ty)),
-            ExprKind::Float(s) => Operand::Const(Const::Float(s.clone(), match ty {
-                Ty::Float(f) => f,
-                _ => tarn_types::FloatTy::F64,
-            })),
+            ExprKind::Float(s) => Operand::Const(Const::Float(
+                s.clone(),
+                match ty {
+                    Ty::Float(f) => f,
+                    _ => tarn_types::FloatTy::F64,
+                },
+            )),
             ExprKind::Str(s) => Operand::Const(Const::Str(s.clone())),
             ExprKind::Bool(b) => Operand::Const(Const::Bool(*b)),
             ExprKind::Unit => Operand::Const(Const::Unit),
@@ -1443,10 +1440,7 @@ impl<'a, 'l> Builder<'a, 'l> {
             Ty::Fn(ps, r) => (ps, *r),
             _ => (vec![Ty::Error; params.len()], Ty::Error),
         };
-        let modes = captured
-            .iter()
-            .map(|s| if mutated.contains(s) { CaptureMode::MutableBorrow } else { CaptureMode::SharedBorrow })
-            .collect();
+        let modes = captured.iter().map(|s| if mutated.contains(s) { CaptureMode::MutableBorrow } else { CaptureMode::SharedBorrow }).collect();
         cb.f.kind = FnKind::Closure { parent: self.f.id, captures: modes };
         cb.f.ret = ret.clone();
         cb.f.generics = self.f.generics.clone();

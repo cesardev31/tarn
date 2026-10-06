@@ -1,0 +1,15 @@
+fn sum(s &[]i64) i64 {
+    var result: i64 = 0
+    for x in &s { result = result + x }
+    return result
+}
+fn main() {
+    a := [4]i64{1, 2, 3, 4}
+    var i: i64 = 0
+    var result: i64 = 0
+    for i < 100000 {
+        result = result + sum(&a[0..4])
+        i = i + 1
+    }
+    print(result)
+}

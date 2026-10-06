@@ -2,6 +2,9 @@
 
 Status: accepted for phase 7, Linux x86_64 only.
 
+Historical phase-7 boundary. ADR 0028 extends specialization, slices and callables;
+ADR 0029 supersedes the shift and float-to-integer limitations below.
+
 ## Boundary and architecture
 
 `compiler/backend` consumes `tarn_ir::post_drop::Program` and the type declaration

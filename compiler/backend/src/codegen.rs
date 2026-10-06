@@ -35,7 +35,7 @@ fn scalar(ty: &Ty) -> Option<cl::Type> {
         },
         Ty::Float(FloatTy::F32) => types::F32,
         Ty::Float(_) => types::F64,
-        Ty::Ref(_,inner) if !matches!(inner.as_ref(),Ty::Slice(_)|Ty::Any(_)) => types::I64,
+        Ty::Ref(_, inner) if !matches!(inner.as_ref(), Ty::Slice(_) | Ty::Any(_)) => types::I64,
         Ty::Str => types::I64,
         _ => return None,
     })
@@ -62,16 +62,30 @@ fn signature(module: &ObjectModule, t: &Typed, f: &ir::Function) -> Result<cl::S
     Ok(sig)
 }
 
-fn capture_count(f:&ir::Function)->usize { match &f.kind {FnKind::Closure {captures,..}=>captures.len(),_=>0} }
-fn environment(t:&Typed,f:&ir::Function)->Result<(u32,Vec<(u32,Ty)>)> {
-    let mut offset=0;let mut fields=Vec::new();
-    for l in f.params().take(capture_count(f)) {let ty=f.local(l).ty.clone();let layout=layout::layout(t,&ty)?;offset=(offset+layout.align-1)&!(layout.align-1);fields.push((offset,ty));offset+=layout.size;}
-    Ok((offset.max(1),fields))
+fn capture_count(f: &ir::Function) -> usize {
+    match &f.kind {
+        FnKind::Closure { captures, .. } => captures.len(),
+        _ => 0,
+    }
 }
-fn closure_signature(module:&ObjectModule,t:&Typed,f:&ir::Function)->Result<cl::Signature> {
-    let mut sig=signature(module,t,f)?;let sret=usize::from(layout::layout(t,&f.ret)?.size>0&&scalar(&f.ret).is_none());
-    let capture_lanes=f.params().take(capture_count(f)).filter(|l|layout::layout(t,&f.local(*l).ty).is_ok_and(|l|l.size>0)).count();
-    sig.params.splice(sret..sret+capture_lanes,[cl::AbiParam::new(types::I64)]);Ok(sig)
+fn environment(t: &Typed, f: &ir::Function) -> Result<(u32, Vec<(u32, Ty)>)> {
+    let mut offset = 0;
+    let mut fields = Vec::new();
+    for l in f.params().take(capture_count(f)) {
+        let ty = f.local(l).ty.clone();
+        let layout = layout::layout(t, &ty)?;
+        offset = (offset + layout.align - 1) & !(layout.align - 1);
+        fields.push((offset, ty));
+        offset += layout.size;
+    }
+    Ok((offset.max(1), fields))
+}
+fn closure_signature(module: &ObjectModule, t: &Typed, f: &ir::Function) -> Result<cl::Signature> {
+    let mut sig = signature(module, t, f)?;
+    let sret = usize::from(layout::layout(t, &f.ret)?.size > 0 && scalar(&f.ret).is_none());
+    let capture_lanes = f.params().take(capture_count(f)).filter(|l| layout::layout(t, &f.local(*l).ty).is_ok_and(|l| l.size > 0)).count();
+    sig.params.splice(sret..sret + capture_lanes, [cl::AbiParam::new(types::I64)]);
+    Ok(sig)
 }
 pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     let main = p.functions.iter().find(|f| f.decl.name == "main").ok_or_else(|| Error::unsupported("program requires fn main()"))?;
@@ -83,7 +97,11 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     // Monomorphization already retained exactly reachable instances, including
     // closure bodies and referenced function values.
     let reachable: HashSet<_> = p.functions.iter().map(|f| f.decl.id).collect();
-    for f in &p.functions { if f.blocks.is_empty() {return Err(Error::unsupported(format!("function {} has no native body",f.decl.name)));} }
+    for f in &p.functions {
+        if f.blocks.is_empty() {
+            return Err(Error::unsupported(format!("function {} has no native body", f.decl.name)));
+        }
+    }
     let mut settings = settings::builder();
     settings.set("opt_level", "none").map_err(|e| Error::bug(e.to_string()))?;
     settings.set("is_pic", "false").map_err(|e| Error::bug(e.to_string()))?;
@@ -99,12 +117,12 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         let fid = module.declare_function(&format!("tarn_fn_{}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?;
         ids.insert(*id, fid);
     }
-    let mut thunks=HashMap::new();
+    let mut thunks = HashMap::new();
     for id in &ordered {
-        let f=&p.functions[id.0 as usize].decl;
-        let sig=closure_signature(&module,t,f)?;
-        let thunk=module.declare_function(&format!("tarn_thunk_{}",id.0),Linkage::Local,&sig).map_err(|e|Error::bug(e.to_string()))?;
-        thunks.insert(*id,thunk);
+        let f = &p.functions[id.0 as usize].decl;
+        let sig = closure_signature(&module, t, f)?;
+        let thunk = module.declare_function(&format!("tarn_thunk_{}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?;
+        thunks.insert(*id, thunk);
     }
     let mut runtime = HashMap::new();
     for (name, params, returns) in [
@@ -133,34 +151,54 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         let mut fb = FunctionBuilderContext::new();
         {
             let b = FunctionBuilder::new(&mut ctx.func, &mut fb);
-            let mut cx = Cx { b, module: &mut module, p, t, f, ids: &ids, thunks: &thunks, runtime: &runtime, locals: Vec::new(), flags: Vec::new(), blocks: Vec::new(), sret: None };
+            let mut cx =
+                Cx { b, module: &mut module, p, t, f, ids: &ids, thunks: &thunks, runtime: &runtime, locals: Vec::new(), flags: Vec::new(), blocks: Vec::new(), sret: None };
             cx.function()?;
             cx.b.finalize();
         }
         cranelift_codegen::verify_function(&ctx.func, module.isa()).map_err(|e| Error::bug(format!("{}: {e}", f.decl.name)))?;
         module.define_function(ids[&id], &mut ctx).map_err(|e| Error::bug(format!("{}: {e}", f.decl.name)))?;
     }
-    let mut thunk_order:Vec<_>=thunks.iter().collect();thunk_order.sort_by_key(|(id,_)|**id);
-    for (id,thunk) in thunk_order {
-        let f=&p.functions[id.0 as usize].decl;let n=capture_count(f);
-        let mut ctx=module.make_context();ctx.func.signature=closure_signature(&module,t,f)?;
-        let mut fb=FunctionBuilderContext::new();
+    let mut thunk_order: Vec<_> = thunks.iter().collect();
+    thunk_order.sort_by_key(|(id, _)| **id);
+    for (id, thunk) in thunk_order {
+        let f = &p.functions[id.0 as usize].decl;
+        let n = capture_count(f);
+        let mut ctx = module.make_context();
+        ctx.func.signature = closure_signature(&module, t, f)?;
+        let mut fb = FunctionBuilderContext::new();
         {
-            let mut b=FunctionBuilder::new(&mut ctx.func,&mut fb);let entry=b.create_block();b.append_block_params_for_function_params(entry);b.switch_to_block(entry);
-            let params=b.block_params(entry).to_vec();let aggregate=layout::layout(t,&f.ret)?.size>0&&scalar(&f.ret).is_none();
-            let env=params[usize::from(aggregate)];let mut values=Vec::new();if aggregate {values.push(params[0]);}
-            let (_,fields)=environment(t,f)?;
-            for (offset,ty) in fields {
-                if layout::layout(t,&ty)?.size==0 {continue;}
-                let ptr=b.ins().iadd_imm(env,i64::from(offset));
-                let value=if let Some(ty)=scalar(&ty){b.ins().load(ty,cl::MemFlags::new(),ptr,0)}else{ptr};values.push(value);
+            let mut b = FunctionBuilder::new(&mut ctx.func, &mut fb);
+            let entry = b.create_block();
+            b.append_block_params_for_function_params(entry);
+            b.switch_to_block(entry);
+            let params = b.block_params(entry).to_vec();
+            let aggregate = layout::layout(t, &f.ret)?.size > 0 && scalar(&f.ret).is_none();
+            let env = params[usize::from(aggregate)];
+            let mut values = Vec::new();
+            if aggregate {
+                values.push(params[0]);
             }
-            values.extend_from_slice(&params[usize::from(aggregate)+1..]);
-            let target=module.declare_func_in_func(ids[id],b.func);let call=b.ins().call(target,&values);let results=b.inst_results(call).to_vec();b.ins().return_(&results);b.seal_all_blocks();b.finalize();
-            let _=n;
+            let (_, fields) = environment(t, f)?;
+            for (offset, ty) in fields {
+                if layout::layout(t, &ty)?.size == 0 {
+                    continue;
+                }
+                let ptr = b.ins().iadd_imm(env, i64::from(offset));
+                let value = if let Some(ty) = scalar(&ty) { b.ins().load(ty, cl::MemFlags::new(), ptr, 0) } else { ptr };
+                values.push(value);
+            }
+            values.extend_from_slice(&params[usize::from(aggregate) + 1..]);
+            let target = module.declare_func_in_func(ids[id], b.func);
+            let call = b.ins().call(target, &values);
+            let results = b.inst_results(call).to_vec();
+            b.ins().return_(&results);
+            b.seal_all_blocks();
+            b.finalize();
+            let _ = n;
         }
-        cranelift_codegen::verify_function(&ctx.func,module.isa()).map_err(|e|Error::bug(e.to_string()))?;
-        module.define_function(*thunk,&mut ctx).map_err(|e|Error::bug(e.to_string()))?;
+        cranelift_codegen::verify_function(&ctx.func, module.isa()).map_err(|e| Error::bug(e.to_string()))?;
+        module.define_function(*thunk, &mut ctx).map_err(|e| Error::bug(e.to_string()))?;
     }
     // libc startup calls the C main shim; internal Tarn main is a void function.
     let mut sig = module.make_signature();
@@ -206,7 +244,7 @@ struct Cx<'a, 'b> {
     t: &'b Typed,
     f: &'b post::Function,
     ids: &'b HashMap<FunctionId, FuncId>,
-    thunks: &'b HashMap<FunctionId,FuncId>,
+    thunks: &'b HashMap<FunctionId, FuncId>,
     runtime: &'b HashMap<&'static str, FuncId>,
     locals: Vec<Slot>,
     flags: Vec<Flag>,
@@ -337,10 +375,12 @@ impl Cx<'_, '_> {
                     let Ty::Ref(_, inner) = ty else {
                         return Err(Error::bug("deref non-reference"));
                     };
-                    if matches!(inner.as_ref(),Ty::Slice(_)) {
-                        slice_len=Some(self.b.ins().load(types::I64,cl::MemFlags::new(),addr,8));
-                        addr=self.b.ins().load(types::I64,cl::MemFlags::new(),addr,0);
-                    } else if i != 0 { addr=self.b.ins().load(types::I64,cl::MemFlags::new(),addr,0); }
+                    if matches!(inner.as_ref(), Ty::Slice(_)) {
+                        slice_len = Some(self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 8));
+                        addr = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
+                    } else if i != 0 {
+                        addr = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
+                    }
                     ty = *inner;
                 }
                 Proj::Downcast(v) => {
@@ -356,10 +396,10 @@ impl Cx<'_, '_> {
                     ty = field.clone();
                 }
                 Proj::Index(idx) => {
-                    let (elem,len)=match ty {
-                        Ty::Array(elem,n)=>(elem,self.b.ins().iconst(types::I64,n as i64)),
-                        Ty::Slice(elem)=>(elem,slice_len.ok_or_else(||Error::bug("missing slice length"))?),
-                        _=>return Err(Error::bug("index of noncollection")),
+                    let (elem, len) = match ty {
+                        Ty::Array(elem, n) => (elem, self.b.ins().iconst(types::I64, n as i64)),
+                        Ty::Slice(elem) => (elem, slice_len.ok_or_else(|| Error::bug("missing slice length"))?),
+                        _ => return Err(Error::bug("index of noncollection")),
                     };
                     let index = self.read(&Place::local(*idx))?.value.unwrap();
                     let invalid = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, index, len);
@@ -440,11 +480,13 @@ impl Cx<'_, '_> {
                     let len = self.b.ins().iconst(types::I64, s.len() as i64);
                     Val { value: Some(self.runtime("tarn_rt_string", &[ptr, len])[0]), ty: Ty::Str }
                 }
-                Const::Fn(id,_)=>{
-                    let f=&self.p.functions[id.0 as usize].decl;
-                    let ty=Ty::Fn(f.params().map(|l|f.local(l).ty.clone()).collect(),Box::new(f.ret.clone()));
-                    let target=self.module.declare_func_in_func(self.thunks[id],self.b.func);let code=self.b.ins().func_addr(types::I64,target);let env=self.b.ins().iconst(types::I64,0);
-                    Val {value:Some(self.pair(code,env)),ty}
+                Const::Fn(id, _) => {
+                    let f = &self.p.functions[id.0 as usize].decl;
+                    let ty = Ty::Fn(f.params().map(|l| f.local(l).ty.clone()).collect(), Box::new(f.ret.clone()));
+                    let target = self.module.declare_func_in_func(self.thunks[id], self.b.func);
+                    let code = self.b.ins().func_addr(types::I64, target);
+                    let env = self.b.ins().iconst(types::I64, 0);
+                    Val { value: Some(self.pair(code, env)), ty }
                 }
                 _ => return Err(Error::unsupported(format!("constant {c:?}"))),
             }),
@@ -490,10 +532,15 @@ impl Cx<'_, '_> {
         match rv {
             Rvalue::Use(o) => self.operand(o),
             Rvalue::Ref(m, p) => {
-                let inner=self.place_ty(p)?;
-                let value=if matches!(inner,Ty::Slice(_)) {let (ptr,len,_)=self.collection(p)?;self.pair(ptr,len)} else {self.addr(p)?};
-                Ok(Val {value:Some(value),ty:Ty::Ref(*m,Box::new(inner))})
-            },
+                let inner = self.place_ty(p)?;
+                let value = if matches!(inner, Ty::Slice(_)) {
+                    let (ptr, len, _) = self.collection(p)?;
+                    self.pair(ptr, len)
+                } else {
+                    self.addr(p)?
+                };
+                Ok(Val { value: Some(value), ty: Ty::Ref(*m, Box::new(inner)) })
+            }
             Rvalue::Binary(op, a, b) => {
                 let a = self.operand(a)?;
                 let b = self.operand(b)?;
@@ -516,12 +563,32 @@ impl Cx<'_, '_> {
                 };
                 Ok(Val { value: Some(value), ty: v.ty })
             }
-            Rvalue::Aggregate(Aggregate::Closure(id),ops)=>{
-                let f=&self.p.functions[id.0 as usize].decl;let (size,fields)=environment(self.t,f)?;
-                if fields.len()!=ops.len(){return Err(Error::bug("closure capture arity"));}
-                let slot=self.stack(size,8);let env=self.b.ins().stack_addr(types::I64,slot,0);
-                for ((offset,ty),o) in fields.into_iter().zip(ops){let v=self.operand(o)?;if v.ty!=ty{return Err(Error::bug("closure capture type"));}let ptr=self.b.ins().iadd_imm(env,i64::from(offset));if let Some(value)=v.value {if scalar(&ty).is_some(){self.b.ins().store(cl::MemFlags::new(),value,ptr,0);}else{self.copy(ptr,value,layout::layout(self.t,&ty)?.size);}}}
-                let target=self.module.declare_func_in_func(self.thunks[id],self.b.func);let code=self.b.ins().func_addr(types::I64,target);let value=self.pair(code,env);Ok(Val {value:Some(value),ty:dest.clone()})
+            Rvalue::Aggregate(Aggregate::Closure(id), ops) => {
+                let f = &self.p.functions[id.0 as usize].decl;
+                let (size, fields) = environment(self.t, f)?;
+                if fields.len() != ops.len() {
+                    return Err(Error::bug("closure capture arity"));
+                }
+                let slot = self.stack(size, 8);
+                let env = self.b.ins().stack_addr(types::I64, slot, 0);
+                for ((offset, ty), o) in fields.into_iter().zip(ops) {
+                    let v = self.operand(o)?;
+                    if v.ty != ty {
+                        return Err(Error::bug("closure capture type"));
+                    }
+                    let ptr = self.b.ins().iadd_imm(env, i64::from(offset));
+                    if let Some(value) = v.value {
+                        if scalar(&ty).is_some() {
+                            self.b.ins().store(cl::MemFlags::new(), value, ptr, 0);
+                        } else {
+                            self.copy(ptr, value, layout::layout(self.t, &ty)?.size);
+                        }
+                    }
+                }
+                let target = self.module.declare_func_in_func(self.thunks[id], self.b.func);
+                let code = self.b.ins().func_addr(types::I64, target);
+                let value = self.pair(code, env);
+                Ok(Val { value: Some(value), ty: dest.clone() })
             }
             Rvalue::Aggregate(kind, ops) => {
                 let l = layout::layout(self.t, dest)?;
@@ -570,25 +637,40 @@ impl Cx<'_, '_> {
                 Ok(Val { value: Some(v), ty: dest.clone() })
             }
             Rvalue::Len(p) => {
-                let len=self.collection(p)?.1;
+                let len = self.collection(p)?.1;
                 Ok(Val { value: Some(len), ty: Ty::Int(IntTy::Usize) })
             }
-            Rvalue::SliceRef {base,start,end,..} => {
-                let (ptr,len,elem)=self.collection(base)?;
-                let start=match start {Some(o)=>self.operand(o)?.value.unwrap(),None=>self.b.ins().iconst(types::I64,0)};
-                let end=match end {Some(o)=>self.operand(o)?.value.unwrap(),None=>len};
-                let bad=self.b.ins().icmp(IntCC::UnsignedGreaterThan,start,end);self.fault_if(bad);
-                let bad=self.b.ins().icmp(IntCC::UnsignedGreaterThan,end,len);self.fault_if(bad);
-                let offset=self.b.ins().imul_imm(start,i64::from(layout::layout(self.t,&elem)?.size));
-                let ptr=self.b.ins().iadd(ptr,offset);let len=self.b.ins().isub(end,start);
-                let pair=self.pair(ptr,len);Ok(Val {value:Some(pair),ty:dest.clone()})
+            Rvalue::SliceRef { base, start, end, .. } => {
+                let (ptr, len, elem) = self.collection(base)?;
+                let start = match start {
+                    Some(o) => self.operand(o)?.value.unwrap(),
+                    None => self.b.ins().iconst(types::I64, 0),
+                };
+                let end = match end {
+                    Some(o) => self.operand(o)?.value.unwrap(),
+                    None => len,
+                };
+                let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThan, start, end);
+                self.fault_if(bad);
+                let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThan, end, len);
+                self.fault_if(bad);
+                let offset = self.b.ins().imul_imm(start, i64::from(layout::layout(self.t, &elem)?.size));
+                let ptr = self.b.ins().iadd(ptr, offset);
+                let len = self.b.ins().isub(end, start);
+                let pair = self.pair(ptr, len);
+                Ok(Val { value: Some(pair), ty: dest.clone() })
             }
-            Rvalue::Coerce(CoerceKind::Unsize,o,ty)=>{
-                let v=self.operand(o)?;
-                let Ty::Ref(_,inner)=v.ty else {return Err(Error::bug("unsize nonref"));};
-                let Ty::Array(_,n)=*inner else {return Err(Error::bug("unsize nonarray"));};
-                let len=self.b.ins().iconst(types::I64,n as i64);let pair=self.pair(v.value.unwrap(),len);
-                Ok(Val {value:Some(pair),ty:ty.clone()})
+            Rvalue::Coerce(CoerceKind::Unsize, o, ty) => {
+                let v = self.operand(o)?;
+                let Ty::Ref(_, inner) = v.ty else {
+                    return Err(Error::bug("unsize nonref"));
+                };
+                let Ty::Array(_, n) = *inner else {
+                    return Err(Error::bug("unsize nonarray"));
+                };
+                let len = self.b.ins().iconst(types::I64, n as i64);
+                let pair = self.pair(v.value.unwrap(), len);
+                Ok(Val { value: Some(pair), ty: ty.clone() })
             }
             Rvalue::Cast(o, ty) => {
                 let v = self.operand(o)?;
@@ -602,16 +684,28 @@ impl Cx<'_, '_> {
         }
     }
     fn binary(&mut self, op: BinOp, a: Val, b: Val) -> Result<Val> {
-        if matches!(op,BinOp::Shl|BinOp::Shr) {
-            let (Ty::Int(lhs),Ty::Int(rhs))=(&a.ty,&b.ty) else{return Err(Error::bug("shift operand types"));};
-            let (x,y)=(a.value.unwrap(),b.value.unwrap());
-            if rhs.signed(){let bad=self.b.ins().icmp_imm(IntCC::SignedLessThan,y,0);self.fault_if(bad);}
+        if matches!(op, BinOp::Shl | BinOp::Shr) {
+            let (Ty::Int(lhs), Ty::Int(rhs)) = (&a.ty, &b.ty) else {
+                return Err(Error::bug("shift operand types"));
+            };
+            let (x, y) = (a.value.unwrap(), b.value.unwrap());
+            if rhs.signed() {
+                let bad = self.b.ins().icmp_imm(IntCC::SignedLessThan, y, 0);
+                self.fault_if(bad);
+            }
             // The count lane may be narrower than the shifted width: widen
             // before comparing so the width constant cannot wrap in that lane.
-            let y=if int_bits(*rhs)<64 {self.b.ins().uextend(types::I64,y)}else{y};
-            let bad=self.b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual,y,i64::from(int_bits(*lhs)));self.fault_if(bad);
-            let value=if op==BinOp::Shl {self.b.ins().ishl(x,y)}else if lhs.signed(){self.b.ins().sshr(x,y)}else{self.b.ins().ushr(x,y)};
-            return Ok(Val {value:Some(value),ty:a.ty});
+            let y = if int_bits(*rhs) < 64 { self.b.ins().uextend(types::I64, y) } else { y };
+            let bad = self.b.ins().icmp_imm(IntCC::UnsignedGreaterThanOrEqual, y, i64::from(int_bits(*lhs)));
+            self.fault_if(bad);
+            let value = if op == BinOp::Shl {
+                self.b.ins().ishl(x, y)
+            } else if lhs.signed() {
+                self.b.ins().sshr(x, y)
+            } else {
+                self.b.ins().ushr(x, y)
+            };
+            return Ok(Val { value: Some(value), ty: a.ty });
         }
         if a.ty != b.ty {
             return Err(Error::bug("binary operand type mismatch"));
@@ -701,19 +795,32 @@ impl Cx<'_, '_> {
         };
         Ok(Val { value: Some(value), ty: if cmp { Ty::Bool } else { a.ty } })
     }
-    fn pair(&mut self,a:cl::Value,b:cl::Value)->cl::Value {
-        let slot=self.stack(16,8);let ptr=self.b.ins().stack_addr(types::I64,slot,0);
-        self.b.ins().store(cl::MemFlags::new(),a,ptr,0);self.b.ins().store(cl::MemFlags::new(),b,ptr,8);ptr
+    fn pair(&mut self, a: cl::Value, b: cl::Value) -> cl::Value {
+        let slot = self.stack(16, 8);
+        let ptr = self.b.ins().stack_addr(types::I64, slot, 0);
+        self.b.ins().store(cl::MemFlags::new(), a, ptr, 0);
+        self.b.ins().store(cl::MemFlags::new(), b, ptr, 8);
+        ptr
     }
-    fn collection(&mut self,p:&Place)->Result<(cl::Value,cl::Value,Ty)> {
+    fn collection(&mut self, p: &Place) -> Result<(cl::Value, cl::Value, Ty)> {
         match self.place_ty(p)? {
-            Ty::Array(elem,n)=>{let ptr=self.addr(p)?;let len=self.b.ins().iconst(types::I64,n as i64);Ok((ptr,len,*elem))},
-            Ty::Slice(elem)=>{
-                if !matches!(p.proj.last(),Some(Proj::Deref)) {return Err(Error::unsupported("unsized slice storage"));}
-                let mut owner=p.clone();owner.proj.pop();let pair=self.read(&owner)?.value.unwrap();
-                let ptr=self.b.ins().load(types::I64,cl::MemFlags::new(),pair,0);let len=self.b.ins().load(types::I64,cl::MemFlags::new(),pair,8);Ok((ptr,len,*elem))
+            Ty::Array(elem, n) => {
+                let ptr = self.addr(p)?;
+                let len = self.b.ins().iconst(types::I64, n as i64);
+                Ok((ptr, len, *elem))
             }
-            _=>Err(Error::bug("noncollection length")),
+            Ty::Slice(elem) => {
+                if !matches!(p.proj.last(), Some(Proj::Deref)) {
+                    return Err(Error::unsupported("unsized slice storage"));
+                }
+                let mut owner = p.clone();
+                owner.proj.pop();
+                let pair = self.read(&owner)?.value.unwrap();
+                let ptr = self.b.ins().load(types::I64, cl::MemFlags::new(), pair, 0);
+                let len = self.b.ins().load(types::I64, cl::MemFlags::new(), pair, 8);
+                Ok((ptr, len, *elem))
+            }
+            _ => Err(Error::bug("noncollection length")),
         }
     }
     fn cast(&mut self, v: Val, ty: &Ty) -> Result<Val> {
@@ -747,16 +854,24 @@ impl Cx<'_, '_> {
                     self.b.ins().fcvt_from_uint(target, value)
                 }
             }
-            (Ty::Float(_),Ty::Int(dst))=>{
-                let truncated=self.b.ins().trunc(value);let source_ty=scalar(&v.ty).unwrap();
-                let lo=if dst.signed(){-(2f64).powi(i32::from(int_bits(*dst))-1)}else{0.0};
-                let hi=(2f64).powi(i32::from(int_bits(*dst))-i32::from(dst.signed()));
-                let (lo,hi)=if source_ty==types::F32 {(self.b.ins().f32const(lo as f32),self.b.ins().f32const(hi as f32))}else{(self.b.ins().f64const(lo),self.b.ins().f64const(hi))};
-                let bad=self.b.ins().fcmp(FloatCC::Unordered,value,value);self.fault_if(bad);
-                let bad=self.b.ins().fcmp(FloatCC::LessThan,truncated,lo);self.fault_if(bad);
-                let bad=self.b.ins().fcmp(FloatCC::GreaterThanOrEqual,truncated,hi);self.fault_if(bad);
-                let integer=if dst.signed(){self.b.ins().fcvt_to_sint(types::I64,truncated)}else{self.b.ins().fcvt_to_uint(types::I64,truncated)};
-                if target.bits()<64 {self.b.ins().ireduce(target,integer)}else{integer}
+            (Ty::Float(_), Ty::Int(dst)) => {
+                let truncated = self.b.ins().trunc(value);
+                let source_ty = scalar(&v.ty).unwrap();
+                let lo = if dst.signed() { -(2f64).powi(i32::from(int_bits(*dst)) - 1) } else { 0.0 };
+                let hi = (2f64).powi(i32::from(int_bits(*dst)) - i32::from(dst.signed()));
+                let (lo, hi) = if source_ty == types::F32 {
+                    (self.b.ins().f32const(lo as f32), self.b.ins().f32const(hi as f32))
+                } else {
+                    (self.b.ins().f64const(lo), self.b.ins().f64const(hi))
+                };
+                let bad = self.b.ins().fcmp(FloatCC::Unordered, value, value);
+                self.fault_if(bad);
+                let bad = self.b.ins().fcmp(FloatCC::LessThan, truncated, lo);
+                self.fault_if(bad);
+                let bad = self.b.ins().fcmp(FloatCC::GreaterThanOrEqual, truncated, hi);
+                self.fault_if(bad);
+                let integer = if dst.signed() { self.b.ins().fcvt_to_sint(types::I64, truncated) } else { self.b.ins().fcvt_to_uint(types::I64, truncated) };
+                if target.bits() < 64 { self.b.ins().ireduce(target, integer) } else { integer }
             }
             (Ty::Float(src), Ty::Float(dst)) => {
                 if src == dst {
@@ -837,17 +952,42 @@ impl Cx<'_, '_> {
                         let call = self.b.ins().call(target, &values);
                         if aggregate { Val { value: ptr, ty: dest_ty.clone() } } else { Val { value: self.b.inst_results(call).first().copied(), ty: dest_ty.clone() } }
                     }
-                    Callee::Value(o)=>{
-                        let closure=self.operand(o)?;let Ty::Fn(params,ret)=&closure.ty else{return Err(Error::bug("indirect nonfunction"));};
-                        if params.len()!=args.len() || **ret!=dest_ty || params.iter().zip(&args).any(|(t,v)|*t!=v.ty){return Err(Error::bug("indirect ABI mismatch"));}
-                        let pair=closure.value.unwrap();let code=self.b.ins().load(types::I64,cl::MemFlags::new(),pair,0);let env=self.b.ins().load(types::I64,cl::MemFlags::new(),pair,8);
-                        let mut sig=self.module.make_signature();let mut values=Vec::new();let aggregate=layout::layout(self.t,ret)?.size>0&&scalar(ret).is_none();
-                        let result=if aggregate {let ptr=self.addr(dest)?;sig.params.push(cl::AbiParam::new(types::I64));values.push(ptr);Some(ptr)}else{None};
-                        sig.params.push(cl::AbiParam::new(types::I64));values.push(env);
-                        for v in &args{if let Some(ty)=abi_type(self.t,&v.ty)?{sig.params.push(cl::AbiParam::new(ty));values.push(v.value.unwrap());}}
-                        if let Some(ty)=scalar(ret){sig.returns.push(cl::AbiParam::new(ty));}
-                        let sig=self.b.import_signature(sig);let call=self.b.ins().call_indirect(sig,code,&values);
-                        Val {value:if aggregate{result}else{self.b.inst_results(call).first().copied()},ty:dest_ty.clone()}
+                    Callee::Value(o) => {
+                        let closure = self.operand(o)?;
+                        let Ty::Fn(params, ret) = &closure.ty else {
+                            return Err(Error::bug("indirect nonfunction"));
+                        };
+                        if params.len() != args.len() || **ret != dest_ty || params.iter().zip(&args).any(|(t, v)| *t != v.ty) {
+                            return Err(Error::bug("indirect ABI mismatch"));
+                        }
+                        let pair = closure.value.unwrap();
+                        let code = self.b.ins().load(types::I64, cl::MemFlags::new(), pair, 0);
+                        let env = self.b.ins().load(types::I64, cl::MemFlags::new(), pair, 8);
+                        let mut sig = self.module.make_signature();
+                        let mut values = Vec::new();
+                        let aggregate = layout::layout(self.t, ret)?.size > 0 && scalar(ret).is_none();
+                        let result = if aggregate {
+                            let ptr = self.addr(dest)?;
+                            sig.params.push(cl::AbiParam::new(types::I64));
+                            values.push(ptr);
+                            Some(ptr)
+                        } else {
+                            None
+                        };
+                        sig.params.push(cl::AbiParam::new(types::I64));
+                        values.push(env);
+                        for v in &args {
+                            if let Some(ty) = abi_type(self.t, &v.ty)? {
+                                sig.params.push(cl::AbiParam::new(ty));
+                                values.push(v.value.unwrap());
+                            }
+                        }
+                        if let Some(ty) = scalar(ret) {
+                            sig.returns.push(cl::AbiParam::new(ty));
+                        }
+                        let sig = self.b.import_signature(sig);
+                        let call = self.b.ins().call_indirect(sig, code, &values);
+                        Val { value: if aggregate { result } else { self.b.inst_results(call).first().copied() }, ty: dest_ty.clone() }
                     }
                     Callee::Builtin(Builtin::Print) => {
                         if args.len() != 1 {

@@ -74,6 +74,11 @@ fn examples_resolve() {
                 if d.code == "E3005" && NEEDS_STDLIB.iter().any(|n| line.starts_with(n)) {
                     continue;
                 }
+                // Bootstrap examples are now explicitly rejected, rather than
+                // accepted through opaque ownership/provenance assumptions.
+                if d.code == "E3040" && ["12_try.tarn", "23_filesystem.tarn", "24_process.tarn", "25_concurrency.tarn"].iter().any(|n| line.starts_with(n)) {
+                    continue;
+                }
                 failures.push(d.render(&res.program.sources));
             } else {
                 warnings.push(line);

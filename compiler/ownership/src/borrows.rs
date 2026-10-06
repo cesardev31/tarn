@@ -20,7 +20,7 @@ use crate::util::{BitSet, may_hold_refs, place_name};
 use std::collections::{HashMap, HashSet, VecDeque};
 use tarn_ast::ReceiverKind;
 use tarn_diagnostics::{Diagnostic, Span};
-use tarn_ir::{BlockId, Callee, Function, FunctionId, LocalId, Operand, Place, Program, Proj, Rvalue, StatementKind, Terminator, RETURN};
+use tarn_ir::{BlockId, Callee, Function, FunctionId, LocalId, Operand, Place, Program, Proj, RETURN, Rvalue, StatementKind, Terminator};
 use tarn_resolve::{Resolved, SymbolKind};
 use tarn_types::{FnSig, Ty, Typed};
 
@@ -145,7 +145,8 @@ fn operand_place(o: &Operand) -> Option<&Place> {
 
 impl<'a> Fx<'a> {
     fn new(f: &'a Function, t: &'a Typed, prov: &'a HashMap<FunctionId, Provenance>) -> Self {
-        let mut fx = Fx { f, t, prov, loans: Vec::new(), loan_at: HashMap::new(), nl: f.locals.len(), live: Vec::new(), live_out: Vec::new(), diags: Vec::new(), reported: HashSet::new() };
+        let mut fx =
+            Fx { f, t, prov, loans: Vec::new(), loan_at: HashMap::new(), nl: f.locals.len(), live: Vec::new(), live_out: Vec::new(), diags: Vec::new(), reported: HashSet::new() };
         // Placeholder loans: one per reference-holding parameter.
         for (i, l) in f.params().enumerate() {
             if may_hold_refs(&f.local(l).ty) {
@@ -704,8 +705,12 @@ impl<'a> Fx<'a> {
         let acc = place_name(self.f, self.t, place);
         let bor = place_name(self.f, self.t, &ln.place);
         let (code, kind, msg, label) = match (access, ln.kind) {
-            (Access::BorrowMut, LoanKind::Shared) => ("E4101", "conflicting_borrow", format!("cannot borrow `{acc}` as mutable because it is also borrowed as shared"), "mutable borrow conflicts here"),
-            (Access::BorrowMut, LoanKind::Mutable) => ("E4101", "conflicting_borrow", format!("cannot borrow `{acc}` as mutable more than once at a time"), "second mutable borrow here"),
+            (Access::BorrowMut, LoanKind::Shared) => {
+                ("E4101", "conflicting_borrow", format!("cannot borrow `{acc}` as mutable because it is also borrowed as shared"), "mutable borrow conflicts here")
+            }
+            (Access::BorrowMut, LoanKind::Mutable) => {
+                ("E4101", "conflicting_borrow", format!("cannot borrow `{acc}` as mutable more than once at a time"), "second mutable borrow here")
+            }
             (Access::BorrowShared, _) => ("E4101", "conflicting_borrow", format!("cannot borrow `{acc}` as shared because it is mutably borrowed"), "shared borrow conflicts here"),
             (Access::Read, _) => ("E4104", "use_while_mutably_borrowed", format!("cannot use `{acc}` while it is mutably borrowed"), "used here"),
             (Access::Write, _) => ("E4102", "assign_while_borrowed", format!("cannot assign to `{acc}` because it is borrowed"), "assigned here while borrowed"),

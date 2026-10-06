@@ -66,3 +66,10 @@ separate `tarn_ir::post_drop::Program` with explicit destruction plans, runtime
 flags and verified CFG edges. A backend consumes it without reading move/borrow
 results. See [ADR 0026](adr/0026-drop-elaboration.md). Inspect it with
 `tarn ir file.tarn --drops`. Native code generation consumes this boundary; see [ADR 0027](adr/0027-native-backend.md).
+
+Native feature completion after phase 7 adds reachable generic specialization,
+concrete generic ADTs, borrowed fat slices, nonescaping borrowed closures and
+checked shifts/float-to-int casts. Unknown bootstrap stdlib APIs now fail with
+E3040. See [ADR 0028](adr/0028-native-feature-completeness.md) and
+[ADR 0029](adr/0029-checked-shifts-and-float-casts.md). Dynamic dispatch and
+optimization remain deferred; callable locals retain current consuming semantics.

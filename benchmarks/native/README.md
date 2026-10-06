@@ -1,0 +1,30 @@
+# Native baseline (2026-10-05)
+
+Linux x86_64 host, debug Rust compiler and Cranelift default code generation;
+C runtime compiled with cc -O0, no optimization changes. Dependency downloads
+were cached. Clean means a fresh Cargo target directory, not a cold filesystem
+cache. No isolated CPU or load control: numbers are observations, not performance
+promises or comparative optimization evidence.
+
+Clean compiler build: **51.10 seconds**, peak RSS **1,400,284 KiB**. Command:
+
+```
+/usr/bin/time -f 'clean_compile_seconds=%e peak_rss_kib=%M' cargo build -p tarn --target-dir /tmp/tarn-clean-native-baseline
+```
+
+`cargo test -p tarn_backend --test baseline -- --ignored --nocapture` measures
+object emission from already-checked post-drop IR (including specialization),
+cc runtime compilation plus linking, ELF size and median of five child executions.
+Runtime includes process startup and one print; no frontend time is included in
+codegen. The clean build ran concurrently with baseline collection, so host
+contention may affect these measurements. The baseline test is deliberately
+ignored in normal CI and asserts results without timing thresholds.
+
+| Fixture | Codegen ms | Runtime compile + link ms | Object bytes | ELF bytes | Runtime median ms |
+|---|---:|---:|---:|---:|---:|
+| arithmetic (1M additions) | 6.274 | 86.719 | 1432 | 16976 | 2.642 |
+| calls (1M generic calls) | 8.047 | 92.453 | 1632 | 17048 | 4.558 |
+| slices (100K 4-element sums) | 29.735 | 90.203 | 3864 | 17048 | 4.943 |
+
+Expected outputs are checked during measurement. Repeat on an idle, controlled
+host before drawing conclusions. These baselines do not authorize optimization.

@@ -310,8 +310,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 if let Some(sym) = self.def(s.id) {
                     if matches!(self.infer.shallow(&t), Ty::Void) && ty.is_none() {
                         self.err(
-                            Diagnostic::error("E3001", "type_mismatch", format!("`{}` would have type `void`", name.name))
-                                .primary(value.span, "this expression produces no value"),
+                            Diagnostic::error("E3001", "type_mismatch", format!("`{}` would have type `void`", name.name)).primary(value.span, "this expression produces no value"),
                         );
                     }
                     self.locals.insert(sym, t);
@@ -351,10 +350,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     }
                     None if !matches!(ret, Ty::Void | Ty::Never) => {
                         let shown = self.show(&ret);
-                        self.err(
-                            Diagnostic::error("E3028", "return_value_mismatch", format!("`return` without a value in a function returning `{shown}`"))
-                                .primary(s.span, ""),
-                        );
+                        self.err(Diagnostic::error("E3028", "return_value_mismatch", format!("`return` without a value in a function returning `{shown}`")).primary(s.span, ""));
                     }
                     None => {}
                 }
@@ -428,11 +424,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
     /// and references to non-copy elements.
     fn iter_elem(&mut self, t: &Ty, span: Span) -> (Ty, BindingMode) {
         let z = self.infer.zonk(t);
-        match &z {
-            Ty::Ref(m, inner) => match &**inner {
-                Ty::Array(e, _) | Ty::Slice(e) => (self.project(e, Some(*m)), self.mode(e, Some(*m))),
-                _ => (self.bad_iter(&z, span), BindingMode::Copy),
-            },
+        let (base, through) = peel(&z);
+        match &base {
+            Ty::Array(e, _) | Ty::Slice(e) if through.is_some() => (self.project(e, through), self.mode(e, through)),
             Ty::Array(e, _) => ((**e).clone(), self.mode(e, None)),
             Ty::Opaque | Ty::Error => (Ty::Opaque, BindingMode::Copy),
             _ => (self.bad_iter(&z, span), BindingMode::Copy),
@@ -532,9 +526,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     other => {
                         let expected = self.show(other);
                         let name = self.env.r.symbol(s).name.clone();
-                        self.err(
-                            Diagnostic::error("E3020", "pattern_mismatch", format!("pattern of struct `{name}` cannot match `{expected}`")).primary(p.span, ""),
-                        );
+                        self.err(Diagnostic::error("E3020", "pattern_mismatch", format!("pattern of struct `{name}` cannot match `{expected}`")).primary(p.span, ""));
                         return;
                     }
                 };
@@ -543,9 +535,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 for fp in fields {
                     let Some(fd) = def.fields.iter().find(|f| f.name == fp.name.name) else {
                         let name = self.env.r.symbol(s).name.clone();
-                        self.err(
-                            Diagnostic::error("E3012", "unknown_field", format!("struct `{name}` has no field `{}`", fp.name.name)).primary(fp.name.span, ""),
-                        );
+                        self.err(Diagnostic::error("E3012", "unknown_field", format!("struct `{name}` has no field `{}`", fp.name.name)).primary(fp.name.span, ""));
                         continue;
                     };
                     let ft = subst(&fd.ty, &map);
@@ -801,9 +791,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs),
             ExprKind::Range { .. } => {
                 self.err(
-                    Diagnostic::error("E3034", "range_outside_for", "ranges can only be used in `for` loops and slicing")
-                        .primary(e.span, "")
-                        .note("ranges are not values in v0"),
+                    Diagnostic::error("E3034", "range_outside_for", "ranges can only be used in `for` loops and slicing").primary(e.span, "").note("ranges are not values in v0"),
                 );
                 Ty::Error
             }
@@ -839,17 +827,18 @@ impl<'e, 'a> FnCx<'e, 'a> {
     fn name_value(&mut self, e: &Expr) -> Ty {
         match self.res(e.id) {
             Some(Res::External { .. }) => {
-                self.err(Diagnostic::error("E3040", "unmodeled_std_api", "standard-library API has no ownership/provenance contract").primary(e.span,"cannot safely type-check this API").help("use a module with explicit Tarn declarations"));
+                self.err(
+                    Diagnostic::error("E3040", "unmodeled_std_api", "standard-library API has no ownership/provenance contract")
+                        .primary(e.span, "cannot safely type-check this API")
+                        .help("use a module with explicit Tarn declarations"),
+                );
                 Ty::Error
-            },
+            }
             Some(Res::ScrutineeVariant(_)) | None => Ty::Error,
             Some(Res::Symbol(s)) => match self.kind(s).clone() {
-                SymbolKind::Local { .. }
-                | SymbolKind::Param
-                | SymbolKind::SelfParam
-                | SymbolKind::PatternBinding
-                | SymbolKind::LoopBinding
-                | SymbolKind::ClosureParam => self.locals.get(&s).cloned().unwrap_or(Ty::Error),
+                SymbolKind::Local { .. } | SymbolKind::Param | SymbolKind::SelfParam | SymbolKind::PatternBinding | SymbolKind::LoopBinding | SymbolKind::ClosureParam => {
+                    self.locals.get(&s).cloned().unwrap_or(Ty::Error)
+                }
                 SymbolKind::Variant { parent } => {
                     let (fields, generics) = self.variant_info(parent, s);
                     let map = self.instantiate(&generics);
@@ -884,15 +873,11 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 k => {
                     let name = self.env.r.symbol(s).name.clone();
                     let what = crate::binding_kind(&k);
-                    self.err(
-                        Diagnostic::error("E3035", "not_a_value", format!("{what} `{name}` is not a value"))
-                            .primary(e.span, "")
-                            .help(match k {
-                                SymbolKind::Struct => format!("build one with `{name}{{...}}`"),
-                                SymbolKind::Builtin => format!("call it: `{name}(...)`"),
-                                _ => "use a value of this type instead".to_string(),
-                            }),
-                    );
+                    self.err(Diagnostic::error("E3035", "not_a_value", format!("{what} `{name}` is not a value")).primary(e.span, "").help(match k {
+                        SymbolKind::Struct => format!("build one with `{name}{{...}}`"),
+                        SymbolKind::Builtin => format!("call it: `{name}(...)`"),
+                        _ => "use a value of this type instead".to_string(),
+                    }));
                     Ty::Error
                 }
             },
@@ -997,9 +982,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 };
                 match self.infer.shallow(&t) {
                     Ty::Int(i) if !i.signed() => {
-                        self.err(
-                            Diagnostic::error("E3007", "invalid_unary", format!("cannot negate an unsigned `{}`", i.name())).primary(e.span, ""),
-                        );
+                        self.err(Diagnostic::error("E3007", "invalid_unary", format!("cannot negate an unsigned `{}`", i.name())).primary(e.span, ""));
                         Ty::Error
                     }
                     Ty::Int(_) | Ty::Float(_) | Ty::Opaque | Ty::Error => t,
@@ -1055,11 +1038,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
         };
         let fail = |cx: &mut Self, why: &str| {
             let (ls, rs) = (cx.show(&lt), cx.show(&rt));
-            cx.err(
-                Diagnostic::error("E3006", "invalid_operands", format!("cannot apply `{}` to `{ls}` and `{rs}`", op.symbol()))
-                    .primary(e.span, "")
-                    .note(why.to_string()),
-            );
+            cx.err(Diagnostic::error("E3006", "invalid_operands", format!("cannot apply `{}` to `{ls}` and `{rs}`", op.symbol())).primary(e.span, "").note(why.to_string()));
             Ty::Error
         };
         match op {
@@ -1147,9 +1126,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             }
             _ => {
                 let got = self.show(&z);
-                self.err(
-                    Diagnostic::error("E3017", "try_mismatch", format!("`try` needs a `Result` or `Option`, found `{got}`")).primary(inner.span, ""),
-                );
+                self.err(Diagnostic::error("E3017", "try_mismatch", format!("`try` needs a `Result` or `Option`, found `{got}`")).primary(inner.span, ""));
                 Ty::Error
             }
         }
@@ -1157,12 +1134,18 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     fn struct_lit(&mut self, e: &Expr, fields: &[FieldInit]) -> Ty {
         let Some(Res::Symbol(s)) = self.res(e.id) else {
+            if matches!(self.res(e.id), Some(Res::External { .. })) {
+                self.err(
+                    Diagnostic::error("E3040", "unmodeled_std_api", "standard-library constructor has no ownership/provenance contract")
+                        .primary(e.span, "use a concrete Tarn declaration"),
+                );
+            }
             for f in fields {
                 if let Some(v) = &f.value {
                     self.expr(v, None);
                 }
             }
-            return Ty::Opaque;
+            return Ty::Error;
         };
         let Some(def) = self.env.decls.structs.get(&s) else { return Ty::Error };
         let name = self.env.r.symbol(s).name.clone();
@@ -1257,9 +1240,15 @@ impl<'e, 'a> FnCx<'e, 'a> {
         let target = self.res(callee.id);
         match target {
             Some(Res::External { .. }) => {
-                self.err(Diagnostic::error("E3040", "unmodeled_std_api", "standard-library API has no ownership/provenance contract").primary(callee.span,"cannot safely type-check this API").help("use a module with explicit Tarn declarations"));
+                self.err(
+                    Diagnostic::error("E3040", "unmodeled_std_api", "standard-library API has no ownership/provenance contract")
+                        .primary(callee.span, "cannot safely type-check this API")
+                        .help("use a module with explicit Tarn declarations"),
+                );
                 self.record(callee, Ty::Error);
-                for a in args { self.expr(a,None); }
+                for a in args {
+                    self.expr(a, None);
+                }
                 Ty::Error
             }
             Some(Res::Symbol(s)) => match self.kind(s).clone() {
@@ -1286,12 +1275,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     let Some(sig) = self.env.decls.fns.get(&s).cloned() else { return Ty::Error };
                     self.sig_call(e, s, &sig, None, args, expected)
                 }
-                SymbolKind::Local { .. }
-                | SymbolKind::Param
-                | SymbolKind::PatternBinding
-                | SymbolKind::LoopBinding
-                | SymbolKind::ClosureParam
-                | SymbolKind::SelfParam => self.value_call(e, callee, args),
+                SymbolKind::Local { .. } | SymbolKind::Param | SymbolKind::PatternBinding | SymbolKind::LoopBinding | SymbolKind::ClosureParam | SymbolKind::SelfParam => {
+                    self.value_call(e, callee, args)
+                }
                 k => {
                     let name = self.env.r.symbol(s).name.clone();
                     let what = crate::binding_kind(&k);
@@ -1341,7 +1327,13 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 Diagnostic::error(
                     "E3002",
                     "wrong_arg_count",
-                    format!("{what} takes {} argument{}, but {} {} given", params.len(), if params.len() == 1 { "" } else { "s" }, args.len(), if args.len() == 1 { "was" } else { "were" }),
+                    format!(
+                        "{what} takes {} argument{}, but {} {} given",
+                        params.len(),
+                        if params.len() == 1 { "" } else { "s" },
+                        args.len(),
+                        if args.len() == 1 { "was" } else { "were" }
+                    ),
                 )
                 .primary(e.span, ""),
             );
@@ -1412,7 +1404,11 @@ impl<'e, 'a> FnCx<'e, 'a> {
             }
             Ty::Adt(s, targs) => {
                 if *s == self.env.prelude.channel || self.env.r.symbol(*s).name == "Sender" && matches!(self.kind(*s), SymbolKind::PreludeType) {
-                    // Channel/Sender methods come with the concurrency runtime.
+                    // No runtime contract exists yet; never erase result provenance.
+                    self.err(
+                        Diagnostic::error("E3040", "unmodeled_std_api", "channel API has no ownership/provenance contract")
+                            .primary(e.span, "concurrency semantics are not implemented"),
+                    );
                     self.tables.method_calls.insert(e.id, MethodTarget::Opaque);
                     for a in args {
                         self.expr(a, Some(&Ty::Opaque));
@@ -1544,13 +1540,20 @@ impl<'e, 'a> FnCx<'e, 'a> {
         };
         self.tables.method_calls.insert(e.id, MethodTarget::Intrinsic(name.name.clone()));
         let mut derefs = 0u8;
-        let mut t = self.infer.zonk(&self.tables.expr_types.get(&match &e.kind {
-            ExprKind::Call { callee, .. } => match &callee.kind {
-                ExprKind::Field { base, .. } => base.id,
-                _ => callee.id,
-            },
-            _ => e.id,
-        }).cloned().unwrap_or(Ty::Error));
+        let mut t = self.infer.zonk(
+            &self
+                .tables
+                .expr_types
+                .get(&match &e.kind {
+                    ExprKind::Call { callee, .. } => match &callee.kind {
+                        ExprKind::Field { base, .. } => base.id,
+                        _ => callee.id,
+                    },
+                    _ => e.id,
+                })
+                .cloned()
+                .unwrap_or(Ty::Error),
+        );
         while let Ty::Ref(_, inner) = t {
             derefs += 1;
             t = *inner;
@@ -1574,6 +1577,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
             self.args(e, "`panic`", &[Ty::Str], args);
             Ty::Never
         } else if s == p.channel_fn {
+            self.err(
+                Diagnostic::error("E3040", "unmodeled_std_api", "channel API has no ownership/provenance contract").primary(e.span, "concurrency semantics are not implemented"),
+            );
             let cap = self.infer.fresh(VarKind::Int);
             self.args(e, "`channel`", &[cap], args);
             let elem = self.infer.fresh(VarKind::General);
