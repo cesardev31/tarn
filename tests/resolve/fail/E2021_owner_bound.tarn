@@ -1,0 +1,12 @@
+interface Hash {
+    fn hash(&self) u64
+}
+
+struct Map<K, V> {
+    keys K
+    values V
+}
+
+fn Map<K: Hash, V>.get(&self, key &K) Option<&V> {
+    return None
+}

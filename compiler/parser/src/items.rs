@@ -106,16 +106,19 @@ impl Parser {
             }
             TokenKind::Copy => {
                 self.bump();
-                if !self.expect(&TokenKind::Struct) {
+                if self.at(&TokenKind::Enum) {
+                    self.parse_enum(true)
+                } else if self.expect(&TokenKind::Struct) {
+                    self.parse_struct(true)
+                } else {
                     return Item { id, span: self.since(start), is_pub, kind: ItemKind::Error };
                 }
-                self.parse_struct(true)
             }
             TokenKind::Struct => {
                 self.bump();
                 self.parse_struct(false)
             }
-            TokenKind::Enum => self.parse_enum(),
+            TokenKind::Enum => self.parse_enum(false),
             TokenKind::Interface => self.parse_interface(),
             TokenKind::Impl => self.parse_impl(is_pub, pub_span),
             _ => {
@@ -137,13 +140,16 @@ impl Parser {
         let id = self.id();
         self.expect(&TokenKind::Fn);
         let mut name = self.expect_ident("function name");
+        // `fn f<T>(` vs `fn Pair<A, B>.m(`: the token after the list decides
+        // whose list it is (ADR 0015); no backtracking.
+        let mut generics = self.parse_generic_params();
         let mut owner = None;
         if ctx == FnContext::Free && self.at(&TokenKind::Dot) {
             self.bump();
-            owner = Some(name);
+            owner = Some(Owner { name, params: std::mem::take(&mut generics) });
             name = self.expect_ident("method name");
+            generics = self.parse_generic_params();
         }
-        let generics = self.parse_generic_params();
         let allow_receiver = owner.is_some() || ctx != FnContext::Free;
         let (receiver, params) = self.parse_params(allow_receiver);
         let ret = if crate::types::starts_type(self.peek()) { Some(self.parse_type()) } else { None };
@@ -208,7 +214,7 @@ impl Parser {
                                 .help("declare methods as `fn Type.name(&self, ...)`"),
                         );
                     } else {
-                        receiver = Some(Receiver { kind, span });
+                        receiver = Some(Receiver { id: p.id(), kind, span });
                     }
                 } else {
                     let id = p.id();
@@ -296,7 +302,7 @@ impl Parser {
         ItemKind::Struct(StructDecl { is_copy, name, generics, fields })
     }
 
-    fn parse_enum(&mut self) -> ItemKind {
+    fn parse_enum(&mut self, is_copy: bool) -> ItemKind {
         self.bump();
         let name = self.expect_ident("enum name");
         let generics = self.parse_generic_params();
@@ -319,7 +325,7 @@ impl Parser {
             }
             variants.push(Variant { id, span: p.since(start), name, fields });
         });
-        ItemKind::Enum(EnumDecl { name, generics, variants })
+        ItemKind::Enum(EnumDecl { is_copy, name, generics, variants })
     }
 
     fn parse_interface(&mut self) -> ItemKind {

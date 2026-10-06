@@ -1,0 +1,12 @@
+import "shapes"
+import "points"
+
+// Neither `Shape` nor `Point` is declared here.
+impl shapes.Shape for points.Point {
+    fn area(&self) f64 {
+        return 0.0
+    }
+}
+
+fn main() {
+}

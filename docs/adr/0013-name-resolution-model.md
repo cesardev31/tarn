@@ -33,6 +33,10 @@ Status: accepted (2026-10-05).
    (not re-exported, E2006), cycles allowed (items are hoisted), unused
    imports warn (W2003).
 9. **Name resolution only runs on syntactically valid programs** (driver).
+   **Deliberate debt for the LSP phase:** the resolver already skips `Error`
+   nodes, so resolving recovered trees is an architectural non-change; what is
+   missing is suppressing name errors caused by recovery (e.g. a binding lost
+   in a broken statement) and tests for it. Not needed for the CLI.
 
 ## Alternatives considered
 

@@ -1,0 +1,3 @@
+pub interface Shape {
+    fn area(&self) f64
+}

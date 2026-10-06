@@ -1,6 +1,8 @@
 # ADR 0014 — In patterns, capitalized names are variants
 
-Status: accepted (2026-10-05). **Language rule**; affects every `match`.
+Status: **experimental v0** (2026-10-05). Language rule affecting every
+`match`; kept provisionally, explicitly *not* a permanent guarantee. Reviewed
+before phase 4 (see "Future interactions").
 
 ## Problem
 
@@ -49,3 +51,26 @@ lookup, which silently turns a misspelled variant into a catch-all binding
 If real code needs capitalized bindings in patterns (e.g. constants used as
 patterns), consider letting a lexically visible `const` win — that would be an
 extension, not a reversal.
+
+## Future interactions (review before phase 4)
+
+The rule is better stated as: **a capitalized pattern name refers to something
+that already exists; a lowercase pattern name introduces a binding.** Read that
+way, the cases that looked risky fit naturally:
+
+| Case | Behavior under the rule | Verdict |
+|------|------------------------|---------|
+| Constants in patterns (`MAX_SIZE => ...`, future) | Capitalized → "existing name". Lookup order: lexically visible `const` first, then the scrutinee's variants. A constant that collides with a variant name is reported as ambiguous. | Fits; an extension, not a reversal. |
+| `EOF`, `MAX_SIZE`, `HTTP` as variant names | Capitalized → variants. Allowed (E2017 only demands an uppercase first letter, not CamelCase). | Fits. |
+| Lowercase constants (`max_size`) in patterns | Would be read as bindings. Must be qualified (`config.max_size`) or renamed. | Accepted limitation; SCREAMING_CASE constants are the convention anyway. |
+| Variants with other conventions (C enums via FFI: `c_int`, `SIGINT`) | A lowercase variant cannot be declared (E2017). FFI enums will be mapped to Tarn names by the binding generator, or matched qualified. | Limitation on *declaration*, not on matching qualified paths. |
+| Qualified patterns (`Shape.Empty`, `geo.Shape.Empty`) | Not affected: a path with a `.` is always a reference, its last segment may have any case. | Unaffected; also the escape hatch for every edge case above. |
+| Capitalized bindings (`N => ...`) | Impossible; read as a variant/constant. | Accepted; a binding named like a type is confusing in any language. |
+
+No structural limitation found: every problematic case has a qualified-path
+escape hatch, and the one future feature (constants) slots into the
+"capitalized = existing" side without changing the meaning of existing code.
+
+Evidence that would reopen it: FFI-heavy xlinux code needing lowercase
+variants frequently, or users reporting confusion between constants and
+variants in patterns.

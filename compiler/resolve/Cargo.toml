@@ -7,3 +7,6 @@ license.workspace = true
 [dependencies]
 tarn_ast = { path = "../ast" }
 tarn_diagnostics = { path = "../diagnostics" }
+
+[dev-dependencies]
+tarn_parser = { path = "../parser" }

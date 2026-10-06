@@ -1,0 +1,8 @@
+warning[W2003]: unused import `shapes`
+ --> tests/resolve/pass/impl_in_type_module/main.tarn:1:8
+  |
+1 | import "shapes"
+  |        ^^^^^^^^
+  |
+  = help: remove the import
+

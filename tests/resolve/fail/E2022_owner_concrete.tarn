@@ -1,0 +1,8 @@
+struct Pair<A, B> {
+    first A
+    second B
+}
+
+fn Pair<i32, B>.sum(&self) i32 {
+    return 0
+}

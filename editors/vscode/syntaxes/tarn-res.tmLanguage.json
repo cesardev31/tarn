@@ -1,0 +1,30 @@
+{
+  "name": "Tarn res",
+  "scopeName": "source.tarn-res",
+  "patterns": [
+    {
+      "name": "entity.name.section.tarn-res",
+      "match": "^== .*$"
+    },
+    {
+      "name": "keyword.other.tarn-res",
+      "match": "\\b(?:primitive|struct|enum|interface|variant|scrutinee-variant|method|fn|function|builtin|prelude|param|self|var|local|capture|captures|module|generic)\\b"
+    },
+    {
+      "name": "keyword.operator.tarn-res",
+      "match": "->"
+    },
+    {
+      "name": "entity.name.type.tarn-res",
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+    },
+    {
+      "name": "string.quoted.double.tarn-artifact",
+      "match": "\"(?:[^\"\\\\]|\\\\.)*\""
+    },
+    {
+      "name": "constant.numeric.tarn-artifact",
+      "match": "\\b\\d+(?:\\.\\d+)?\\b"
+    }
+  ]
+}

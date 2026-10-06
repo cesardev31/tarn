@@ -1,0 +1,8 @@
+error[E2022]: `i32` names an existing primitive type; type parameter binders must be fresh names
+ --> tests/resolve/fail/E2022_owner_concrete.tarn:6:9
+  |
+6 | fn Pair<i32, B>.sum(&self) i32 {
+  |         ^^^
+  |
+  = note: `Pair<A, B>` covers every `Pair`; specialized impls and methods are not supported in v0 (ADR 0015, 0016)
+

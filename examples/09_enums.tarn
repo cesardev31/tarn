@@ -1,4 +1,4 @@
-enum Shape {
+copy enum Shape {
     Circle(f64)
     Rect(f64, f64)
     Empty

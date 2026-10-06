@@ -62,8 +62,8 @@ pub struct FnDecl {
     pub span: Span,
     /// `extern "C"` ABI string, if any.
     pub abi: Option<String>,
-    /// `User` in `fn User.new()`.
-    pub owner: Option<Ident>,
+    /// `User` in `fn User.new()`, `Pair<A, B>` in `fn Pair<A, B>.first()`.
+    pub owner: Option<Owner>,
     pub name: Ident,
     pub generics: Vec<GenericParam>,
     pub receiver: Option<Receiver>,
@@ -71,6 +71,14 @@ pub struct FnDecl {
     pub ret: Option<Type>,
     /// `None` for interface methods and extern declarations.
     pub body: Option<Block>,
+}
+
+/// The type a method is declared on. `params` are fresh binders for the
+/// type's generic parameters, in declaration order (ADR 0015).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Owner {
+    pub name: Ident,
+    pub params: Vec<GenericParam>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -85,6 +93,7 @@ pub enum ReceiverKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Receiver {
+    pub id: NodeId,
     pub kind: ReceiverKind,
     pub span: Span,
 }
@@ -124,6 +133,7 @@ pub struct FieldDecl {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EnumDecl {
+    pub is_copy: bool,
     pub name: Ident,
     pub generics: Vec<GenericParam>,
     pub variants: Vec<Variant>,

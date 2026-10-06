@@ -1,0 +1,19 @@
+interface Show {
+    fn show(&self) string
+}
+
+struct Point {
+    x i64
+}
+
+impl Show for Point {
+    fn show(&self) string {
+        return "a"
+    }
+}
+
+impl Show for Point {
+    fn show(&self) string {
+        return "b"
+    }
+}

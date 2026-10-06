@@ -1,0 +1,25 @@
+error[E2022]: `i32` names an existing primitive type; type parameter binders must be fresh names
+  --> tests/resolve/fail/E2022_E2024_impl_targets.tarn:10:20
+   |
+10 | impl Show for Pair<i32, B> {
+   |                    ^^^
+   |
+   = note: `Pair<A, B>` covers every `Pair`; specialized impls and methods are not supported in v0 (ADR 0015, 0016)
+
+error[E2024]: cannot implement an interface for primitive type `i32`
+  --> tests/resolve/fail/E2022_E2024_impl_targets.tarn:16:15
+   |
+16 | impl Show for i32 {
+   |               ^^^
+   |
+   = note: only structs and enums can implement interfaces in v0 (ADR 0016)
+   = help: wrap the value in a struct you define: `struct Meters { value f64 }`
+
+error[E2024]: interfaces can only be implemented for structs and enums
+  --> tests/resolve/fail/E2022_E2024_impl_targets.tarn:22:15
+   |
+22 | impl Show for &Pair<A, B> {
+   |               ^^^^^^^^^^^
+   |
+   = note: v0 has no impls for references, slices, arrays or function types (ADR 0016)
+

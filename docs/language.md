@@ -201,8 +201,31 @@ fn User.into_name(self) string {         // consumes the receiver
 }
 ```
 
+Enums follow the same rule: `copy enum Light { Red Green }` is copied on
+assignment; a plain `enum` moves. Copy types must contain only copy types.
+
 The declaration mirrors the call site: `User.new("ana")`, `u.greet()`.
 There is no `impl` block for inherent methods.
+
+Methods of a **generic type** name the type's parameters right after the type
+(ADR 0015); the names are binders, one per parameter, in order:
+
+```tarn
+struct Pair<A, B> {
+    first  A
+    second B
+}
+
+fn Pair<A, B>.swap(self) Pair<B, A> {
+    return Pair{first: self.second, second: self.first}
+}
+
+fn Pair<A, B>.map_first<C>(self, f fn(A) C) Pair<C, B> {   // own generics after the name
+    return Pair{first: f(self.first), second: self.second}
+}
+```
+
+Methods can only be declared in the module that declares the type.
 
 Struct literal: `User{name: "ana", age: 30}`. All fields must be given.
 Field shorthand `User{name, age}` is allowed when a local of the same name exists.
@@ -303,6 +326,10 @@ fn save_any(w &mut any Writer) { ... }    // dynamic dispatch, explicit with `an
 Implementations are explicit (`impl I for T`), not structural: intent is
 visible and greppable, and adding a method never silently changes which
 interfaces a type satisfies.
+
+Coherence (ADR 0016): an `impl I for T` must be written in the module that
+declares `I` or the one that declares `T`; `T` is a struct or enum; its type
+arguments are binders (`impl I for Pair<A, B>`); at most one impl per pair.
 
 ## 13. Concurrency (provisional, phase 25)
 

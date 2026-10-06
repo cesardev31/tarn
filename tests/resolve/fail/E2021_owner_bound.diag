@@ -1,0 +1,9 @@
+error[E2021]: bounds are not allowed on method owner parameters
+  --> tests/resolve/fail/E2021_owner_bound.tarn:10:11
+   |
+10 | fn Map<K: Hash, V>.get(&self, key &K) Option<&V> {
+   |           ^^^^
+   |
+   = note: conditional methods are not supported in v0 (ADR 0015)
+   = help: declare the bound on the type itself: `struct Map<K: Hash, V>`
+

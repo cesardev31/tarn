@@ -1,0 +1,45 @@
+{
+  "name": "Tarn ast",
+  "scopeName": "source.tarn-ast",
+  "patterns": [
+    {
+      "begin": "\\(",
+      "end": "\\)",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.parens.begin.tarn-ast"
+        }
+      },
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.parens.end.tarn-ast"
+        }
+      },
+      "patterns": [
+        {
+          "include": "$self"
+        }
+      ]
+    },
+    {
+      "name": "keyword.other.tarn-ast",
+      "match": "\\b(?:fn|pub|copy|struct|enum|interface|impl|block|let|var|return|if|else|for|match|arm|call|try|unsafe|spawn|scope|import|break|continue)\\b"
+    },
+    {
+      "name": "constant.language.tarn-ast",
+      "match": "\\b(?:true|false)\\b"
+    },
+    {
+      "name": "entity.name.type.tarn-ast",
+      "match": "\\b(?:[iu](?:8|16|32|64)|[iu]size|f32|f64|bool|string|void|never|[A-Z][A-Za-z0-9_]*)\\b"
+    },
+    {
+      "name": "string.quoted.double.tarn-artifact",
+      "match": "\"(?:[^\"\\\\]|\\\\.)*\""
+    },
+    {
+      "name": "constant.numeric.tarn-artifact",
+      "match": "\\b\\d+(?:\\.\\d+)?\\b"
+    }
+  ]
+}

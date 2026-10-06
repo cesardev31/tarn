@@ -11,8 +11,10 @@ item        = [ "pub" ] ( import | fn_decl | extern_fn | struct_decl
                         | enum_decl | interface | impl_decl ) ;
 import      = "import" STRING ;
 extern_fn   = "extern" STRING fn_decl ;                 (* body optional *)
-fn_decl     = "fn" IDENT [ "." IDENT ] [ generics ]
+fn_decl     = "fn" IDENT [ generics ] [ "." IDENT [ generics ] ]
               "(" [ params ] ")" [ type ] [ block ] ;
+              (* `fn Pair<A, B>.m<C>(…)`: a list before `.` binds the owner's
+                 type parameters (ADR 0015); the token after it decides *)
 params      = param { "," param } [ "," ] ;
 param       = receiver | IDENT type ;
 receiver    = "self" | "&" "self" | "&" "mut" "self" ;  (* first param of a method only *)
@@ -21,10 +23,10 @@ gparam      = IDENT [ ":" path { "+" path } ] ;
 
 struct_decl = [ "copy" ] "struct" IDENT [ generics ] body(field) ;
 field       = [ "pub" ] IDENT type ;
-enum_decl   = "enum" IDENT [ generics ] body(variant) ;
+enum_decl   = [ "copy" ] "enum" IDENT [ generics ] body(variant) ;
 variant     = IDENT [ "(" type { "," type } [ "," ] ")" ] ;
 interface   = "interface" IDENT [ generics ] body(fn_decl) ;   (* no bodies *)
-impl_decl   = "impl" path "for" type body(fn_decl) ;
+impl_decl   = "impl" path "for" type body(fn_decl) ;    (* type args = binders, ADR 0016 *)
 body(m)     = "{" { NL } [ m { NL { NL } m } ] { NL } "}" ;   (* one member per line *)
 
 type        = path

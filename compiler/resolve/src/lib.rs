@@ -228,6 +228,9 @@ pub struct Resolved {
     /// interface → declared methods.
     pub members: HashMap<SymbolId, Vec<SymbolId>>,
     pub impls: Vec<ImplInfo>,
+    /// Number of generic parameters of every struct, enum, interface and
+    /// prelude type (`Option` → 1, `Result` → 2).
+    pub type_arity: HashMap<SymbolId, usize>,
 }
 
 impl Resolved {
@@ -283,4 +286,25 @@ pub fn resolve(modules: &[ModuleInput]) -> (Resolved, Vec<Diagnostic>) {
     cx.collect();
     cx.walk_all();
     cx.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    /// Regression: `self` once reused the function's `NodeId` and overwrote
+    /// the function's entry in `defs`.
+    #[test]
+    fn receiver_has_its_own_def() {
+        use tarn_diagnostics::SourceMap;
+        let mut map = SourceMap::new();
+        let id = map.add("t.tarn", "struct S {\n}\n\nfn S.get(&self) {\n}\n");
+        let parsed = tarn_parser::parse_file(id, map.file(id)).module;
+        let inputs = [crate::ModuleInput { name: "t".into(), ast: &parsed }];
+        let (r, d) = crate::resolve(&inputs);
+        assert!(d.is_empty());
+        let tarn_ast::ItemKind::Fn(f) = &parsed.items[1].kind else { panic!() };
+        let fsym = r.tables[0].defs[&f.id];
+        assert!(matches!(r.symbol(fsym).kind, crate::SymbolKind::Method { .. }));
+        let rsym = r.tables[0].defs[&f.receiver.as_ref().unwrap().id];
+        assert!(matches!(r.symbol(rsym).kind, crate::SymbolKind::SelfParam));
+    }
 }

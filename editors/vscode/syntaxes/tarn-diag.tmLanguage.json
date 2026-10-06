@@ -1,0 +1,38 @@
+{
+  "name": "Tarn diag",
+  "scopeName": "source.tarn-diag",
+  "patterns": [
+    {
+      "name": "invalid.illegal.tarn-diag",
+      "match": "^error\\[E\\d+\\]"
+    },
+    {
+      "name": "markup.changed.tarn-diag",
+      "match": "^warning\\[W\\d+\\]"
+    },
+    {
+      "name": "keyword.other.tarn-diag",
+      "match": "\\b(?:help|note):"
+    },
+    {
+      "name": "entity.name.filename.tarn-diag",
+      "match": "[^\\s]+\\.tarn:\\d+:\\d+"
+    },
+    {
+      "name": "string.quoted.other.tarn-diag",
+      "match": "`[^`]*`"
+    },
+    {
+      "name": "punctuation.separator.tarn-diag",
+      "match": "-->|\\^+|\\|"
+    },
+    {
+      "name": "string.quoted.double.tarn-artifact",
+      "match": "\"(?:[^\"\\\\]|\\\\.)*\""
+    },
+    {
+      "name": "constant.numeric.tarn-artifact",
+      "match": "\\b\\d+(?:\\.\\d+)?\\b"
+    }
+  ]
+}

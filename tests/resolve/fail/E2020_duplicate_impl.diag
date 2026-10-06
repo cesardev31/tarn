@@ -1,0 +1,6 @@
+error[E2020]: `Show` is implemented more than once for `Point`
+  --> tests/resolve/fail/E2020_duplicate_impl.tarn:15:6
+   |
+15 | impl Show for Point {
+   |      ^^^^ second implementation
+

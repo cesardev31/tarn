@@ -1,0 +1,18 @@
+struct Pair<A, B> {
+    first A
+    second B
+}
+
+struct User {
+    name string
+}
+
+fn Pair.first(&self) A {
+    return self.first
+}
+
+fn Pair<A>.only(&self) {
+}
+
+fn User<T>.name(&self) {
+}

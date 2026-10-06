@@ -24,9 +24,50 @@
         ],
         "configuration": "./language-configuration.json",
         "icon": {
-          "light": "./icons/tarn.svg",
-          "dark": "./icons/tarn.svg"
+          "light": "./icons/tarn-file.svg",
+          "dark": "./icons/tarn-file.svg"
         }
+      },
+      {
+        "id": "tarn-diag",
+        "aliases": [
+          "Tarn Diagnostics"
+        ],
+        "extensions": [
+          ".diag"
+        ],
+        "icon": {
+          "light": "./icons/tarn-diag.svg",
+          "dark": "./icons/tarn-diag.svg"
+        },
+        "configuration": "./artifact-configuration.json"
+      },
+      {
+        "id": "tarn-res",
+        "aliases": [
+          "Tarn Resolution"
+        ],
+        "extensions": [],
+        "icon": {
+          "light": "./icons/tarn-res.svg",
+          "dark": "./icons/tarn-res.svg"
+        },
+        "configuration": "./artifact-configuration.json",
+        "firstLine": "^== "
+      },
+      {
+        "id": "tarn-ast",
+        "aliases": [
+          "Tarn AST"
+        ],
+        "extensions": [
+          ".ast"
+        ],
+        "icon": {
+          "light": "./icons/tarn-ast.svg",
+          "dark": "./icons/tarn-ast.svg"
+        },
+        "configuration": "./artifact-configuration.json"
       }
     ],
     "grammars": [
@@ -34,6 +75,21 @@
         "language": "tarn",
         "scopeName": "source.tarn",
         "path": "./syntaxes/tarn.tmLanguage.json"
+      },
+      {
+        "language": "tarn-diag",
+        "scopeName": "source.tarn-diag",
+        "path": "./syntaxes/tarn-diag.tmLanguage.json"
+      },
+      {
+        "language": "tarn-res",
+        "scopeName": "source.tarn-res",
+        "path": "./syntaxes/tarn-res.tmLanguage.json"
+      },
+      {
+        "language": "tarn-ast",
+        "scopeName": "source.tarn-ast",
+        "path": "./syntaxes/tarn-ast.tmLanguage.json"
       }
     ]
   },

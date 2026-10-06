@@ -1,0 +1,18 @@
+error[E2025]: `Pair` takes 2 type arguments, but 1 was given
+ --> tests/resolve/fail/E2025_type_arity.tarn:6:8
+  |
+6 | fn f(p Pair<i32>, o Option, r Result<i32, string, bool>) {
+  |        ^^^^^^^^^
+
+error[E2025]: `Option` takes 1 type argument, but 0 were given
+ --> tests/resolve/fail/E2025_type_arity.tarn:6:21
+  |
+6 | fn f(p Pair<i32>, o Option, r Result<i32, string, bool>) {
+  |                     ^^^^^^
+
+error[E2025]: `Result` takes 2 type arguments, but 3 were given
+ --> tests/resolve/fail/E2025_type_arity.tarn:6:31
+  |
+6 | fn f(p Pair<i32>, o Option, r Result<i32, string, bool>) {
+  |                               ^^^^^^^^^^^^^^^^^^^^^^^^^
+

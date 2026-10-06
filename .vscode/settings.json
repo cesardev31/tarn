@@ -1,0 +1,5 @@
+{
+  "files.associations": {
+    "**/tests/**/*.res": "tarn-res"
+  }
+}

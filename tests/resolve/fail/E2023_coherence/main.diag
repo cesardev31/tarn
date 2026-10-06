@@ -1,0 +1,9 @@
+error[E2023]: `impl Shape for Point` must be in module `shapes` or `points`
+ --> tests/resolve/fail/E2023_coherence/main.tarn:5:1
+  |
+5 | impl shapes.Shape for points.Point {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: an impl lives with its interface or its type, so a program can never contain two different impls for the same pair (ADR 0016)
+  = help: move this impl to `shapes` or `points`, or wrap `Point` in a struct defined here
+

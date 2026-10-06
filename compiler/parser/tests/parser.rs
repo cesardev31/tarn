@@ -227,6 +227,14 @@ fn items() {
 }
 
 #[test]
+fn methods_on_generic_types() {
+    assert_eq!(
+        ok("fn Pair<A, B>.swap(&self) Pair<B, A> {}\nfn Pair<A, B>.map<C>(self, f fn(A) C) Pair<C, B> {}\nfn id<T>(x T) T { return x }\n"),
+        "(fn Pair<A, B>.swap (&self) -> Pair<B, A>\n  (block))\n(fn Pair<A, B>.map <C> (self (f fn(A) C)) -> Pair<C, B>\n  (block))\n(fn id <T> ((x T)) -> T\n  (block\n    (return x)))\n"
+    );
+}
+
+#[test]
 fn spans_cover_nodes() {
     let src = "fn add(a i32, b i32) i32 {\n    return a + b\n}";
     let (map, res) = parse(src);

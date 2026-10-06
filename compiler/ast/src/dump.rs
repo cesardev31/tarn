@@ -55,7 +55,7 @@ impl Dumper {
                 self.s(")");
             }
             ItemKind::Enum(e) => {
-                let _ = write!(self.out, "({p}enum {}", e.name.name);
+                let _ = write!(self.out, "({p}{}enum {}", if e.is_copy { "copy " } else { "" }, e.name.name);
                 self.generics(&e.generics);
                 for v in &e.variants {
                     self.nl(ind + 1);
@@ -118,7 +118,14 @@ impl Dumper {
             let _ = write!(self.out, "extern {abi:?} ");
         }
         if let Some(o) = &f.owner {
-            let _ = write!(self.out, "{}.", o.name);
+            self.s(&o.name.name);
+            if !o.params.is_empty() {
+                self.generics(&o.params);
+                // `generics` prints a leading space; owner lists are tight.
+                let n = self.out.rfind(" <").unwrap();
+                self.out.remove(n);
+            }
+            self.s(".");
         }
         self.s(&f.name.name);
         self.generics(&f.generics);

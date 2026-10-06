@@ -1,0 +1,7 @@
+struct Pair<A, B> {
+    first A
+    second B
+}
+
+fn f(p Pair<i32>, o Option, r Result<i32, string, bool>) {
+}

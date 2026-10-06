@@ -1,0 +1,6 @@
+import "shapes"
+import "points"
+
+fn main() {
+    p := points.Point{x: 1.0}
+}

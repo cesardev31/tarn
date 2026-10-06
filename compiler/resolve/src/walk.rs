@@ -432,6 +432,37 @@ impl<'c, 'a> Walker<'c, 'a> {
         }
     }
 
+    /// Owner/impl binders: plain generic parameters, bounds already rejected.
+    fn binders(&mut self, ps: &[GenericParam]) {
+        for g in ps {
+            // A binder named like an existing type is almost certainly an
+            // attempted specialization (`Pair<i32, B>`), not a fresh name.
+            if let Some(existing) = self.cx.r.lookup(self.scope, &g.name.name)
+                && self.cx.sym(existing).kind.is_type()
+                && !matches!(self.cx.sym(existing).kind, SymbolKind::GenericParam)
+            {
+                let k = kind_name(&self.cx.sym(existing).kind);
+                self.cx.diags.push(
+                    Diagnostic::error("E2022", "specialized_impl", format!("`{}` names an existing {k}; type parameter binders must be fresh names", g.name.name))
+                        .primary(g.name.span, "")
+                        .note("`Pair<A, B>` covers every `Pair`; specialized impls and methods are not supported in v0 (ADR 0015, 0016)"),
+                );
+                continue;
+            }
+            let sym = Symbol {
+                name: g.name.name.clone(),
+                kind: SymbolKind::GenericParam,
+                module: Some(self.m),
+                def: Some(g.id),
+                span: Some(g.name.span),
+                scope: self.scope,
+                is_pub: false,
+                body: None,
+            };
+            self.cx.declare(self.scope, sym, self.m, "E2003");
+        }
+    }
+
     /// A path that must name an interface (bounds, `impl I for`, `any I`).
     fn interface_path(&mut self, p: &Path, what: &str) -> Option<SymbolId> {
         for a in &p.args {
@@ -456,10 +487,13 @@ impl<'c, 'a> Walker<'c, 'a> {
     fn function(&mut self, f: &FnDecl) {
         self.bodies.push(BodyCx { id: f.id, span: f.span, is_closure: false });
         self.in_scope(ScopeKind::Function, f.span, |w| {
+            if let Some(o) = &f.owner {
+                w.binders(&o.params);
+            }
             w.generics(&f.generics);
             if let Some(r) = &f.receiver {
                 let name = Ident { name: "self".to_string(), span: r.span };
-                w.declare_local(&name, SymbolKind::SelfParam, f.id);
+                w.declare_local(&name, SymbolKind::SelfParam, r.id);
             }
             for p in &f.params {
                 w.ty(&p.ty);
@@ -476,12 +510,101 @@ impl<'c, 'a> Walker<'c, 'a> {
     }
 
     fn impl_block(&mut self, item: &Item, i: &ImplDecl) {
+        let saved = self.scope;
+        self.push_scope(ScopeKind::Item, item.span);
         let iface = self.interface_path(&i.interface, "`impl`");
-        self.ty(&i.target);
-        let target = match self.cx.r.tables[self.m.0 as usize].uses.get(&i.target.id).map(|u| &u.res) {
-            Some(Res::Symbol(id)) if matches!(self.cx.sym(*id).kind, SymbolKind::Struct | SymbolKind::Enum) => Some(*id),
-            _ => None,
+        let target = self.impl_target(&i.target);
+        self.check_coherence(item, i, iface, target);
+        self.impl_members(item, i, iface, target);
+        self.scope = saved;
+    }
+
+    /// `impl I for T` / `impl I for T<A, B>`: `T` a struct or enum, its
+    /// arguments fresh binders (ADR 0016).
+    fn impl_target(&mut self, t: &Type) -> Option<SymbolId> {
+        let TypeKind::Path(p) = &t.kind else {
+            self.cx.diags.push(
+                Diagnostic::error("E2024", "invalid_impl_target", "interfaces can only be implemented for structs and enums")
+                    .primary(t.span, "")
+                    .note("v0 has no impls for references, slices, arrays or function types (ADR 0016)"),
+            );
+            return None;
         };
+        let bare = Path { id: p.id, span: p.span, segments: p.segments.clone(), args: Vec::new() };
+        let res = self.path_res(&bare)?;
+        let Res::Symbol(id) = res else { return None };
+        let kind = self.cx.sym(id).kind.clone();
+        if !matches!(kind, SymbolKind::Struct | SymbolKind::Enum) {
+            let mut d = Diagnostic::error(
+                "E2024",
+                "invalid_impl_target",
+                format!("cannot implement an interface for {} `{}`", kind_name(&kind), path_text(p)),
+            )
+            .primary(p.span, "")
+            .note("only structs and enums can implement interfaces in v0 (ADR 0016)");
+            if matches!(kind, SymbolKind::Primitive) {
+                d = d.help("wrap the value in a struct you define: `struct Meters { value f64 }`");
+            }
+            self.cx.diags.push(d);
+            return None;
+        }
+        self.use_(p.id, p.span, Res::Symbol(id));
+        self.use_(t.id, t.span, Res::Symbol(id));
+        let arity = self.cx.r.type_arity.get(&id).copied().unwrap_or(0);
+        if arity != p.args.len() {
+            let names = self.cx.type_param_names(id);
+            self.cx.diags.push(
+                Diagnostic::error("E2025", "type_arity", format!("`{}` takes {arity} type arguments, but {} were given", path_text(p), p.args.len()))
+                    .primary(p.span, "")
+                    .help(format!("write `{}<{}>`", path_text(p), names.join(", "))),
+            );
+        }
+        let mut binders = Vec::new();
+        for a in &p.args {
+            match &a.kind {
+                TypeKind::Path(ap) if ap.segments.len() == 1 && ap.args.is_empty() => {
+                    binders.push(GenericParam { id: a.id, name: ap.segments[0].clone(), bounds: Vec::new() });
+                }
+                _ => self.cx.diags.push(
+                    Diagnostic::error("E2022", "specialized_impl", "impl type arguments must be type parameter names")
+                        .primary(a.span, "")
+                        .note("`impl I for Pair<A, B>` implements `I` for every `Pair`; specialized impls are not supported in v0"),
+                ),
+            }
+        }
+        self.binders(&binders);
+        Some(id)
+    }
+
+    /// ADR 0016: the impl lives in the module of the interface or of the type,
+    /// and there is at most one per (interface, type).
+    fn check_coherence(&mut self, item: &Item, i: &ImplDecl, iface: Option<SymbolId>, target: Option<SymbolId>) {
+        let (Some(iface), Some(target)) = (iface, target) else { return };
+        let (im, tm) = (self.cx.sym(iface).module, self.cx.sym(target).module);
+        if im != Some(self.m) && tm != Some(self.m) {
+            let iname = self.cx.sym(iface).name.clone();
+            let tname = self.cx.sym(target).name.clone();
+            let modname = |m: Option<ModuleId>| m.map(|m| self.cx.r.modules[m.0 as usize].name.clone()).unwrap_or_default();
+            let (imn, tmn) = (modname(im), modname(tm));
+            self.cx.diags.push(
+                Diagnostic::error("E2023", "impl_coherence", format!("`impl {iname} for {tname}` must be in module `{imn}` or `{tmn}`"))
+                    .primary(item.span.to(i.interface.span), "")
+                    .note("an impl lives with its interface or its type, so a program can never contain two different impls for the same pair (ADR 0016)")
+                    .help(format!("move this impl to `{imn}` or `{tmn}`, or wrap `{tname}` in a struct defined here")),
+            );
+        }
+        if let Some(prev) = self.cx.r.impls.iter().find(|x| x.interface == Some(iface) && x.target == Some(target)) {
+            let iname = self.cx.sym(iface).name.clone();
+            let tname = self.cx.sym(target).name.clone();
+            let _ = prev;
+            self.cx.diags.push(
+                Diagnostic::error("E2020", "duplicate_impl", format!("`{iname}` is implemented more than once for `{tname}`"))
+                    .primary(i.interface.span, "second implementation"),
+            );
+        }
+    }
+
+    fn impl_members(&mut self, item: &Item, i: &ImplDecl, iface: Option<SymbolId>, target: Option<SymbolId>) {
         let scope = self.scope;
         let mut methods = Vec::new();
         let mut seen: HashMap<String, SymbolId> = HashMap::new();
@@ -546,6 +669,20 @@ impl<'c, 'a> Walker<'c, 'a> {
                     self.ty(a);
                 }
                 let Some(res) = self.path_res(p) else { return };
+                if let Res::Symbol(id) = res
+                    && let Some(&arity) = self.cx.r.type_arity.get(&id)
+                    && arity != p.args.len()
+                {
+                    let name = path_text(p);
+                    self.cx.diags.push(
+                        Diagnostic::error(
+                            "E2025",
+                            "type_arity",
+                            format!("`{name}` takes {arity} type argument{}, but {} {} given", if arity == 1 { "" } else { "s" }, p.args.len(), if p.args.len() == 1 { "was" } else { "were" }),
+                        )
+                        .primary(p.span, ""),
+                    );
+                }
                 if let Res::Symbol(id) = res
                     && !self.cx.sym(id).kind.is_type()
                 {

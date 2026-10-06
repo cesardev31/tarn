@@ -114,7 +114,8 @@ impl<'a> Cx<'a> {
                 }
                 ItemKind::Struct(s) => {
                     let sym = self.item_symbol(&s.name, SymbolKind::Struct, m, item.id, scope, item.is_pub);
-                    self.declare(scope, sym, m, "E2002");
+                    let id = self.declare(scope, sym, m, "E2002");
+                    self.r.type_arity.insert(id, s.generics.len());
                     let mut seen: HashMap<&str, Span> = HashMap::new();
                     for f in &s.fields {
                         if let Some(prev) = seen.insert(&f.name.name, f.name.span) {
@@ -129,6 +130,7 @@ impl<'a> Cx<'a> {
                 ItemKind::Enum(e) => {
                     let sym = self.item_symbol(&e.name, SymbolKind::Enum, m, item.id, scope, item.is_pub);
                     let enum_id = self.declare(scope, sym, m, "E2002");
+                    self.r.type_arity.insert(enum_id, e.generics.len());
                     for v in &e.variants {
                         if !is_upper(&v.name.name) {
                             self.diags.push(
@@ -145,6 +147,7 @@ impl<'a> Cx<'a> {
                 ItemKind::Interface(i) => {
                     let sym = self.item_symbol(&i.name, SymbolKind::Interface, m, item.id, scope, item.is_pub);
                     let iface = self.declare(scope, sym, m, "E2002");
+                    self.r.type_arity.insert(iface, i.generics.len());
                     for f in &i.methods {
                         let sym = self.item_symbol(&f.name, SymbolKind::InterfaceMethod { interface: iface }, m, f.id, scope, item.is_pub);
                         self.add_member(iface, sym, m);
@@ -196,9 +199,10 @@ impl<'a> Cx<'a> {
         for item in &ast.items {
             let ItemKind::Fn(f) = &item.kind else { continue };
             let Some(owner) = &f.owner else { continue };
-            let Some(owner_id) = self.method_owner(owner, scope, f) else { continue };
+            let Some(owner_id) = self.method_owner(&owner.name, scope, f) else { continue };
             self.mark_used(owner_id);
-            self.r.tables[m.0 as usize].uses.insert(item.id, Use { res: Res::Symbol(owner_id), span: owner.span });
+            self.r.tables[m.0 as usize].uses.insert(item.id, Use { res: Res::Symbol(owner_id), span: owner.name.span });
+            self.check_owner_binders(owner, owner_id, f);
             let sym = self.item_symbol(&f.name, SymbolKind::Method { owner: owner_id }, m, f.id, scope, item.is_pub);
             self.add_member(owner_id, sym, m);
         }
@@ -231,6 +235,61 @@ impl<'a> Cx<'a> {
                 None
             }
         }
+    }
+
+    /// ADR 0015: `fn Pair<A, B>.m` — one plain binder per type parameter.
+    fn check_owner_binders(&mut self, owner: &tarn_ast::Owner, owner_id: SymbolId, f: &FnDecl) {
+        let arity = self.r.type_arity.get(&owner_id).copied().unwrap_or(0);
+        let given = owner.params.len();
+        if given != arity {
+            let tname = &owner.name.name;
+            let decl_params = self.type_param_names(owner_id);
+            let fix = if arity == 0 {
+                format!("fn {tname}.{}", f.name.name)
+            } else {
+                format!("fn {tname}<{}>.{}", decl_params.join(", "), f.name.name)
+            };
+            let span = owner.params.last().map(|p| owner.name.span.to(p.name.span)).unwrap_or(owner.name.span);
+            self.diags.push(
+                Diagnostic::error(
+                    "E2019",
+                    "owner_arity",
+                    format!("`{tname}` has {arity} type parameter{}, but the method declares {given}", if arity == 1 { "" } else { "s" }),
+                )
+                .primary(span, "")
+                .help(format!("write `{fix}`"))
+                .note("the names after the type are binders for its parameters, in order (ADR 0015)"),
+            );
+        }
+        for p in &owner.params {
+            if let Some(b) = p.bounds.first() {
+                self.diags.push(
+                    Diagnostic::error("E2021", "owner_binder_bound", "bounds are not allowed on method owner parameters")
+                        .primary(b.span, "")
+                        .help("declare the bound on the type itself: `struct Map<K: Hash, V>`")
+                        .note("conditional methods are not supported in v0 (ADR 0015)"),
+                );
+            }
+        }
+    }
+
+    /// Generic parameter names of a struct/enum/interface, from its declaration.
+    pub fn type_param_names(&self, id: SymbolId) -> Vec<String> {
+        let s = self.sym(id);
+        let (Some(m), Some(def)) = (s.module, s.def) else { return Vec::new() };
+        for item in &self.inputs[m.0 as usize].ast.items {
+            if item.id != def {
+                continue;
+            }
+            let gs = match &item.kind {
+                ItemKind::Struct(x) => &x.generics,
+                ItemKind::Enum(x) => &x.generics,
+                ItemKind::Interface(x) => &x.generics,
+                _ => return Vec::new(),
+            };
+            return gs.iter().map(|g| g.name.name.clone()).collect();
+        }
+        Vec::new()
     }
 
     pub fn mark_used(&mut self, id: SymbolId) {

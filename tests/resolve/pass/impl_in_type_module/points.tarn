@@ -1,0 +1,12 @@
+import "shapes"
+
+pub struct Point {
+    pub x f64
+}
+
+// Allowed: this module declares `Point`.
+impl shapes.Shape for Point {
+    fn area(&self) f64 {
+        return self.x
+    }
+}

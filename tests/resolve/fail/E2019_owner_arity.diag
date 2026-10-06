@@ -1,0 +1,33 @@
+error[E2019]: `Pair` has 2 type parameters, but the method declares 0
+  --> tests/resolve/fail/E2019_owner_arity.tarn:10:4
+   |
+10 | fn Pair.first(&self) A {
+   |    ^^^^
+   |
+   = note: the names after the type are binders for its parameters, in order (ADR 0015)
+   = help: write `fn Pair<A, B>.first`
+
+error[E2001]: cannot find `A` in this scope
+  --> tests/resolve/fail/E2019_owner_arity.tarn:10:22
+   |
+10 | fn Pair.first(&self) A {
+   |                      ^ not found
+
+error[E2019]: `Pair` has 2 type parameters, but the method declares 1
+  --> tests/resolve/fail/E2019_owner_arity.tarn:14:4
+   |
+14 | fn Pair<A>.only(&self) {
+   |    ^^^^^^
+   |
+   = note: the names after the type are binders for its parameters, in order (ADR 0015)
+   = help: write `fn Pair<A, B>.only`
+
+error[E2019]: `User` has 0 type parameters, but the method declares 1
+  --> tests/resolve/fail/E2019_owner_arity.tarn:17:4
+   |
+17 | fn User<T>.name(&self) {
+   |    ^^^^^^
+   |
+   = note: the names after the type are binders for its parameters, in order (ADR 0015)
+   = help: write `fn User.name`
+

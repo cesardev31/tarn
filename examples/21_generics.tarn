@@ -7,10 +7,16 @@ struct Pair<A, B> {
     second B
 }
 
+fn Pair<A, B>.swap(self) Pair<B, A> {
+    return Pair{first: self.second, second: self.first}
+}
+
 fn main() {
     n := identity(42)
     p := Pair{first: "port", second: 8080}
     nothing: Option<i64> := None
     print(n)
     print(p.second)
+    q := p.swap()
+    print(q.first)
 }

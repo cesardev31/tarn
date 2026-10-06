@@ -1,0 +1,44 @@
+struct Pair<A, B> {
+    first A
+    second B
+}
+
+enum Tree<T> {
+    Leaf(T)
+    Node(Tree<T>, Tree<T>)
+}
+
+fn Pair<A, B>.new(a A, b B) Pair<A, B> {
+    return Pair{first: a, second: b}
+}
+
+fn Pair<A, B>.first(&self) &A {
+    return &self.first
+}
+
+fn Pair<X, Y>.swap(self) Pair<Y, X> {
+    return Pair{first: self.second, second: self.first}
+}
+
+fn Pair<A, B>.map_first<C>(self, f fn(A) C) Pair<C, B> {
+    return Pair{first: f(self.first), second: self.second}
+}
+
+fn Tree<T>.leaf(value T) Tree<T> {
+    return Tree.Leaf(value)
+}
+
+interface Named {
+    fn name(&self) string
+}
+
+impl Named for Pair<K, V> {
+    fn name(&self) string {
+        return "pair"
+    }
+}
+
+fn main() {
+    p := Pair.new(1, "one")
+    q := p.swap()
+}

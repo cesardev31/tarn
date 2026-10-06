@@ -1,0 +1,26 @@
+interface Show {
+    fn show(&self) string
+}
+
+struct Pair<A, B> {
+    first A
+    second B
+}
+
+impl Show for Pair<i32, B> {
+    fn show(&self) string {
+        return "pair"
+    }
+}
+
+impl Show for i32 {
+    fn show(&self) string {
+        return "int"
+    }
+}
+
+impl Show for &Pair<A, B> {
+    fn show(&self) string {
+        return "ref"
+    }
+}

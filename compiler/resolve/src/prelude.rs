@@ -42,7 +42,13 @@ pub fn build(r: &mut Resolved) -> ScopeId {
         r.declare(scope, mk(b, SymbolKind::Builtin));
     }
     for t in PRELUDE_TYPES {
-        r.declare(scope, mk(t, SymbolKind::PreludeType));
+        let (id, _) = r.declare(scope, mk(t, SymbolKind::PreludeType));
+        let arity = match *t {
+            "Option" | "Channel" | "Sender" => 1,
+            "Result" => 2,
+            _ => 0,
+        };
+        r.type_arity.insert(id, arity);
     }
     for (v, parent) in PRELUDE_VARIANTS {
         let parent = r.scope(scope).get(parent).unwrap();
