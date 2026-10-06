@@ -54,10 +54,23 @@ pub fn load(entry: &Path) -> Result<(Program, Vec<Diagnostic>), String> {
 
 /// Read open editor buffers before falling back to disk. Paths must be absolute.
 pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>) -> Result<(Program, Vec<Diagnostic>), String> {
+    load_editor_sources(entry, overlays, false)
+}
+
+fn official_stdlib_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../stdlib/{name}/{name}.tarn"))
+}
+
+fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, editor: bool) -> Result<(Program, Vec<Diagnostic>), String> {
+    let official_entry = if editor {
+        entry.canonicalize().ok().and_then(|entry| ["core", "net", "string"].into_iter().find(|name|
+            official_stdlib_path(name).canonicalize().ok().as_ref() == Some(&entry)))
+    } else { None };
     let root = entry.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     let stem = entry.file_stem().and_then(|s| s.to_str()).ok_or("invalid file name")?.to_string();
     // Entry filenames do not confer reserved stdlib module identity.
-    let stem = if matches!(stem.as_str(), "core" | "net") { format!("entry/{stem}") } else { stem };
+    let stem = if let Some(name) = official_entry { name.to_string() }
+        else if matches!(stem.as_str(), "core" | "net") { format!("entry/{stem}") } else { stem };
     let mut sources = SourceMap::new();
     let mut modules: Vec<(String, Module)> = Vec::new();
     let mut diags = Vec::new();
@@ -67,7 +80,15 @@ pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pat
         if modules.iter().any(|(n, _)| *n == name) {
             continue;
         }
-        let text = if matches!(name.as_str(), "core" | "net") {
+        let official_path = official_stdlib_path(&name).canonicalize().ok();
+        let editor_text = if editor && (path != entry || official_entry == Some(name.as_str())) && matches!(name.as_str(), "core" | "net" | "string") {
+            official_path.as_ref().and_then(|p| overlays.get(p)).cloned()
+        } else { None };
+        let has_editor_text = editor_text.is_some();
+        let text = if let Some(text) = editor_text {
+            if matches!(name.as_str(), "core" | "net") { trusted_modules.insert(name.clone()); }
+            text
+        } else if matches!(name.as_str(), "core" | "net") {
             trusted_modules.insert(name.clone());
             if name == "core" { CORE_SOURCE.to_string() } else { NET_SOURCE.to_string() }
         } else {
@@ -77,7 +98,9 @@ pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pat
                 None => std::fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?,
             }
         };
-        let display = if trusted_modules.contains(&name) { format!("stdlib/{name}/{name}.tarn") } else { path.strip_prefix(".").unwrap_or(&path).display().to_string() };
+        let display = if editor && (official_entry == Some(name.as_str()) || has_editor_text) {
+            official_path.as_ref().unwrap_or(&path).display().to_string()
+        } else if trusted_modules.contains(&name) { format!("stdlib/{name}/{name}.tarn") } else { path.strip_prefix(".").unwrap_or(&path).display().to_string() };
         let id = sources.add(display, text);
         let res = tarn_parser::parse_file(id, sources.file(id));
         diags.extend(res.diagnostics);
@@ -95,7 +118,10 @@ pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pat
     // `core` is always part of the program (ADR 0020). Embedded in the
     // binary so the compiler is self-contained.
     if !modules.iter().any(|(n, _)| n == "core") {
-        let id = sources.add("stdlib/core/core.tarn", CORE_SOURCE);
+        let official_core = official_stdlib_path("core").canonicalize().ok();
+        let buffer = if editor { official_core.as_ref().and_then(|p| overlays.get(p)) } else { None };
+        let display = if buffer.is_some() { official_core.as_ref().unwrap().display().to_string() } else { "stdlib/core/core.tarn".to_string() };
+        let id = sources.add(display, buffer.map(String::as_str).unwrap_or(CORE_SOURCE));
         let res = tarn_parser::parse_file(id, sources.file(id));
         diags.extend(res.diagnostics);
         modules.push(("core".to_string(), res.module));
@@ -112,7 +138,16 @@ pub fn check(entry: &Path) -> Result<CheckResult, String> {
 
 /// Check a program including unsaved buffers of imported modules.
 pub fn check_with_overlays(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>) -> Result<CheckResult, String> {
-    let (program, mut diagnostics) = load_with_overlays(entry, overlays)?;
+    check_loaded(load_with_overlays(entry, overlays)?)
+}
+
+/// Editor-only checking of this checkout's official stdlib source buffers.
+/// Normal CLI entry files never gain intrinsic authority from their path/name.
+pub fn check_editor_with_overlays(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>) -> Result<CheckResult, String> {
+    check_loaded(load_editor_sources(entry, overlays, true)?)
+}
+
+fn check_loaded((program, mut diagnostics): (Program, Vec<Diagnostic>)) -> Result<CheckResult, String> {
     let mut resolved = None;
     let mut typed = None;
     let mut ir = None;

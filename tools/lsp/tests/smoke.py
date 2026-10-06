@@ -78,3 +78,48 @@ with tempfile.TemporaryDirectory(prefix='tarn lsp ñ ') as directory:
     assert definition['uri'] == child.as_uri(), definition
     assert child.read_text() == 'pub fn get() i32 { return 1 }\n'
 print('PASS: stdio lifecycle, unsaved diagnostics/clearing, UTF-16, hover, definition, imported buffers, unchanged disk')
+
+# Official stdlib buffers keep their declaration identities, including intrinsics.
+# A user file named net.tarn must not acquire that authority.
+for module in ('core', 'net', 'string'):
+    entry = ROOT / 'stdlib' / module / f'{module}.tarn'
+    text = entry.read_text()
+    out = exchange([{'id': 1, 'method': 'initialize', 'params': {}},
+                    opened(entry.as_uri(), text),
+                    {'id': 2, 'method': 'shutdown'}, {'method': 'exit'}])
+    diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics']
+    assert diagnostics and diagnostics[-1] == [], (module, diagnostics)
+    assert entry.read_text() == text
+
+with tempfile.TemporaryDirectory(prefix='tarn untrusted stdlib ') as directory:
+    entry = Path(directory) / 'net.tarn'
+    text = 'extern "intrinsic" fn injected() i32\nfn main() {}\n'
+    entry.write_text(text)
+    out = exchange([{'id': 1, 'method': 'initialize', 'params': {}},
+                    opened(entry.as_uri(), text),
+                    {'id': 2, 'method': 'shutdown'}, {'method': 'exit'}])
+    diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics']
+    assert any(d.get('code') == 'E2027' for d in diagnostics[-1]), diagnostics
+net = ROOT / 'stdlib/net/net.tarn'
+text = net.read_text()
+out = exchange([{'id': 1, 'method': 'initialize', 'params': {}},
+                opened(net.as_uri(), text),
+                changed(net.as_uri(), text + '\nfn lsp_probe() { missing_lsp_value }\n', 2),
+                changed(net.as_uri(), text, 3),
+                {'id': 2, 'method': 'shutdown'}, {'method': 'exit'}])
+diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics']
+assert any(d.get('code') == 'E2001' for d in diagnostics[1]), diagnostics
+assert diagnostics[-1] == [] and net.read_text() == text
+
+with tempfile.TemporaryDirectory(prefix='tarn stdlib overlay ') as directory:
+    entry = Path(directory) / 'main.tarn'
+    main = 'import "net"\nfn main() { print(net.lsp_probe()) }\n'
+    entry.write_text(main)
+    out = exchange([{'id': 1, 'method': 'initialize', 'params': {}},
+                    opened(net.as_uri(), text + '\npub fn lsp_probe() i32 { return 42 }\n'),
+                    opened(entry.as_uri(), main),
+                    {'id': 2, 'method': 'shutdown'}, {'method': 'exit'}])
+    diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics' and m['params']['uri'] == entry.as_uri()]
+    assert diagnostics and diagnostics[-1] == [], diagnostics
+    assert net.read_text() == text
+print('PASS: official stdlib buffers, live errors, imported overlays and untrusted intrinsic rejection')

@@ -32,6 +32,10 @@ including unsaved imported buffers, with UTF-16 positions. It supports hover
 (local/parameter types and symbol information) and go to definition for
 resolved names. Only file-backed `.tarn` documents are supported. Each open
 file is checked as an entry; its directory remains the driver's module root.
+When editing this compiler checkout's official `core`, `net` and `string`
+sources, the server preserves their stdlib module identities and uses unsaved
+buffers for imported declarations. User files with those names do not gain
+intrinsic authority. CLI checking retains its normal embedded-stdlib boundary.
 Checks are synchronous and recheck all open entries; workspace-wide indexing,
 completion, rename, formatting and incremental analysis are future work.
 Run `python3 tools/lsp/tests/smoke.py` after building to verify stdio integration.
