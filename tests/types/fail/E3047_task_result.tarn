@@ -1,0 +1,6 @@
+fn launch<T: Share>(value T) {
+    task := spawn move fn() T { return value }
+    task.join()
+}
+fn main() {
+}

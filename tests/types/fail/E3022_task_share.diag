@@ -1,0 +1,8 @@
+error[E3022]: `Task<i32>` does not implement `Share`
+ --> tests/types/fail/E3022_task_share.tarn:5:5
+  |
+5 |     shared(&task)
+  |     ^^^^^^^^^^^^^ required by a bound `Share` here
+  |
+  = help: `Task<i32>` must satisfy `Share` structurally; generic parameters require an explicit bound
+

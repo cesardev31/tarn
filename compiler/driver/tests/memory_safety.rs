@@ -6,6 +6,9 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("task capture requires transfer bound", Some("E3047"), "fn launch<T>(value T) { t := spawn move fn() { value }\n t.join() }\nfn main() {}"),
+    ("share bound does not grant result transfer", Some("E3047"), "fn launch<T: Share>(value T) { t := spawn move fn() T { return value }\n t.join() }\nfn main() {}"),
+    ("owned structural transfer capture", None, "fn main() { value := Buffer.new()\n task := spawn move fn() Buffer { return value }\n result := task.join()\n read(&result) }"),
     ("task double join", Some("E4001"), "fn main() { t := spawn move fn() i64 { return 42 }\n t.join()\n t.join() }") ,
     ("task handle use after move", Some("E4001"), "fn main() { t := spawn move fn() i64 { return 42 }\n u := t\n t.join()\n u.join() }") ,
     ("task capture use after move", Some("E4001"), "fn main() { s := \"owned\"\n t := spawn move fn() string { return s }\n print(s)\n t.join() }") ,

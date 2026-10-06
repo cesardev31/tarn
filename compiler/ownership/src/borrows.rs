@@ -135,7 +135,7 @@ impl<'a> Fx<'a> {
             Fx { f, t, prov, loans: Vec::new(), loan_at: HashMap::new(), nl: f.locals.len(), live: Vec::new(), live_out: Vec::new(), diags: Vec::new(), reported: HashSet::new() };
         // Placeholder loans: one per reference-holding parameter.
         for (i, l) in f.params().enumerate() {
-            if may_hold_refs(&f.local(l).ty) {
+            if may_hold_refs(&f.local(l).ty) || t.decls.contains_task(&f.local(l).ty) {
                 let kind = if matches!(f.local(l).ty, Ty::Ref(true, _)) { LoanKind::Mutable } else { LoanKind::Shared };
                 fx.loans.push(Loan { kind, place: Place::local(l).project(Proj::Deref), block: BlockId(0), stmt: 0, span: f.local(l).span, holder: l, param: Some(i) });
             }
@@ -202,7 +202,7 @@ impl<'a> Fx<'a> {
     }
 
     /// Backward transfer of one statement: `live` goes from after to before.
-    fn stmt_back(kind: &StatementKind, live: &mut BitSet) {
+    fn stmt_back(&self, kind: &StatementKind, live: &mut BitSet) {
         match kind {
             StatementKind::Assign(dest, rv) => {
                 if dest.proj.is_empty() {
@@ -214,7 +214,10 @@ impl<'a> Fx<'a> {
             }
             StatementKind::StorageLive(l) | StatementKind::StorageDead(l) => live.remove(l.0 as usize),
             // Dropping releases ownership; it does not read references.
-            StatementKind::Drop(p) => Self::place_uses(p, live),
+            StatementKind::Drop(p) => {
+                Self::place_uses(p, live);
+                if self.t.decls.contains_task(&self.f.local(p.local).ty) { Self::read_uses(p, live); }
+            },
         }
     }
 
@@ -262,7 +265,7 @@ impl<'a> Fx<'a> {
                 }
                 Self::term_back(&self.f.blocks[b].term, &mut live);
                 for s in self.f.blocks[b].stmts.iter().rev() {
-                    Self::stmt_back(&s.kind, &mut live);
+                    self.stmt_back(&s.kind, &mut live);
                 }
                 if live_in[b] != live {
                     live_in[b] = live;
@@ -283,7 +286,7 @@ impl<'a> Fx<'a> {
             Self::term_back(&blk.term, &mut live);
             points[blk.stmts.len()] = live.clone();
             for (i, s) in blk.stmts.iter().enumerate().rev() {
-                Self::stmt_back(&s.kind, &mut live);
+                self.stmt_back(&s.kind, &mut live);
                 points[i] = live.clone();
             }
             self.live.push(points);
@@ -337,7 +340,7 @@ impl<'a> Fx<'a> {
     fn write_holds(&self, h: &mut Holds, dest: &Place, inflow: BitSet) {
         let d = dest.local.0 as usize;
         if dest.proj.is_empty() {
-            h[d] = if may_hold_refs(&self.f.local(dest.local).ty) { inflow } else { BitSet::new(self.loans.len()) };
+            h[d] = if may_hold_refs(&self.f.local(dest.local).ty) || self.t.decls.contains_task(&self.f.local(dest.local).ty) { inflow } else { BitSet::new(self.loans.len()) };
         } else if !dest.proj.contains(&Proj::Deref) {
             h[d].union(&inflow);
         }
@@ -348,7 +351,7 @@ impl<'a> Fx<'a> {
     fn call_inflow(&self, h: &Holds, callee: &Callee, args: &[Operand], dest: &Place) -> BitSet {
         let mut inflow = BitSet::new(self.loans.len());
         let dty = &self.f.local(dest.local).ty;
-        if dest.proj.is_empty() && !may_hold_refs(dty) {
+        if dest.proj.is_empty() && !may_hold_refs(dty) && !self.t.decls.contains_task(dty) {
             return inflow;
         }
         let positions: Option<Provenance> = match callee {
@@ -357,6 +360,7 @@ impl<'a> Fx<'a> {
                 Elided::Prov(p) => p,
                 _ => Vec::new(),
             }),
+            Callee::TaskSpawn { scoped: true, .. } => None,
             Callee::Builtin(_) | Callee::TaskSpawn { .. } => Some(Vec::new()),
             // Source calls without contracts are rejected with E3040. Keep
             // manually constructed/recovery IR conservative as well.
@@ -373,6 +377,13 @@ impl<'a> Fx<'a> {
         inflow
     }
 
+    fn consume_task_operand(&self, h: &mut Holds, operand: &Operand) {
+        if let Operand::Move(place) = operand
+            && place.proj.is_empty() && self.t.decls.contains_task(&self.f.local(place.local).ty) {
+            h[place.local.0 as usize] = BitSet::new(self.loans.len());
+        }
+    }
+
     fn block_forward(&mut self, b: usize, h: &mut Holds, check: bool) {
         let blk = &self.f.blocks[b];
         for (si, s) in blk.stmts.iter().enumerate() {
@@ -382,10 +393,19 @@ impl<'a> Fx<'a> {
             match &s.kind {
                 StatementKind::Assign(dest, rv) => {
                     let inflow = self.rvalue_inflow(h, b, si, rv);
+                    match rv {
+                        Rvalue::Use(o) | Rvalue::Cast(o, _) | Rvalue::Coerce(_, o, _) => self.consume_task_operand(h, o),
+                        Rvalue::Aggregate(_, operands) => for o in operands { self.consume_task_operand(h, o); },
+                        _ => {},
+                    }
                     self.write_holds(h, dest, inflow);
                 }
                 StatementKind::StorageLive(l) | StatementKind::StorageDead(l) => h[l.0 as usize] = BitSet::new(self.loans.len()),
-                StatementKind::Drop(_) => {}
+                StatementKind::Drop(place) => {
+                    if place.proj.is_empty() && self.t.decls.contains_task(&self.f.local(place.local).ty) {
+                        h[place.local.0 as usize] = BitSet::new(self.loans.len());
+                    }
+                }
             }
         }
         if check {
@@ -393,6 +413,7 @@ impl<'a> Fx<'a> {
         }
         if let Terminator::Call { callee, args, dest, .. } = &blk.term {
             let inflow = self.call_inflow(h, callee, args, dest);
+            for operand in args { self.consume_task_operand(h, operand); }
             self.write_holds(h, dest, inflow);
         }
     }
@@ -502,6 +523,13 @@ impl<'a> Fx<'a> {
     fn check_stmt(&mut self, b: usize, i: usize, kind: &StatementKind, span: Span, h: &Holds) {
         match kind {
             StatementKind::Assign(dest, rv) => {
+                if matches!(rv, Rvalue::Aggregate(tarn_ir::Aggregate::Closure(..), _)) {
+                    let inflow = self.rvalue_inflow(h, b, i, rv);
+                    if inflow.iter().any(|l| self.f.local(self.loans[l].place.local).kind == tarn_ir::LocalKind::TaskScopeWitness) {
+                        self.diags.push(Diagnostic::error("E4207", "scoped_task_escape", "a scoped task handle cannot be captured by another callable")
+                            .primary(span, "join the task inside its scope before capturing its result"));
+                    }
+                }
                 self.rvalue_accesses(b, i, rv, span, h);
                 self.access(b, i, dest, Access::Write, span, h, true);
                 // Storing a borrow of a local into memory behind a reference
@@ -593,7 +621,7 @@ impl<'a> Fx<'a> {
                         Operand::Move(p) => self.access(b, i, p, Access::Move, span, h, false),
                         Operand::Const(_) => {}
                     }
-                    if *spawn {
+                    if *spawn && !matches!(callee, Callee::TaskSpawn { scoped: true, .. }) {
                         let mut held = BitSet::new(self.loans.len());
                         self.holds_of(h, a, &mut held);
                         if held.iter().next().is_some() {
@@ -603,6 +631,13 @@ impl<'a> Fx<'a> {
                                     .note("v0 does not track borrows across tasks; pass owned values to `spawn`"),
                             );
                         }
+                    }
+                }
+                if !matches!(callee, Callee::Intrinsic(name) if name == "Task.join") && !matches!(callee, Callee::TaskSpawn { .. }) {
+                    if args.iter().filter_map(operand_place).any(|p| self.t.decls.contains_task(&self.f.local(p.local).ty)
+                        && h[p.local.0 as usize].iter().any(|l| self.f.local(self.loans[l].place.local).kind == tarn_ir::LocalKind::TaskScopeWitness)) {
+                        self.diags.push(Diagnostic::error("E4207", "scoped_task_escape", "a scoped task handle must complete inside its creating scope")
+                            .primary(tspan, "join the handle locally before passing its result"));
                     }
                 }
                 self.access(b, i, dest, Access::Write, tspan, h, true);
@@ -632,7 +667,11 @@ impl<'a> Fx<'a> {
             }
             if storage_loan(ln) && capture_error { continue; }
             let name = place_name(self.f, self.t, &ln.place);
-            let d = if storage_loan(ln) {
+            let d = if self.f.local(ln.place.local).kind == tarn_ir::LocalKind::TaskScopeWitness {
+                Diagnostic::error("E4207", "scoped_task_escape", "a scoped task handle cannot escape its creating scope")
+                    .primary(span, "join the task inside its scope and return its owned result")
+                    .secondary(ln.span, "the task starts in this scope")
+            } else if storage_loan(ln) {
                 Diagnostic::error("E4205", "closure_escapes_borrow", "borrowed closure cannot escape its stack environment")
                     .primary(span, "the closure escapes here")
                     .secondary(ln.span, "this environment ends when its creating scope exits")

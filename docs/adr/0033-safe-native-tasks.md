@@ -179,3 +179,34 @@ implicit completion, conditional initialization, overwrite/self-assignment,
 exact capture/result destruction traces, worker SIGABRT, corrupted metadata and
 both mutation corpora. Runtime tests assert distinct pthread identity, repeated
 joins and deterministic injected allocation/create/join/self-join faults.
+
+## 11B capability implementation checkpoint
+
+The initial semantic capability layer is implemented; 11B is not complete.
+`Transfer` and `Share` use core declaration identities and existing generic bound
+syntax. Queries substitute declaration fields and payloads, preserve declaration
+order, reject recursive cycles, and stop at depth 64 or 4096 visited nodes.
+Numbers, bool, string and zero-size primitive values qualify for both. Arrays
+and ADTs require every component; shared references require Share referents,
+mutable references require Transfer referents and are not Share. Neither
+capability implies Copy. Task<R> requires Transfer for R and is never Share.
+Unknown opaque types and erased callables default to neither. A declaration
+catalog entry can explicitly grant native or dynamic capability evidence; no
+source-level annotation or new native API is introduced at this checkpoint.
+Ordinary impl declarations cannot grant these semantic capabilities.
+
+Unscoped spawn checks owned captures and results after inference defaults.
+Known owned callable captures use their creation-site component evidence;
+reassignment discards that evidence conservatively. A signature alone never
+proves capture safety. Generic bounds are checked through the existing obligation
+mechanism. Existing unscoped loan and result-escape rejections remain in force.
+A generic Transfer bound is not proof of loan-free storage: unscoped spawn of an
+unknown reference-bearing parameter remains rejected. Capability evidence for
+known owned callable captures is available at spawn; erased callable generic
+bounds and reusable callable Share derivation remain conservative rejections.
+
+Scoped completion records, scoped loan retention and join-shortened worker loans
+remain unimplemented. In particular, lexical scope still does not authorize
+borrowed task captures. The next implementation step must connect explicit
+completion obligations to ordinary loan flow before accepting scoped borrowing.
+No 11C synchronization work is authorized by this checkpoint.

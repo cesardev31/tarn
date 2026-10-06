@@ -183,12 +183,17 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
             }
         }
         for b in &f.blocks {
-            if let Terminator::Call { callee: Callee::TaskSpawn { worker, drop_result, .. }, args, dest, spawn, .. } = &b.term {
+            if let Terminator::Call { callee: Callee::TaskSpawn { worker, drop_result, scoped, .. }, args, dest, spawn, .. } = &b.term {
                 let valid = p.functions.get(worker.0 as usize).zip(p.functions.get(drop_result.0 as usize)).is_some_and(|(wf, df)| {
                     wf.decl.param_count == 1 && df.decl.param_count == 1 && df.decl.ret == Ty::Void
                     && wf.decl.locals.get(1).is_some_and(|l| matches!(&l.ty, Ty::Fn(_, ps, ret) if ps.is_empty() && **ret == wf.decl.ret))
                     && df.decl.locals.get(1).is_some_and(|l| l.ty == wf.decl.ret)
-                    && args.len() == 1 && match &args[0] { Operand::Move(p) => place_ty(&f.decl, t, p), _ => None } == wf.decl.locals.get(1).map(|l| l.ty.clone())
+                    && args.len() == if *scoped { 2 } else { 1 }
+                    && (!*scoped || matches!(args.get(1), Some(Operand::Copy(p)) if place_ty(&f.decl, t, p) == Some(Ty::Ref(false, Box::new(Ty::Bool)))
+                        && f.blocks.iter().flat_map(|b| &b.stmts).any(|statement| matches!(&statement.op,
+                            Op::Plain(crate::StatementKind::Assign(dest, Rvalue::Ref(false, scope)))
+                            if dest == p && scope.proj.is_empty() && f.decl.locals.get(scope.local.0 as usize).is_some_and(|l| l.kind == LocalKind::TaskScopeWitness && l.ty == Ty::Bool)))))
+                    && match &args[0] { Operand::Move(p) => place_ty(&f.decl, t, p), _ => None } == wf.decl.locals.get(1).map(|l| l.ty.clone())
                     && matches!(place_ty(&f.decl, t, dest), Some(Ty::Adt(id, ts)) if Some(id) == t.decls.task && ts == vec![wf.decl.ret.clone()])
                 });
                 if !valid || !spawn { err("invalid task worker/result metadata".into()); }

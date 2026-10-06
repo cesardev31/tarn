@@ -1,0 +1,5 @@
+struct Resource {}
+impl Transfer for Resource {
+}
+fn main() {
+}

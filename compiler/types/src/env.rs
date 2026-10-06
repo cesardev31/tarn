@@ -89,6 +89,9 @@ pub struct Prelude {
 #[derive(Default)]
 pub struct Decls {
     pub task: Option<SymbolId>,
+    pub transfer: Option<SymbolId>,
+    pub share: Option<SymbolId>,
+    pub native_capabilities: HashMap<SymbolId, crate::NativeCapabilities>,
     /// Interface declaration order, plus resolved implementation IDs.
     pub interfaces: HashMap<SymbolId, Vec<SymbolId>>,
     pub interface_methods: HashMap<SymbolId, (SymbolId, usize)>,
@@ -138,7 +141,7 @@ impl<'a> Env<'a> {
             panic: get("panic"),
             channel_fn: get("channel"),
         };
-        let decls = Decls { task: ps.get("Task"), copy: prelude.copy, ..Decls::default() };
+        let decls = Decls { task: ps.get("Task"), transfer: ps.get("Transfer"), share: ps.get("Share"), copy: prelude.copy, ..Decls::default() };
         let mut env = Env { inputs, r, decls, prelude, diags: Vec::new() };
         env.collect();
         for imp in &r.impls {

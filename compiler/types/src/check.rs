@@ -19,12 +19,17 @@ pub struct FnCx<'e, 'a> {
     pub tables: TypeTables,
     rets: Vec<Ty>,
     unsafe_depth: u32,
+    task_scope_depth: u32,
     /// Integer literals to range-check once types are known: (span, value, type).
     literals: Vec<(Span, i128, Ty)>,
     /// Generic arguments that must implement an interface: (type, interface, span).
     obligations: Vec<(Ty, SymbolId, Span)>,
     /// Arguments of `print` to check once types are known.
     printables: Vec<(Ty, Span)>,
+    task_capabilities: Vec<(Ty, crate::Capability, Span, String)>,
+    scoped_results: Vec<(Ty, Span)>,
+    callable_transfer: HashMap<SymbolId, Vec<Ty>>,
+    callable_share: HashMap<SymbolId, Vec<Ty>>,
     /// Bindings whose type must be fully inferred: (symbol, name span).
     inferred_lets: Vec<(SymbolId, Span)>,
     /// Operand of the `&`/`&mut` being checked (slices are legal there).
@@ -64,9 +69,14 @@ impl<'e, 'a> FnCx<'e, 'a> {
             tables: TypeTables::default(),
             rets: Vec::new(),
             unsafe_depth: 0,
+            task_scope_depth: 0,
             literals: Vec::new(),
             obligations: Vec::new(),
             printables: Vec::new(),
+            task_capabilities: Vec::new(),
+            scoped_results: Vec::new(),
+            callable_transfer: HashMap::new(),
+            callable_share: HashMap::new(),
             inferred_lets: Vec::new(),
             borrowed: None,
         }
@@ -141,6 +151,12 @@ impl<'e, 'a> FnCx<'e, 'a> {
     }
 
     fn implements(&self, t: &Ty, iface: SymbolId) -> bool {
+        if Some(iface) == self.env.decls.transfer {
+            return self.env.decls.capability(&self.infer.zonk(t), crate::Capability::Transfer);
+        }
+        if Some(iface) == self.env.decls.share {
+            return self.env.decls.capability(&self.infer.zonk(t), crate::Capability::Share);
+        }
         match self.infer.shallow(t) {
             Ty::Adt(s, _) => self.env.has_impl(iface, s),
             _ if Some(iface) == self.env.prelude.copy => self.is_copy(t),
@@ -236,11 +252,29 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 }
             }
         }
+        for (ty, span) in std::mem::take(&mut self.scoped_results) {
+            if self.env.decls.may_contain_references(&self.infer.zonk(&ty)) {
+                self.err(Diagnostic::error("E3049", "scoped_task_borrowed_result", "scoped task results containing references are not supported yet")
+                    .primary(span, "return owned data from the worker")
+                    .note("join completes the worker; it does not by itself establish result provenance"));
+            }
+        }
+        for (ty, cap, span, context) in std::mem::take(&mut self.task_capabilities) {
+            let ty = self.infer.zonk(&ty);
+            if !self.env.decls.capability(&ty, cap) {
+                let shown = self.show(&ty);
+                self.err(Diagnostic::error("E3047", "task_capability_required", format!("{context} of type `{shown}` requires `{cap:?}`"))
+                    .primary(span, "cannot cross this native task boundary")
+                    .help("use structurally capable owned data or declare the required generic bound; unknown native and erased callable values need explicit evidence"));
+            }
+        }
         for (t, iface, span) in std::mem::take(&mut self.obligations) {
             let z = self.infer.zonk(&t);
             if !self.implements(&z, iface) && !matches!(z, Ty::Var(_)) {
                 let (tn, iname) = (self.show(&z), self.env.r.symbol(iface).name.clone());
-                let help = if Some(iface) == self.env.prelude.copy {
+                let help = if Some(iface) == self.env.decls.transfer || Some(iface) == self.env.decls.share {
+                    format!("`{tn}` must satisfy `{iname}` structurally; generic parameters require an explicit bound")
+                } else if Some(iface) == self.env.prelude.copy {
                     format!("`{tn}` is not a copy type; copy types are numbers, `bool`, `&T` and types declared with `copy`")
                 } else if matches!(z, Ty::Adt(..)) {
                     format!("add `impl {iname} for {tn}` in the module of `{iname}` or of `{tn}`")
@@ -316,11 +350,24 @@ impl<'e, 'a> FnCx<'e, 'a> {
                             Diagnostic::error("E3001", "type_mismatch", format!("`{}` would have type `void`", name.name)).primary(value.span, "this expression produces no value"),
                         );
                     }
+                    if let Some(evidence) = self.callable_transfer_evidence(value) {
+                        self.callable_transfer.insert(sym, evidence);
+                    }
+                    if matches!(self.infer.shallow(&t), Ty::Fn(CallMode::Shared, ..))
+                        && let Some(evidence) = self.callable_capability_evidence(value, crate::Capability::Share) {
+                        self.callable_share.insert(sym, evidence);
+                    }
                     self.locals.insert(sym, t);
                     self.inferred_lets.push((sym, name.span));
                 }
             }
             StmtKind::Assign { target, value } => {
+                // Assignment can be conditional; discard creation-site evidence
+                // rather than guessing the reaching callable environment.
+                if let Some(Res::Symbol(symbol)) = self.res(target.id) {
+                    self.callable_transfer.remove(&symbol);
+                    self.callable_share.remove(&symbol);
+                }
                 let tt = self.expr(target, None);
                 self.require_mut(target, false);
                 let vt = self.expr(value, Some(&tt));
@@ -362,7 +409,12 @@ impl<'e, 'a> FnCx<'e, 'a> {
             StmtKind::If(i) => self.if_stmt(i),
             StmtKind::For(f) => self.for_stmt(s, f),
             StmtKind::Match(m) => self.match_stmt(m),
-            StmtKind::Block(b) | StmtKind::Scope(b) => self.stmts(&b.stmts),
+            StmtKind::Block(b) => self.stmts(&b.stmts),
+            StmtKind::Scope(b) => {
+                self.task_scope_depth += 1;
+                self.stmts(&b.stmts);
+                self.task_scope_depth -= 1;
+            },
             StmtKind::Unsafe(b) => {
                 self.unsafe_depth += 1;
                 self.stmts(&b.stmts);
@@ -828,6 +880,43 @@ impl<'e, 'a> FnCx<'e, 'a> {
         }
     }
 
+    /// Snapshot evidence for a known callable value. Erased signatures alone
+    /// never grant transfer authority, and reassignment invalidates evidence.
+    fn callable_transfer_evidence(&self, expression: &Expr) -> Option<Vec<Ty>> {
+        self.callable_capability_evidence(expression, crate::Capability::Transfer)
+    }
+
+    fn callable_capability_evidence(&self, expression: &Expr, cap: crate::Capability) -> Option<Vec<Ty>> {
+        match &expression.kind {
+            ExprKind::Paren(inner) => self.callable_capability_evidence(inner, cap),
+            ExprKind::Closure { .. } => {
+                if cap == crate::Capability::Share && !matches!(self.tables.expr_types.get(&expression.id).map(|t| self.infer.shallow(t)), Some(Ty::Fn(CallMode::Shared, ..))) { return None; }
+                let mut evidence = Vec::new();
+                for (symbol, mode) in self.tables.closure_captures.get(&expression.id)? {
+                    let ty = self.locals.get(symbol)?.clone();
+                    let required = if *mode == crate::CaptureMode::SharedBorrow { crate::Capability::Share } else { cap };
+                    if matches!(self.infer.shallow(&ty), Ty::Fn(..)) {
+                        let nested = if required == crate::Capability::Share { self.callable_share.get(symbol)? } else { self.callable_transfer.get(symbol)? };
+                        evidence.extend(nested.iter().map(|t| if *mode == crate::CaptureMode::SharedBorrow { Ty::Ref(false, Box::new(t.clone())) } else { t.clone() }));
+                    } else {
+                        evidence.push(match mode {
+                            crate::CaptureMode::Move => ty,
+                            crate::CaptureMode::SharedBorrow => Ty::Ref(false, Box::new(ty)),
+                            crate::CaptureMode::MutableBorrow => Ty::Ref(true, Box::new(ty)),
+                        });
+                    }
+                    if evidence.len() > 4096 { return None; }
+                }
+                Some(evidence)
+            }
+            _ => match self.res(expression.id) {
+                Some(Res::Symbol(symbol)) if matches!(self.kind(symbol), SymbolKind::Function) => Some(Vec::new()),
+                Some(Res::Symbol(symbol)) => if cap == crate::Capability::Share { self.callable_share.get(&symbol).cloned() } else { self.callable_transfer.get(&symbol).cloned() },
+                _ => None,
+            },
+        }
+    }
+
     /// An identifier or a static path used as a value.
     fn name_value(&mut self, e: &Expr) -> Ty {
         match self.res(e.id) {
@@ -981,9 +1070,45 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 let ty = self.expr(operand, None);
                 match self.infer.shallow(&ty) {
                     Ty::Fn(_, params, result) if params.is_empty() => {
-                        if !matches!(operand.kind, ExprKind::Closure { owned: true, .. }) {
+                        if self.task_scope_depth == 0 && !matches!(operand.kind, ExprKind::Closure { owned: true, .. }) {
                             self.err(Diagnostic::error("E4206", "reference_to_spawned_task", "unscoped spawn requires an owned closure")
                                 .primary(operand.span, "use `move fn` to transfer captures"));
+                        }
+                        self.task_capabilities.push((*result.clone(), crate::Capability::Transfer, operand.span, "task result".into()));
+                        if self.task_scope_depth > 0 {
+                            self.tables.scoped_spawns.insert(e.id);
+                            self.scoped_results.push((*result.clone(), operand.span));
+                            if let Some(captures) = self.tables.closure_captures.get(&operand.id) {
+                                for (symbol, mode) in captures {
+                                    let ty = self.locals.get(symbol).cloned().unwrap_or(Ty::Error);
+                                    let cap = if *mode == crate::CaptureMode::SharedBorrow { crate::Capability::Share } else { crate::Capability::Transfer };
+                                    let name = self.env.r.symbol(*symbol).name.clone();
+                                    let evidence = if cap == crate::Capability::Share { self.callable_share.get(symbol) } else { self.callable_transfer.get(symbol) };
+                                    if matches!(self.infer.shallow(&ty), Ty::Fn(..)) && let Some(evidence) = evidence {
+                                        for component in evidence {
+                                            self.task_capabilities.push((component.clone(), cap, operand.span, format!("scoped callable capture `{name}`")));
+                                        }
+                                    } else {
+                                        self.task_capabilities.push((ty, cap, operand.span, format!("scoped capture `{name}`")));
+                                    }
+                                }
+                            }
+                        }
+                        if self.task_scope_depth == 0 && let Some(captures) = self.tables.owned_captures.get(&operand.id) {
+                            for (symbol, ty) in captures {
+                                let name = self.env.r.symbol(*symbol).name.clone();
+                                if matches!(self.infer.shallow(ty), Ty::Fn(..)) {
+                                    if let Some(evidence) = self.callable_transfer.get(symbol) {
+                                        for component in evidence {
+                                            self.task_capabilities.push((component.clone(), crate::Capability::Transfer, operand.span, format!("callable capture `{name}`")));
+                                        }
+                                    } else {
+                                        self.task_capabilities.push((ty.clone(), crate::Capability::Transfer, operand.span, format!("capture `{name}`")));
+                                    }
+                                } else {
+                                    self.task_capabilities.push((ty.clone(), crate::Capability::Transfer, operand.span, format!("capture `{name}`")));
+                                }
+                            }
                         }
                         self.env.decls.task.map(|id| Ty::Adt(id, vec![*result])).unwrap_or(Ty::Error)
                     }
@@ -1244,7 +1369,10 @@ impl<'e, 'a> FnCx<'e, 'a> {
             (None, None) => Ty::Void,
         };
         self.rets.push(rt.clone());
+        let parent_task_depth = self.task_scope_depth;
+        self.task_scope_depth = 0;
         self.stmts(&body.stmts);
+        self.task_scope_depth = parent_task_depth;
         self.rets.pop();
         if !matches!(self.infer.shallow(&rt), Ty::Void | Ty::Never | Ty::Opaque) && !self.diverges(&body.stmts) {
             let shown = self.show(&rt);

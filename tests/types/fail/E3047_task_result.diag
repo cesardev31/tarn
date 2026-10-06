@@ -1,0 +1,16 @@
+error[E3047]: task result of type `T` requires `Transfer`
+ --> tests/types/fail/E3047_task_result.tarn:2:19
+  |
+2 |     task := spawn move fn() T { return value }
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot cross this native task boundary
+  |
+  = help: use structurally capable owned data or declare the required generic bound; unknown native and erased callable values need explicit evidence
+
+error[E3047]: capture `value` of type `T` requires `Transfer`
+ --> tests/types/fail/E3047_task_result.tarn:2:19
+  |
+2 |     task := spawn move fn() T { return value }
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot cross this native task boundary
+  |
+  = help: use structurally capable owned data or declare the required generic bound; unknown native and erased callable values need explicit evidence
+

@@ -1158,8 +1158,8 @@ impl Cx<'_, '_> {
                     return Ok(());
                 }
                 let value = match callee {
-                    Callee::TaskSpawn { worker, drop_result, type_args } => {
-                        if !type_args.is_empty() || args.len() != 1 { return Err(Error::bug("task spawn shape")); }
+                    Callee::TaskSpawn { worker, drop_result, type_args, scoped } => {
+                        if !type_args.is_empty() || args.len() != if *scoped { 2 } else { 1 } { return Err(Error::bug("task spawn shape")); }
                         let wf = &self.p.functions[worker.0 as usize].decl;
                         let df = &self.p.functions[drop_result.0 as usize].decl;
                         if wf.param_count != 1 || wf.local(LocalId(1)).ty != args[0].ty || df.param_count != 1 || df.local(LocalId(1)).ty != wf.ret || df.ret != Ty::Void || !matches!(&dest_ty, Ty::Adt(id, ts) if Some(*id)==self.t.decls.task && ts==&vec![wf.ret.clone()]) {

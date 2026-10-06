@@ -754,6 +754,10 @@ Scoped completion must precede destruction of borrowed storage on every normal
 exit, including return, break and continue. Retain captured loans until completion;
 do not weaken E4205, E4203 or conservative indexed-place overlap.
 
+Cross-thread safety is part of the ownership model. Moving a reference never
+extends its lifetime. Unknown native resources have neither Transfer nor Share
+unless their declaration catalog provides an explicit trusted contract.
+
 Distinguish cross-thread value transfer from concurrent shared access using semantic
 capabilities, not Copy or size guesses. Native handles require explicit trusted
 contracts. Synchronization guards must expose ordinary loans and verified

@@ -5,6 +5,8 @@
 //! pattern variants) — the AST stays untouched. Rules: `docs/types.md`.
 
 mod captures;
+mod capabilities;
+pub use capabilities::{Capability, NativeCapabilities};
 mod check;
 mod env;
 mod exhaust;
@@ -67,6 +69,8 @@ pub struct Receiver {
 /// phases never re-derive them (ADR 0023).
 #[derive(Default, Debug)]
 pub struct TypeTables {
+    /// Spawn expressions authorized by a lexical completion boundary.
+    pub scoped_spawns: std::collections::HashSet<NodeId>,
     pub expr_types: HashMap<NodeId, Ty>,
     /// Calls whose argument is observed rather than consumed.
     pub borrowed_builtin_calls: std::collections::HashSet<NodeId>,
@@ -142,6 +146,7 @@ pub fn check(inputs: &[ModuleInput], r: &Resolved) -> (Typed, Vec<Diagnostic>) {
             locals.extend(cx.locals);
             let t = &mut tables[mi];
             t.expr_types.extend(cx.tables.expr_types);
+            t.scoped_spawns.extend(cx.tables.scoped_spawns);
             t.mutable_captures.extend(cx.tables.mutable_captures);
             t.owned_captures.extend(cx.tables.owned_captures);
             t.callable_calls.extend(cx.tables.callable_calls);
@@ -228,6 +233,14 @@ fn validate_no_ref_fields(env: &Env, diags: &mut Vec<Diagnostic>) {
 fn validate_impls(env: &Env, diags: &mut Vec<Diagnostic>) {
     for imp in &env.r.impls {
         let Some(iface) = imp.interface else { continue };
+        if Some(iface) == env.decls.transfer || Some(iface) == env.decls.share {
+            if let Some(item) = env.inputs[imp.module.0 as usize].ast.items.iter().find(|item| item.id == imp.node) {
+                diags.push(Diagnostic::error("E3048", "semantic_capability_impl", "cross-thread capabilities cannot be granted with an impl")
+                    .primary(item.span, "capabilities are structural or explicitly trusted declaration metadata")
+                    .help("require the capability on generic parameters and ensure every component qualifies"));
+            }
+            continue;
+        }
         for &m in &imp.methods {
             let name = &env.r.symbol(m).name;
             let Some(decl) = env.r.member(iface, name) else { continue };

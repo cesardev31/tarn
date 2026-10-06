@@ -102,6 +102,7 @@ struct Builder<'a, 'l> {
     scopes: Vec<Vec<LocalId>>,
     /// Lexical scope depths whose tasks must finish before storage ends.
     task_scopes: Vec<usize>,
+    task_witnesses: Vec<LocalId>,
     loops: Vec<LoopCx>,
     /// Temporaries of the statements being lowered (dropped at statement end).
     stmt_temps: Vec<Vec<LocalId>>,
@@ -127,6 +128,7 @@ impl<'a, 'l> Builder<'a, 'l> {
             captures: HashMap::new(),
             scopes: Vec::new(),
             task_scopes: Vec::new(),
+            task_witnesses: Vec::new(),
             loops: Vec::new(),
             stmt_temps: Vec::new(),
             extend_temps: false,
@@ -217,7 +219,9 @@ impl<'a, 'l> Builder<'a, 'l> {
     fn temp(&mut self, ty: Ty, span: Span) -> LocalId {
         let drop = self.needs_drop(&ty);
         let l = self.new_local(ty, LocalKind::Temp, None, None, false, span);
-        if drop && let Some(ts) = self.stmt_temps.last_mut() {
+        if drop && !self.task_scopes.is_empty() && self.lx.t.decls.contains_task(&self.f.local(l).ty) {
+            self.scopes.last_mut().unwrap().push(l);
+        } else if drop && let Some(ts) = self.stmt_temps.last_mut() {
             ts.push(l);
         }
         l
@@ -238,11 +242,15 @@ impl<'a, 'l> Builder<'a, 'l> {
     // ------------------------------------------------------------ scopes and drops
 
     fn drop_locals(&mut self, locals: &[LocalId], span: Span) {
-        for &l in locals.iter().rev() {
+        let mut order: Vec<_> = locals.iter().rev().copied().collect();
+        if !self.task_scopes.is_empty() {
+            order.sort_by_key(|l| !self.lx.t.decls.contains_task(&self.f.local(*l).ty));
+        }
+        for l in order {
             if self.needs_drop(&self.f.locals[l.0 as usize].ty.clone()) {
                 self.push(StatementKind::Drop(Place::local(l)), span);
             }
-            if self.f.locals[l.0 as usize].kind == LocalKind::User {
+            if self.f.locals[l.0 as usize].kind == LocalKind::User || self.f.locals[l.0 as usize].kind == LocalKind::TaskScopeWitness {
                 self.push(StatementKind::StorageDead(l), span);
             }
         }
@@ -250,7 +258,7 @@ impl<'a, 'l> Builder<'a, 'l> {
 
     fn pop_scope(&mut self, span: Span) {
         if !self.dead && self.task_scopes.contains(&(self.scopes.len() - 1)) {
-            self.join_scope(span);
+            self.join_scope(&self.scopes.last().cloned().unwrap_or_default(), span);
         }
         let locals = self.scopes.pop().unwrap_or_default();
         if !self.dead {
@@ -269,13 +277,22 @@ impl<'a, 'l> Builder<'a, 'l> {
         for (offset, s) in scopes.into_iter().enumerate() {
             let level = self.scopes.len() - 1 - offset;
             if self.task_scopes.contains(&level) {
-                self.join_scope(span);
+                self.join_scope(&s, span);
             }
             self.drop_locals(&s, span);
         }
     }
 
-    fn join_scope(&mut self, span: Span) {
+    fn join_scope(&mut self, locals: &[LocalId], span: Span) {
+        // Scope-owned task values (including discarded expression temporaries)
+        // are the completion obligations. A scope witness prevents their escape.
+        // Destruction waits before any borrowed storage can end. Later abstract
+        // drops are dead sites removed by ordinary drop elaboration.
+        for &local in locals.iter().rev() {
+            if self.lx.t.decls.contains_task(&self.f.local(local).ty) && self.needs_drop(&self.f.local(local).ty) {
+                self.push(StatementKind::Drop(Place::local(local)), span);
+            }
+        }
         let t = self.temp(Ty::Void, span);
         let next = self.new_block();
         self.terminate(
@@ -468,7 +485,15 @@ impl<'a, 'l> Builder<'a, 'l> {
             StmtKind::Block(b) | StmtKind::Unsafe(b) => self.block(b),
             StmtKind::Scope(b) => {
                 self.task_scopes.push(self.scopes.len());
-                self.block(b);
+                self.scopes.push(Vec::new());
+                let witness = self.new_local(Ty::Bool, LocalKind::TaskScopeWitness, Some("task scope".into()), None, false, b.span);
+                self.push(StatementKind::StorageLive(witness), b.span);
+                self.assign(Place::local(witness), Rvalue::Use(Operand::Const(Const::Bool(true))), b.span);
+                self.scopes.last_mut().unwrap().push(witness);
+                self.task_witnesses.push(witness);
+                self.stmts(&b.stmts);
+                self.pop_scope(b.span);
+                self.task_witnesses.pop();
                 self.task_scopes.pop();
             }
             StmtKind::Error => {}
@@ -1496,9 +1521,16 @@ impl<'a, 'l> Builder<'a, 'l> {
         db.fall_off_end(e.span);
         self.lx.extra.borrow_mut().push(db.finish());
         let input = self.operand(callable);
-        self.finish_call(Callee::TaskSpawn { worker, drop_result,
+        let scoped = self.tables().scoped_spawns.contains(&e.id);
+        let mut inputs = vec![input];
+        if scoped {
+            let witness = *self.task_witnesses.last().expect("typed scoped spawn without scope");
+            inputs.push(self.ref_temp(false, Place::local(witness), &Ty::Bool, e.span));
+        }
+        let spans = vec![callable.span; inputs.len()];
+        self.finish_call(Callee::TaskSpawn { worker, drop_result, scoped,
             type_args: self.f.generics.iter().copied().map(Ty::Param).collect() },
-            vec![input], vec![callable.span], dest, false, true, e.span);
+            inputs, spans, dest, false, true, e.span);
     }
 
     // ------------------------------------------------------------ closures

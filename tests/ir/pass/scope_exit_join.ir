@@ -1,18 +1,22 @@
 fn normal_exit() -> void {
     _0: void    // return
-    _1: string    // let kept
-    _2: void    // temp
-    _3: &string    // temp
-    _4: void    // temp
+    _1: bool    // task scope
+    _2: string    // let kept
+    _3: void    // temp
+    _4: &string    // temp
+    _5: void    // temp
   bb0:
     live _1
-    _1 = "normal"
-    _3 = &_1
-    _2 = call builtin print(copy _3) -> bb1
+    _1 = true
+    live _2
+    _2 = "normal"
+    _4 = &_2
+    _3 = call builtin print(copy _4) -> bb1
   bb1:
-    _4 = call builtin joinscope() -> bb2
+    _5 = call builtin joinscope() -> bb2
   bb2:
-    drop _1
+    drop _2
+    dead _2
     dead _1
     _0 = ()
     return
@@ -20,30 +24,35 @@ fn normal_exit() -> void {
 
 fn return_exit() -> void {
     _0: void    // return
-    _1: string    // let kept
-    _2: void    // temp
-    _3: &string    // temp
-    _4: void    // temp
+    _1: bool    // task scope
+    _2: string    // let kept
+    _3: void    // temp
+    _4: &string    // temp
+    _5: void    // temp
   bb0:
     live _1
-    _1 = "return"
-    _3 = &_1
-    _2 = call builtin print(copy _3) -> bb1
+    _1 = true
+    live _2
+    _2 = "return"
+    _4 = &_2
+    _3 = call builtin print(copy _4) -> bb1
   bb1:
     _0 = ()
-    _4 = call builtin joinscope() -> bb2
+    _5 = call builtin joinscope() -> bb2
   bb2:
-    drop _1
+    drop _2
+    dead _2
     dead _1
     return
 }
 
 fn break_exit() -> void {
     _0: void    // return
-    _1: string    // let kept
-    _2: void    // temp
-    _3: &string    // temp
-    _4: void    // temp
+    _1: bool    // task scope
+    _2: string    // let kept
+    _3: void    // temp
+    _4: &string    // temp
+    _5: void    // temp
   bb0:
     goto bb2
   bb1:
@@ -51,13 +60,16 @@ fn break_exit() -> void {
     return
   bb2:
     live _1
-    _1 = "break"
-    _3 = &_1
-    _2 = call builtin print(copy _3) -> bb3
+    _1 = true
+    live _2
+    _2 = "break"
+    _4 = &_2
+    _3 = call builtin print(copy _4) -> bb3
   bb3:
-    _4 = call builtin joinscope() -> bb4
+    _5 = call builtin joinscope() -> bb4
   bb4:
-    drop _1
+    drop _2
+    dead _2
     dead _1
     goto bb1
 }
@@ -67,10 +79,11 @@ fn continue_exit() -> void {
     _1: i64    // var remaining
     _2: bool    // temp
     _3: i64    // temp
-    _4: string    // let kept
-    _5: void    // temp
-    _6: &string    // temp
-    _7: void    // temp
+    _4: bool    // task scope
+    _5: string    // let kept
+    _6: void    // temp
+    _7: &string    // temp
+    _8: void    // temp
   bb0:
     live _1
     _1 = 1_i64
@@ -86,46 +99,57 @@ fn continue_exit() -> void {
     _3 = sub(copy _1, 1_i64)
     _1 = copy _3
     live _4
-    _4 = "continue"
-    _6 = &_4
-    _5 = call builtin print(copy _6) -> bb4
+    _4 = true
+    live _5
+    _5 = "continue"
+    _7 = &_5
+    _6 = call builtin print(copy _7) -> bb4
   bb4:
-    _7 = call builtin joinscope() -> bb5
+    _8 = call builtin joinscope() -> bb5
   bb5:
-    drop _4
+    drop _5
+    dead _5
     dead _4
     goto bb2
 }
 
 fn nested_return() -> void {
     _0: void    // return
-    _1: string    // let outer
-    _2: string    // let kept
-    _3: void    // temp
-    _4: &string    // temp
+    _1: bool    // task scope
+    _2: string    // let outer
+    _3: bool    // task scope
+    _4: string    // let kept
     _5: void    // temp
     _6: &string    // temp
     _7: void    // temp
-    _8: void    // temp
+    _8: &string    // temp
+    _9: void    // temp
+    _10: void    // temp
   bb0:
     live _1
-    _1 = "outer"
+    _1 = true
     live _2
-    _2 = "inner"
-    _4 = &_2
-    _3 = call builtin print(copy _4) -> bb1
+    _2 = "outer"
+    live _3
+    _3 = true
+    live _4
+    _4 = "inner"
+    _6 = &_4
+    _5 = call builtin print(copy _6) -> bb1
   bb1:
-    _6 = &_1
-    _5 = call builtin print(copy _6) -> bb2
+    _8 = &_2
+    _7 = call builtin print(copy _8) -> bb2
   bb2:
     _0 = ()
-    _7 = call builtin joinscope() -> bb3
+    _9 = call builtin joinscope() -> bb3
   bb3:
+    drop _4
+    dead _4
+    dead _3
+    _10 = call builtin joinscope() -> bb4
+  bb4:
     drop _2
     dead _2
-    _8 = call builtin joinscope() -> bb4
-  bb4:
-    drop _1
     dead _1
     return
 }

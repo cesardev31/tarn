@@ -1,0 +1,6 @@
+fn shared<T: Share>(value &T) {
+}
+fn main() {
+    task := spawn move fn() i32 { return 42 }
+    shared(&task)
+}

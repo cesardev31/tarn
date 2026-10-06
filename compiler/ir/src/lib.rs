@@ -115,6 +115,8 @@ pub enum LocalKind {
     /// are moved out one by one by index; the move checker does not track
     /// them, and dropping it drops the elements not yet yielded.
     IterArray,
+    /// Storage witness tying scoped task handles to structured completion.
+    TaskScopeWitness,
 }
 
 #[derive(Clone, Debug)]
@@ -293,7 +295,7 @@ pub enum Builtin {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Callee {
     /// Native task worker and verified unused-result destruction function.
-    TaskSpawn { worker: FunctionId, drop_result: FunctionId, type_args: Vec<Ty> },
+    TaskSpawn { worker: FunctionId, drop_result: FunctionId, type_args: Vec<Ty>, scoped: bool },
     /// Statically resolved function or method, with type arguments.
     Fn(FunctionId, Vec<Ty>),
     /// Interface method on a type parameter or `any I`: chosen at

@@ -1,0 +1,71 @@
+struct Counter { value i64 }
+struct Pair { left Counter
+    right Counter
+}
+fn bump(c &mut Counter) { c.value = c.value + 1 }
+fn exit_return(c &mut Counter) {
+    scope {
+        spawn move fn() { bump(c) }
+        return
+    }
+}
+fn main() {
+    var counter = Counter{value: 0}
+    for i in 0..128 {
+        scope {
+            task := spawn fn() { counter.value = counter.value + 1 }
+            task.join()
+            counter.value = counter.value + 1
+        }
+    }
+    print(counter.value)
+    var pair = Pair{left: Counter{value: 0}, right: Counter{value: 0}}
+    scope {
+        left := &mut pair.left
+        right := &mut pair.right
+        spawn move fn() { bump(left) }
+        spawn move fn() { bump(right) }
+    }
+    print(pair.left.value)
+    print(pair.right.value)
+    scope {
+        view := &counter
+        a := spawn move fn() i64 { return view.value }
+        b := spawn move fn() i64 { return view.value }
+        c := spawn move fn() i64 { return view.value }
+        d := spawn move fn() i64 { return view.value }
+        print(a.join() + b.join() + c.join() + d.join())
+    }
+    scope {
+        f := move fn() i64 { return 42 }
+        a := spawn fn() i64 { return f() }
+        b := spawn fn() i64 { return f() }
+        print(a.join() + b.join())
+    }
+    scope {
+        var nested = Counter{value: 0}
+        spawn fn() {
+            scope {
+                spawn fn() { nested.value = nested.value + 1 }
+            }
+        }
+    }
+    exit_return(&mut counter)
+    print(counter.value)
+    for i in 0..3 {
+        scope {
+            c := &mut counter
+            spawn move fn() { bump(c) }
+            continue
+        }
+    }
+    print(counter.value)
+    for i in 0..3 {
+        scope {
+            c := &mut counter
+            spawn move fn() { bump(c) }
+            break
+        }
+    }
+    print(counter.value)
+}

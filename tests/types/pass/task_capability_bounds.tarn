@@ -1,0 +1,19 @@
+struct Box<T> { value T }
+enum Choice<T> {
+    Some(T)
+    Empty
+}
+fn transfer<T: Transfer>(value T) {
+}
+fn share<T: Share>(value &T) {
+}
+fn generic<T: Transfer>(value T) {
+    transfer(Box{value: value})
+}
+fn main() {
+    transfer(Box{value: "owned"})
+    transfer(Choice.Some([2]i32{1, 2}))
+    shared := "observe"
+    share(&shared)
+    generic(42)
+}

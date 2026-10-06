@@ -1,0 +1,8 @@
+error[E3048]: cross-thread capabilities cannot be granted with an impl
+ --> tests/types/fail/E3048_task_capability_impl.tarn:2:1
+  |
+2 | impl Transfer for Resource {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ capabilities are structural or explicitly trusted declaration metadata
+  |
+  = help: require the capability on generic parameters and ensure every component qualifies
+

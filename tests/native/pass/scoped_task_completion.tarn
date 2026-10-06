@@ -1,0 +1,64 @@
+fn normal() {
+    scope {
+        text := "normal-parent"
+        spawn fn() string { text.len()
+            return "normal-result"
+        }
+    }
+}
+fn early() {
+    scope {
+        text := "return-parent"
+        spawn fn() string { text.len()
+            return "return-result"
+        }
+        return
+    }
+}
+fn propagate() Option<i32> {
+    scope {
+        text := "try-parent"
+        spawn fn() string { text.len()
+            return "try-result"
+        }
+        missing: Option<i32> := None
+        try missing
+    }
+    return Some(42)
+}
+fn main() {
+    normal()
+    early()
+    propagate()
+    for i in 0..2 {
+        scope {
+            text := "continue-parent"
+            spawn fn() string { text.len()
+                return "continue-result"
+            }
+            continue
+        }
+    }
+    for i in 0..2 {
+        scope {
+            text := "break-parent"
+            spawn fn() string { text.len()
+                return "break-result"
+            }
+            break
+        }
+    }
+    scope {
+        outer := "outer-parent"
+        spawn fn() string { outer.len()
+            return "outer-result"
+        }
+        scope {
+            inner := "inner-parent"
+            spawn fn() string { inner.len()
+                return "inner-result"
+            }
+        }
+    }
+    print(42)
+}

@@ -1,0 +1,20 @@
+struct Box<T> { value T }
+fn transfer<T: Transfer>(value T) T {
+    return value
+}
+fn inspect<T: Share>(value &T) {
+}
+fn main() {
+    scalar := transfer(42)
+    task := spawn move fn() i64 { return scalar }
+    print(task.join())
+    generic := transfer(Box{value: "transferred"})
+    other := spawn move fn() Box<string> { return generic }
+    owned := other.join()
+    print(owned.value)
+    captured := "callable"
+    callable := move fn() string { return captured }
+    nested := spawn move fn() string { return callable() }
+    print(nested.join())
+    inspect(&owned)
+}

@@ -1,0 +1,5 @@
+== task_capability_bounds
+6:26 value: T
+8:20 value: &T
+10:25 value: T
+16:5 shared: string

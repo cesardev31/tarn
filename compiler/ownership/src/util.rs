@@ -51,6 +51,7 @@ impl BitSet {
 pub fn place_name(f: &Function, t: &Typed, p: &Place) -> String {
     let l = f.local(p.local);
     let mut name = match l.kind {
+        LocalKind::TaskScopeWitness => "the task scope".into(),
         LocalKind::User | LocalKind::Param => l.name.clone().unwrap_or_else(|| "value".into()),
         _ => "a temporary".into(),
     };

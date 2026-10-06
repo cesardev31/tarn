@@ -130,7 +130,7 @@ impl P<'_> {
             Callee::Fn(id, targs) => format!("{}{}", self.p.function(*id).name, self.targs(targs)),
             Callee::Virtual { method, type_args } => format!("virtual {}{}", self.r.symbol(*method).name, self.targs(type_args)),
             Callee::Intrinsic(n) => format!("intrinsic {n}"),
-            Callee::TaskSpawn { worker, drop_result, .. } => format!("task worker#{} drop#{}", worker.0, drop_result.0),
+            Callee::TaskSpawn { worker, drop_result, scoped, .. } => format!("{}task worker#{} drop#{}", if *scoped { "scoped " } else { "" }, worker.0, drop_result.0),
             Callee::Builtin(b) => format!("builtin {b:?}").to_lowercase(),
             Callee::Value(o) => format!("({})", self.operand(o)),
             Callee::Opaque(n) => format!("opaque {n}"),
@@ -154,6 +154,7 @@ fn print_function_annotated(f: &Function, p: &Program, r: &Resolved, t: &Typed, 
             LocalKind::User => format!("{}{}", if l.mutable { "var " } else { "let " }, l.name.clone().unwrap_or_default()),
             LocalKind::Temp => "temp".to_string(),
             LocalKind::IterArray => "iteration array".to_string(),
+            LocalKind::TaskScopeWitness => "task scope".to_string(),
         };
         let _ = writeln!(out, "    _{i}: {}    // {what}", pp.ty(&l.ty));
     }

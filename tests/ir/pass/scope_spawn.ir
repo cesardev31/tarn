@@ -11,16 +11,20 @@ fn work(_1: i64) -> void {
 
 fn main() -> void {
     _0: void    // return
-    _1: void    // temp
+    _1: bool    // task scope
     _2: void    // temp
     _3: void    // temp
+    _4: void    // temp
   bb0:
-    spawn _1 = call work(1_i64) -> bb1
+    live _1
+    _1 = true
+    spawn _2 = call work(1_i64) -> bb1
   bb1:
-    spawn _2 = call work(2_i64) -> bb2
+    spawn _3 = call work(2_i64) -> bb2
   bb2:
-    _3 = call builtin joinscope() -> bb3
+    _4 = call builtin joinscope() -> bb3
   bb3:
+    dead _1
     _0 = ()
     return
 }

@@ -25,6 +25,14 @@ pub enum Result<T, E> {
 pub interface Copy {
 }
 
+/// Compile-time capability: ownership may cross a native task boundary.
+pub interface Transfer {
+}
+
+/// Compile-time capability: shared access may occur concurrently.
+pub interface Share {
+}
+
 // ---------------------------------------------------------------- string
 
 /// Length in bytes.
