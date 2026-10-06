@@ -1,0 +1,12 @@
+error[E4105]: `y` does not live long enough
+  --> tests/borrows/fail/E4105_store_through_mutable_argument.tarn:11:5
+   |
+10 |         set(&mut holder, &y)
+   |                          -- `y` is borrowed here
+11 |     }
+   |     ^ `y` goes out of scope here while still borrowed
+12 |     r := holder.item
+   |          ----------- the borrow is still used here
+   |
+   = help: declare `y` in an outer scope so it outlives the reference
+

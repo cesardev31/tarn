@@ -44,6 +44,15 @@ void *tarn_rt_env_alloc(uint64_t size) {
     return p;
 }
 void tarn_rt_env_free(void *p) { free(p); }
+/* Vec storage: reallocate to `count` elements of `size` bytes. Overflow and
+ * exhaustion abort. Element ownership and destruction stay in compiled code. */
+void *tarn_rt_vec_grow(void *data, uint64_t count, uint64_t size) {
+    if (size != 0 && count > UINT64_MAX / size) abort();
+    uint64_t bytes = count * size;
+    void *p = realloc(data, bytes ? (size_t)bytes : 1);
+    if (!p) abort();
+    return p;
+}
 void tarn_rt_env_drop(void *p) {
     if (!p) return;
     void (*drop)(void *);
@@ -442,7 +451,8 @@ void tarn_rt_net_poll_drop(TarnPoll *poll) { TarnNetRaw out; tarn_rt_net_close_p
 
 /* Mechanical wake bookkeeping, not an executor or application-state store. */
 typedef struct TarnWake TarnWake;
-typedef struct { TarnPoll *poll; TarnWake *head; } TarnExecution;
+typedef struct TarnSpawned TarnSpawned;
+typedef struct { TarnPoll *poll; TarnWake *head; TarnSpawned *inbox, *inbox_tail; } TarnExecution;
 struct TarnWake {
     TarnExecution *owner;
     TarnWake *next;
@@ -460,7 +470,7 @@ static uint64_t net_identity(void) {
 void tarn_rt_net_exec_new(TarnNetRaw *out, TarnPoll *poll) {
     net_init(out); TarnExecution *owner = malloc(sizeof(*owner));
     if (!owner) { out->code = ENOMEM; return; }
-    owner->poll = poll; owner->head = NULL; out->value = (int64_t)(uintptr_t)owner;
+    owner->poll = poll; owner->head = NULL; owner->inbox = owner->inbox_tail = NULL; out->value = (int64_t)(uintptr_t)owner;
 }
 void tarn_rt_net_waker_new(uintptr_t *out, TarnExecution *owner) {
     TarnWake *wake = calloc(1, sizeof(*wake)); if (!wake) tarn_rt_fault();
@@ -529,5 +539,73 @@ void tarn_rt_net_waker_drop(TarnWake *wake) {
 }
 void tarn_rt_net_exec_drop(TarnExecution *owner) {
     if (owner->head) tarn_rt_fault(); /* Ordinary loans must keep Execution alive. */
+    if (owner->inbox) tarn_rt_fault(); /* Spawned operations are drained by Tarn executors. */
     free(owner);
+}
+
+/* Phase 14A async task records. Storage only: compiled code copies and destroys
+ * the typed result; Tarn decides scheduling, completion and abandonment. Two
+ * references exist: the AsyncTask handle and the executor's runner entry. */
+typedef struct {
+    TarnExecution *owner;
+    uint64_t joiner;     /* identity of a waiting Waker, 0 if none */
+    uint32_t refs, complete, taken, abandoned;
+    unsigned char result[];
+} TarnAsyncTask;
+TarnAsyncTask *tarn_rt_async_task_new(TarnExecution *owner, uint64_t size) {
+    TarnAsyncTask *task = calloc(1, sizeof(TarnAsyncTask) + (size ? size : 1));
+    if (!task) abort();
+    task->owner = owner; task->refs = 2;
+    return task;
+}
+void *tarn_rt_async_task_result(TarnAsyncTask *task) { return task->result; }
+/* After compiled code stored the result: mark complete and wake the joiner. */
+void tarn_rt_async_task_complete(TarnAsyncTask *task) {
+    if (task->complete || task->abandoned) tarn_rt_fault();
+    task->complete = 1;
+    if (task->joiner) { TarnWake *w = net_wake_find(task->owner, task->joiner); if (w) net_wake_deliver(w); }
+}
+/* 1 when an untaken result may be moved out now (marks it taken). */
+int8_t tarn_rt_async_task_take(TarnAsyncTask *task) {
+    if (!task->complete || task->taken) return 0;
+    task->taken = 1; return 1;
+}
+/* Register the joining Waker; it must belong to the task's Execution. */
+void tarn_rt_async_task_wait(TarnNetRaw *out, TarnAsyncTask *task, TarnWake *waker) {
+    net_init(out);
+    if (waker->owner != task->owner) { out->code = EINVAL; return; }
+    task->joiner = waker->identity;
+}
+int8_t tarn_rt_async_task_abandoned(TarnAsyncTask *task) { return (int8_t)task->abandoned; }
+void tarn_rt_async_task_release(TarnAsyncTask *task) {
+    if (task->refs == 0) tarn_rt_fault();
+    if (--task->refs == 0) free(task);
+}
+/* Handle destruction: 1 when compiled code must destroy an untaken result.
+ * Otherwise a pending task is marked abandoned for structured destruction. */
+int8_t tarn_rt_async_task_handle_drop(TarnAsyncTask *task) {
+    task->joiner = 0;
+    if (task->complete && !task->taken) { task->taken = 1; return 1; }
+    if (!task->complete) task->abandoned = 1;
+    return 0;
+}
+
+/* Spawn mailbox: owned operation bytes moved in by Tarn, drained FIFO. */
+struct TarnSpawned { TarnSpawned *next; uint64_t size; unsigned char bytes[]; };
+void tarn_rt_async_inbox_push(TarnExecution *owner, const void *bytes, uint64_t size) {
+    TarnSpawned *entry = malloc(sizeof(TarnSpawned) + (size ? size : 1));
+    if (!entry) abort();
+    entry->next = NULL; entry->size = size; memcpy(entry->bytes, bytes, size);
+    if (owner->inbox_tail) owner->inbox_tail->next = entry; else owner->inbox = entry;
+    owner->inbox_tail = entry;
+}
+/* Copies the oldest entry into `out` and frees it; 0 when empty. */
+int8_t tarn_rt_async_inbox_pop(TarnExecution *owner, void *out, uint64_t size) {
+    TarnSpawned *entry = owner->inbox;
+    if (!entry) return 0;
+    if (entry->size != size) tarn_rt_fault();
+    owner->inbox = entry->next;
+    if (!owner->inbox) owner->inbox_tail = NULL;
+    memcpy(out, entry->bytes, size); free(entry);
+    return 1;
 }

@@ -190,6 +190,12 @@ fn stored_locals(f: &post::Function, waker: LocalId, params: &[LocalId]) -> Vec<
             {
                 keep[p.local.0 as usize] = true;
             }
+            // A borrowed closure's environment lives with its storage witness:
+            // a closure held across a suspension must not point into the
+            // per-poll native stack.
+            if let Op::Plain(StatementKind::Assign(_, Rvalue::Aggregate(Aggregate::Closure(_, Some(p)), _))) = &st.op {
+                keep[p.local.0 as usize] = true;
+            }
         }
     }
     for p in params {

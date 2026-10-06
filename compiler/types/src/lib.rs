@@ -13,7 +13,7 @@ mod exhaust;
 mod ty;
 
 pub use check::subst;
-pub use env::{Decls, EnumDef, Env, FieldDef, FnSig, PassingMode, Prelude, ResultContract, SemanticContract, StructDef, VariantDef};
+pub use env::{Decls, EnumDef, Env, FieldDef, FnSig, PassingMode, Prelude, ResultContract, SemanticContract, StructDef, TASK_INTRINSICS, VariantDef};
 pub use tarn_ast::{CallMode, ReceiverKind};
 pub use ty::{FloatTy, IntTy, ParamId, Ty};
 

@@ -71,6 +71,34 @@ pub struct Task<R> {
 }
 pub extern "intrinsic" fn Task<R>.join(self) R
 
+// ------------------------------------------------ growable vector (phase 14A)
+
+/// Owned growable sequence. Elements live in owned heap storage; destroying the
+/// vector destroys every remaining element once, in index order, then frees the
+/// storage. Capacity grows geometrically (4, 8, 16, ...). Out-of-range indices
+/// abort. `[0]T` is a zero-size marker: capabilities, reference containment and
+/// copy semantics follow the element type.
+pub struct Vec<T> {
+    storage usize
+    count usize
+    capacity usize
+    elements [0]T
+}
+pub extern "intrinsic" fn Vec<T>.new() Vec<T>
+pub extern "intrinsic" fn Vec<T>.len(&self) usize
+pub extern "intrinsic" fn Vec<T>.push(&mut self, value T)
+/// Moves the last element out, if any.
+pub extern "intrinsic" fn Vec<T>.pop(&mut self) Option<T>
+pub extern "intrinsic" fn Vec<T>.get(&self, index usize) &T
+/// Copy out an element; requires `T: Copy` (trusted obligation, like MutexGuard.read).
+pub extern "intrinsic" fn Vec<T>.at(&self, index usize) T
+pub extern "intrinsic" fn Vec<T>.get_mut(&mut self, index usize) &mut T
+/// Installs `value` at `index` and moves the previous element out.
+pub extern "intrinsic" fn Vec<T>.replace(&mut self, index usize, value T) T
+/// Moves the element at `index` out; the last element takes its place.
+pub extern "intrinsic" fn Vec<T>.swap_remove(&mut self, index usize) T
+pub extern "intrinsic" fn Vec<T>.is_empty(&self) bool
+
 // ------------------------------------------------ synchronization (phase 11C)
 
 /// Unique synchronized owner. Share and Transfer both require T: Transfer.

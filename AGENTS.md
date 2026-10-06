@@ -843,6 +843,16 @@ Calls are lazy; blocking and async I/O have distinct names; there is no hidden
 global executor. Do not add async closures/blocks, select, cancellation, timers or
 multi-thread executors without a separate approved phase.
 
+## Cooperative Async Tasks
+
+Phase 14A (ADR 0038). An async task is an owned computation run cooperatively
+by an executor, not an operating-system thread; `spawn` stays native threads and
+`spawn_async` is cooperative. The task handle is the only authority over its
+pending result. Dropping a task never detaches it silently: a pending task is
+abandoned through its verified frame destruction, an unjoined result is
+destroyed once. Runtime task records store bytes only; typed result handling is
+compiled code. Do not add a second scheduler or task model.
+
 ---
 
 ## Drops

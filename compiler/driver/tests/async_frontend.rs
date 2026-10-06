@@ -14,11 +14,11 @@ fn check(source: &str, tag: &str) -> tarn_driver::CheckResult {
 
 #[test]
 fn async_call_and_await_have_distinct_types_and_generic_inference() {
-    let result = check("async fn identity<T>(value T) T { return value }\nasync fn app() i32 { return await identity(42) }\nfn main() { computation := identity(i32(7)) }\n", "types");
+    let result = check("async fn identity<T>(value T) T { return value }\nasync fn app() i32 { return await identity(42) }\nfn main() { lazy_value := identity(i32(7)) }\n", "types");
     assert!(!result.has_errors(), "{:?}", result.diagnostics.iter().map(|d| (&d.code, &d.message)).collect::<Vec<_>>());
     let typed = result.typed.as_ref().unwrap();
     let resolved = result.resolved.as_ref().unwrap();
-    let computation = typed.locals.iter().find(|(id, _)| resolved.symbol(**id).name == "computation").unwrap().1;
+    let computation = typed.locals.iter().find(|(id, _)| resolved.symbol(**id).name == "lazy_value").unwrap().1;
     assert_eq!(*computation, Ty::Async(Box::new(Ty::Int(IntTy::I32))));
     assert!(typed.tables[0].expr_types.values().any(|ty| *ty == Ty::Int(IntTy::I32)));
     // Calling constructs a frame lazily; the body is a separate suspended function.

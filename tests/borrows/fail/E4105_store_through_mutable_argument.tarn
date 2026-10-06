@@ -1,0 +1,14 @@
+// A callee may store a borrowed argument behind another `&mut` argument:
+// the borrowed holder then retains that loan (regression: it did not).
+struct Box2<T> { item T }
+fn set<T>(slot &mut Box2<T>, value T) { slot.item = value }
+fn main() {
+    x := 5
+    var holder = Box2{item: &x}
+    {
+        y := 7
+        set(&mut holder, &y)
+    }
+    r := holder.item
+    print(r)
+}

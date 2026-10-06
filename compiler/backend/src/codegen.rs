@@ -58,8 +58,10 @@ struct FrameLayout {
     size: u32,
     locals: HashMap<LocalId, u32>,
     flags: Vec<u32>,
+    /// Borrowed closure environments whose storage witness is frame-resident.
+    environments: HashMap<LocalId, u32>,
 }
-fn frame_layout(t: &Typed, f: &post::Function) -> Result<FrameLayout> {
+fn frame_layout(t: &Typed, p: &post::Program, f: &post::Function) -> Result<FrameLayout> {
     let frame = frame(&f.decl).ok_or_else(|| Error::bug("frame layout of non-async function"))?;
     let mut offset = 8u32;
     let mut locals = HashMap::new();
@@ -79,7 +81,42 @@ fn frame_layout(t: &Typed, f: &post::Function) -> Result<FrameLayout> {
         };
         offset = grow(offset, n)?;
     }
-    Ok(FrameLayout { size: offset.max(8), locals, flags })
+    let mut environments = HashMap::new();
+    for b in &f.blocks {
+        for s in &b.stmts {
+            if let post::Op::Plain(StatementKind::Assign(_, Rvalue::Aggregate(Aggregate::Closure(_, Some(storage)), _))) = &s.op
+                && locals.contains_key(&storage.local)
+                && !environments.contains_key(&storage.local)
+            {
+                // Sized by the backend from the closure's own environment; see `closure_env_size`.
+                environments.insert(storage.local, 0);
+            }
+        }
+    }
+    frame_environments(t, p, f, FrameLayout { size: offset.max(8), locals, flags, environments })
+}
+/// Place frame-resident closure environments after the frame's other slots.
+fn frame_environments(t: &Typed, p: &post::Program, f: &post::Function, mut placement: FrameLayout) -> Result<FrameLayout> {
+    let mut offset = placement.size;
+    let mut placed = HashMap::new();
+    for b in &f.blocks {
+        for s in &b.stmts {
+            if let post::Op::Plain(StatementKind::Assign(_, Rvalue::Aggregate(Aggregate::Closure(id, Some(storage)), _))) = &s.op
+                && placement.environments.contains_key(&storage.local)
+            {
+                let (size, _) = environment(t, &p.functions[id.0 as usize].decl)?;
+                let at = (offset + 7) & !7;
+                let previous = placed.get(&storage.local).copied();
+                if previous.is_none_or(|(_, s)| s < size) {
+                    placed.insert(storage.local, (at, size));
+                    offset = at.checked_add(size).filter(|n| *n <= 65536).ok_or_else(|| Error::unsupported("async frame exceeds 64 KiB"))?;
+                }
+            }
+        }
+    }
+    placement.environments = placed.into_iter().map(|(l, (at, _))| (l, at)).collect();
+    placement.size = offset.max(8);
+    Ok(placement)
 }
 fn signature(module: &ObjectModule, t: &Typed, f: &ir::Function) -> Result<cl::Signature> {
     let mut sig = module.make_signature();
@@ -373,6 +410,17 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         ("tarn_rt_string", vec![types::I64, types::I64], vec![types::I64]),
         ("tarn_rt_drop_string", vec![types::I64], vec![]),
         ("tarn_rt_env_alloc", vec![types::I64], vec![types::I64]),
+        ("tarn_rt_vec_grow", vec![types::I64, types::I64, types::I64], vec![types::I64]),
+        ("tarn_rt_async_task_new", vec![types::I64, types::I64], vec![types::I64]),
+        ("tarn_rt_async_task_result", vec![types::I64], vec![types::I64]),
+        ("tarn_rt_async_task_complete", vec![types::I64], vec![]),
+        ("tarn_rt_async_task_take", vec![types::I64], vec![types::I8]),
+        ("tarn_rt_async_task_wait", vec![types::I64; 3], vec![]),
+        ("tarn_rt_async_task_abandoned", vec![types::I64], vec![types::I8]),
+        ("tarn_rt_async_task_release", vec![types::I64], vec![]),
+        ("tarn_rt_async_task_handle_drop", vec![types::I64], vec![types::I8]),
+        ("tarn_rt_async_inbox_push", vec![types::I64; 3], vec![]),
+        ("tarn_rt_async_inbox_pop", vec![types::I64; 3], vec![types::I8]),
         ("tarn_rt_env_free", vec![types::I64], vec![]),
         ("tarn_rt_env_drop", vec![types::I64], vec![]),
         ("tarn_rt_print_i64", vec![types::I64], vec![]),
@@ -425,6 +473,7 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
                 thunks: &thunks,
                 frame_drops: &frame_drops,
                 env: None,
+                environments: HashMap::new(),
                 runtime: &runtime,
                 task_adapters: &task_adapters,
                 tables: &tables,
@@ -632,6 +681,8 @@ struct Cx<'a, 'b> {
     frame_drops: &'b HashMap<FunctionId, FuncId>,
     /// Frame pointer of an async body.
     env: Option<cl::Value>,
+    /// Frame offsets of borrowed closure environments (async bodies).
+    environments: HashMap<LocalId, u32>,
     runtime: &'b HashMap<String, FuncId>,
     task_adapters: &'b HashMap<FunctionId, (FuncId, FuncId)>,
     tables: &'b [(tarn_resolve::SymbolId, Ty, Vec<FunctionId>, DataId)],
@@ -652,7 +703,8 @@ impl Cx<'_, '_> {
                 }
             }
         }
-        let placement = if frame(&self.f.decl).is_some() { Some(frame_layout(self.t, self.f)?) } else { None };
+        let placement = if frame(&self.f.decl).is_some() { Some(frame_layout(self.t, self.p, self.f)?) } else { None };
+        self.environments = placement.as_ref().map(|p| p.environments.clone()).unwrap_or_default();
         for (i, l) in self.f.decl.locals.iter().enumerate() {
             let lyt = layout::layout(self.t, &l.ty)?;
             let slot = if let Some(offset) = placement.as_ref().and_then(|p| p.locals.get(&LocalId(i as u32))) {
@@ -1067,7 +1119,7 @@ impl Cx<'_, '_> {
                 // into their parameter slots, start in state 0. No body code runs.
                 let g = &self.p.functions[id.0 as usize];
                 let frame = frame(&g.decl).ok_or_else(|| Error::bug("async construction without frame"))?;
-                let placement = frame_layout(self.t, g)?;
+                let placement = frame_layout(self.t, self.p, g)?;
                 if frame.params.len() != ops.len() {
                     return Err(Error::bug("async construction arity"));
                 }
@@ -1098,8 +1150,9 @@ impl Cx<'_, '_> {
                 let value = self.pair(code, env);
                 Ok(Val { value: Some(value), ty: dest.clone() })
             }
-            Rvalue::Aggregate(Aggregate::Closure(id, _), ops) => {
+            Rvalue::Aggregate(Aggregate::Closure(id, storage), ops) => {
                 let f = &self.p.functions[id.0 as usize].decl;
+                let in_frame = storage.as_ref().and_then(|s| self.environments.get(&s.local).copied());
                 let (size, fields) = environment(self.t, f)?;
                 if fields.len() != ops.len() {
                     return Err(Error::bug("closure capture arity"));
@@ -1111,6 +1164,9 @@ impl Cx<'_, '_> {
                 let env = if owned {
                     let size = self.b.ins().iconst(types::I64, i64::from(size));
                     self.runtime("tarn_rt_env_alloc", &[size])[0]
+                } else if let (Some(offset), Some(frame)) = (in_frame, self.env) {
+                    // Borrowed environment of an async body: stable frame storage.
+                    self.b.ins().iadd_imm(frame, i64::from(offset))
                 } else {
                     let slot = self.stack(size, 8);
                     self.b.ins().stack_addr(types::I64, slot, 0)
@@ -1688,8 +1744,10 @@ impl Cx<'_, '_> {
         Ok(())
     }
     fn intrinsic(&mut self, name: &str, args: &[Val], dest: &Ty) -> Result<Val> {
+        if let Some(result) = self.tasks(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.networking(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.synchronization(name, args, dest)? { return Ok(result); }
+        if let Some(result) = self.vector(name, args, dest)? { return Ok(result); }
         if args.len() != 1 {
             return Err(Error::unsupported(format!("intrinsic {name}")));
         }
@@ -1846,6 +1904,9 @@ impl Cx<'_, '_> {
                     self.drop_at(ptr, elem)?;
                 }
             }
+            Ty::Adt(id, _) if Some(*id) == self.t.decls.vec => self.drop_vector(addr, ty)?,
+            Ty::Adt(id, _) if Some(*id) == self.t.decls.async_task => self.drop_async_task(addr, ty)?,
+            Ty::Adt(id, _) if Some(*id) == self.t.decls.task_ref => self.drop_task_ref(addr),
             Ty::Adt(id, args) if Some(*id) == self.t.decls.mutex => {
                 // Complete initialized value selected by verified post-drop.
                 let l = layout::layout(self.t, ty)?;
@@ -1937,6 +1998,12 @@ fn validate_table(p: &post::Program, t: &Typed, interface: tarn_resolve::SymbolI
 
 #[path = "synchronization.rs"]
 mod synchronization;
+
+#[path = "vectors.rs"]
+mod vectors;
+
+#[path = "tasks.rs"]
+mod tasks;
 
 #[path = "networking.rs"]
 mod networking;

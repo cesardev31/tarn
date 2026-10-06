@@ -108,6 +108,8 @@ struct Fx<'a> {
     f: &'a Function,
     t: &'a Typed,
     prov: &'a HashMap<FunctionId, Provenance>,
+    /// `Execution.spawn`, whose computation may borrow only its Execution.
+    spawn_fn: Option<FunctionId>,
     loans: Vec<Loan>,
     /// Loan created at (block, statement).
     loan_at: HashMap<(usize, usize), usize>,
@@ -132,7 +134,7 @@ fn operand_place(o: &Operand) -> Option<&Place> {
 impl<'a> Fx<'a> {
     fn new(f: &'a Function, t: &'a Typed, prov: &'a HashMap<FunctionId, Provenance>) -> Self {
         let mut fx =
-            Fx { f, t, prov, loans: Vec::new(), loan_at: HashMap::new(), nl: f.locals.len(), live: Vec::new(), live_out: Vec::new(), diags: Vec::new(), reported: HashSet::new() };
+            Fx { f, t, prov, spawn_fn: None, loans: Vec::new(), loan_at: HashMap::new(), nl: f.locals.len(), live: Vec::new(), live_out: Vec::new(), diags: Vec::new(), reported: HashSet::new() };
         // Placeholder loans: one per reference-holding parameter.
         for (i, l) in f.params().enumerate() {
             if t.decls.may_contain_references(&f.local(l).ty) || t.decls.contains_task(&f.local(l).ty) {
@@ -372,6 +374,23 @@ impl<'a> Fx<'a> {
         // generated frame (the async body's own provenance rejects returning
         // frame storage) nor the per-poll waker, which source code cannot name.
         // It carries the loans the computation captured (ADR 0037).
+        // Elements moved out of a vector carry the loans the vector stores,
+        // never the call's own borrow of the vector.
+        if let Callee::Intrinsic(name) = callee
+            && matches!(name.as_str(), "Vec.pop" | "Vec.replace" | "Vec.swap_remove" | "net._task_take")
+            && let Some(receiver) = args.first().and_then(operand_place)
+        {
+            let mut held = BitSet::new(self.loans.len());
+            for a in args {
+                self.holds_of(h, a, &mut held);
+            }
+            for l in held.iter() {
+                if self.loans[l].holder != receiver.local {
+                    inflow.insert(l);
+                }
+            }
+            return inflow;
+        }
         let polled_async = matches!(callee, Callee::Value(o) if operand_place(o).is_some_and(|p| matches!(tarn_ir::post_drop::place_ty(self.f, self.t, p), Some(Ty::Ref(_, inner)) if matches!(*inner, Ty::Async(_)))));
         match positions {
             _ if polled_async => {}
@@ -428,8 +447,51 @@ impl<'a> Fx<'a> {
         }
         if let Terminator::Call { callee, args, dest, .. } = &blk.term {
             let inflow = self.call_inflow(h, callee, args, dest);
+            self.store_effects(h, callee, args);
             for operand in args { self.consume_resource_operand(h, operand); }
             self.write_holds(h, dest, inflow);
+        }
+    }
+
+    /// A callee may store any argument's loans behind a mutable reference it
+    /// receives. The borrowed storage then holds those loans: union them into
+    /// every local mutably borrowed by an argument whose type can hold
+    /// references. Conservative; builtins and resources store nothing.
+    fn store_effects(&self, h: &mut Holds, callee: &Callee, args: &[Operand]) {
+        if matches!(callee, Callee::Builtin(_) | Callee::TaskSpawn { .. }) {
+            return;
+        }
+        let mut targets = Vec::new();
+        for a in args {
+            let Some(arg) = operand_place(a) else { continue };
+            let mut held = BitSet::new(self.loans.len());
+            self.holds_of(h, a, &mut held);
+            for l in held.iter() {
+                let loan = &self.loans[l];
+                // Only the argument's own borrow names storage the callee can
+                // write; loans it merely carries were created elsewhere.
+                if loan.holder == arg.local && loan.kind == LoanKind::Mutable && loan.param.is_none() && tarn_ir::post_drop::place_ty(self.f, self.t, &loan.place).is_some_and(|ty| self.t.decls.may_contain_references(&ty)) && !targets.contains(&(loan.place.local, l)) {
+                    targets.push((loan.place.local, l));
+                }
+            }
+        }
+        if targets.is_empty() {
+            return;
+        }
+        let mut stored = BitSet::new(self.loans.len());
+        for a in args {
+            self.holds_of(h, a, &mut stored);
+        }
+        for (target, own) in targets {
+            let mut incoming = stored.clone();
+            incoming.remove(own);
+            // Storage never holds a borrow of itself.
+            for l in stored.iter() {
+                if self.loans[l].place.local == target {
+                    incoming.remove(l);
+                }
+            }
+            h[target.0 as usize].union(&incoming);
         }
     }
 
@@ -669,6 +731,24 @@ impl<'a> Fx<'a> {
                         }
                     }
                 }
+                // v0 cooperative tasks may borrow only the Execution they run on:
+                // the spawn mailbox and executor never outlive it (ADR 0038).
+                if let Callee::Fn(id, _) = callee
+                    && Some(*id) == self.spawn_fn
+                    && let [owner, computation] = args.as_slice()
+                {
+                    let (mut allowed, mut held) = (BitSet::new(self.loans.len()), BitSet::new(self.loans.len()));
+                    self.holds_of(h, owner, &mut allowed);
+                    self.holds_of(h, computation, &mut held);
+                    let owner_roots: Vec<LocalId> = allowed.iter().map(|l| self.loans[l].place.local).collect();
+                    if held.iter().any(|l| !allowed.contains(l) && !owner_roots.contains(&self.loans[l].place.local)) {
+                        self.diags.push(
+                            Diagnostic::error("E4209", "borrow_in_async_task", "a spawned async task cannot hold borrowed data")
+                                .primary(arg_spans.get(1).copied().unwrap_or(tspan), "this computation holds a reference")
+                                .note("v0 async tasks may borrow only the Execution they run on; pass owned values"),
+                        );
+                    }
+                }
                 if !matches!(callee, Callee::Intrinsic(name) if name == "Task.join") && !matches!(callee, Callee::TaskSpawn { .. }) {
                     if args.iter().filter_map(operand_place).any(|p| self.t.decls.contains_task(&self.f.local(p.local).ty)
                         && h[p.local.0 as usize].iter().any(|l| self.f.local(self.loans[l].place.local).kind == tarn_ir::LocalKind::TaskScopeWitness)) {
@@ -884,6 +964,7 @@ pub fn check_borrows(p: &Program, r: &Resolved, t: &Typed, skip: &HashSet<Functi
         let mut changed = false;
         for f in p.functions.iter().filter(|f| !f.blocks.is_empty()) {
             let mut fx = Fx::new(f, t, &prov);
+            fx.spawn_fn = t.decls.exec_spawn.and_then(|s| p.by_symbol.get(&s)).copied();
             let ins = fx.flow();
             let s = fx.summary(&ins);
             if prov.get(&f.id) != Some(&s) {
@@ -898,6 +979,7 @@ pub fn check_borrows(p: &Program, r: &Resolved, t: &Typed, skip: &HashSet<Functi
     let mut results = BorrowResults::default();
     for f in p.functions.iter().filter(|f| !f.blocks.is_empty()) {
         let mut fx = Fx::new(f, t, &prov);
+        fx.spawn_fn = t.decls.exec_spawn.and_then(|s| p.by_symbol.get(&s)).copied();
         let ins = fx.flow();
         if !skip.contains(&f.id) {
             for (b, h) in ins.iter().enumerate() {

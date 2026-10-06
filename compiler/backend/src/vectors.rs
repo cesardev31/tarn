@@ -1,0 +1,203 @@
+use super::*;
+
+// Vec<T> storage execution (phase 14A). Element ownership, loans and which
+// values are initialized are frontend/post-drop decisions; this module only
+// moves bytes in and out of owned heap storage and destroys what remains.
+impl Cx<'_, '_> {
+    fn vec_fields(&self, vec: &Ty) -> Result<(i32, i32, i32, Ty)> {
+        let Ty::Adt(id, ts) = vec else { return Err(Error::bug("vector type")) };
+        if Some(*id) != self.t.decls.vec || ts.len() != 1 {
+            return Err(Error::bug("vector identity"));
+        }
+        let l = layout::layout(self.t, vec)?;
+        let offset = |i: usize| l.fields.get(i).map(|(o, _)| *o as i32).ok_or_else(|| Error::bug("vector layout"));
+        Ok((offset(0)?, offset(1)?, offset(2)?, ts[0].clone()))
+    }
+
+    fn vec_element(&mut self, data: cl::Value, index: cl::Value, elem: &Ty) -> Result<cl::Value> {
+        let size = layout::layout(self.t, elem)?.size;
+        let offset = self.b.ins().imul_imm(index, i64::from(size));
+        Ok(self.b.ins().iadd(data, offset))
+    }
+
+    fn vec_bounds(&mut self, index: cl::Value, len: cl::Value) {
+        let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, index, len);
+        self.fault_if(bad);
+    }
+
+    /// Snapshot an element (owned bytes) into a fresh slot.
+    fn vec_take(&mut self, addr: cl::Value, ty: &Ty) -> Result<Val> {
+        let l = layout::layout(self.t, ty)?;
+        let value = if l.size == 0 {
+            None
+        } else if let Some(st) = scalar(ty) {
+            Some(self.b.ins().load(st, cl::MemFlags::new(), addr, 0))
+        } else {
+            let slot = self.stack(l.size, l.align);
+            let copy = self.b.ins().stack_addr(types::I64, slot, 0);
+            self.copy(copy, addr, l.size);
+            Some(copy)
+        };
+        Ok(Val { value, ty: ty.clone() })
+    }
+
+    fn vec_put(&mut self, addr: cl::Value, value: &Val) -> Result<()> {
+        let l = layout::layout(self.t, &value.ty)?;
+        if l.size != 0 {
+            let v = value.value.ok_or_else(|| Error::bug("missing vector element"))?;
+            if scalar(&value.ty).is_some() {
+                self.b.ins().store(cl::MemFlags::new(), v, addr, 0);
+            } else {
+                self.copy(addr, v, l.size);
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn vector(&mut self, name: &str, args: &[Val], dest: &Ty) -> Result<Option<Val>> {
+        let Some(operation) = name.strip_prefix("Vec.") else { return Ok(None) };
+        if operation == "new" {
+            let (data, len, cap, _) = self.vec_fields(dest)?;
+            let l = layout::layout(self.t, dest)?;
+            let slot = self.stack(l.size, l.align);
+            let addr = self.b.ins().stack_addr(types::I64, slot, 0);
+            let zero = self.b.ins().iconst(types::I64, 0);
+            for offset in [data, len, cap] {
+                self.b.ins().store(cl::MemFlags::new(), zero, addr, offset);
+            }
+            return Ok(Some(Val { value: Some(addr), ty: dest.clone() }));
+        }
+        let receiver = args.first().ok_or_else(|| Error::bug("vector receiver"))?;
+        let Ty::Ref(mutable, vec) = &receiver.ty else { return Err(Error::bug("vector receiver type")) };
+        let (data_at, len_at, cap_at, elem) = self.vec_fields(vec)?;
+        let addr = receiver.value.ok_or_else(|| Error::bug("vector storage"))?;
+        let flags = cl::MemFlags::new();
+        let data = self.b.ins().load(types::I64, flags, addr, data_at);
+        let len = self.b.ins().load(types::I64, flags, addr, len_at);
+        let value = match (operation, args.len()) {
+            ("len", 1) if *dest == Ty::Int(IntTy::Usize) => Val { value: Some(len), ty: dest.clone() },
+            ("is_empty", 1) if *dest == Ty::Bool => {
+                let empty = self.b.ins().icmp_imm(IntCC::Equal, len, 0);
+                Val { value: Some(empty), ty: Ty::Bool }
+            }
+            ("get", 2) | ("get_mut", 2) if *dest == Ty::Ref(operation == "get_mut", Box::new(elem.clone())) && (operation == "get" || *mutable) => {
+                let index = args[1].value.ok_or_else(|| Error::bug("vector index"))?;
+                self.vec_bounds(index, len);
+                let at = self.vec_element(data, index, &elem)?;
+                Val { value: Some(at), ty: dest.clone() }
+            }
+            ("at", 2) if *dest == elem && self.t.decls.is_copy(&elem) => {
+                let index = args[1].value.ok_or_else(|| Error::bug("vector index"))?;
+                self.vec_bounds(index, len);
+                let at = self.vec_element(data, index, &elem)?;
+                self.vec_take(at, &elem)?
+            }
+            ("push", 2) if *mutable && args[1].ty == elem && *dest == Ty::Void => {
+                let cap = self.b.ins().load(types::I64, flags, addr, cap_at);
+                let full = self.b.ins().icmp(IntCC::Equal, len, cap);
+                let grow = self.b.create_block();
+                let store = self.b.create_block();
+                self.b.ins().brif(full, grow, &[], store, &[]);
+                self.b.switch_to_block(grow);
+                let doubled = self.b.ins().imul_imm(cap, 2);
+                let four = self.b.ins().iconst(types::I64, 4);
+                let empty = self.b.ins().icmp_imm(IntCC::Equal, cap, 0);
+                let next = self.b.ins().select(empty, four, doubled);
+                let size = self.b.ins().iconst(types::I64, i64::from(layout::layout(self.t, &elem)?.size));
+                let grown = self.runtime("tarn_rt_vec_grow", &[data, next, size])[0];
+                self.b.ins().store(flags, grown, addr, data_at);
+                self.b.ins().store(flags, next, addr, cap_at);
+                self.b.ins().jump(store, &[]);
+                self.b.switch_to_block(store);
+                let data = self.b.ins().load(types::I64, flags, addr, data_at);
+                let at = self.vec_element(data, len, &elem)?;
+                self.vec_put(at, &args[1])?;
+                let len = self.b.ins().iadd_imm(len, 1);
+                self.b.ins().store(flags, len, addr, len_at);
+                Val { value: None, ty: Ty::Void }
+            }
+            ("pop", 1) if *mutable => {
+                let Ty::Adt(option, _) = dest else { return Err(Error::bug("vector pop result")) };
+                let def = self.t.decls.enums.get(option).ok_or_else(|| Error::bug("option layout"))?;
+                let none = def.variants.iter().position(|v| v.name == "None").ok_or_else(|| Error::bug("Option.None"))?;
+                let some = def.variants.iter().position(|v| v.name == "Some").ok_or_else(|| Error::bug("Option.Some"))?;
+                let l = layout::layout(self.t, dest)?;
+                let payload = l.variants.get(some).and_then(|v| v.first()).cloned().ok_or_else(|| Error::bug("Option payload"))?;
+                if payload.1 != elem {
+                    return Err(Error::bug("vector pop ABI"));
+                }
+                let slot = self.stack(l.size, l.align);
+                let out = self.b.ins().stack_addr(types::I64, slot, 0);
+                let empty = self.b.ins().icmp_imm(IntCC::Equal, len, 0);
+                let (on_empty, on_value, done) = (self.b.create_block(), self.b.create_block(), self.b.create_block());
+                self.b.ins().brif(empty, on_empty, &[], on_value, &[]);
+                self.b.switch_to_block(on_empty);
+                let tag = self.b.ins().iconst(types::I32, none as i64);
+                self.b.ins().store(flags, tag, out, 0);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(on_value);
+                let last = self.b.ins().iadd_imm(len, -1);
+                self.b.ins().store(flags, last, addr, len_at);
+                let at = self.vec_element(data, last, &elem)?;
+                let size = layout::layout(self.t, &elem)?.size;
+                let target = self.b.ins().iadd_imm(out, i64::from(payload.0));
+                self.copy(target, at, size);
+                let tag = self.b.ins().iconst(types::I32, some as i64);
+                self.b.ins().store(flags, tag, out, 0);
+                self.b.ins().jump(done, &[]);
+                self.b.switch_to_block(done);
+                Val { value: Some(out), ty: dest.clone() }
+            }
+            ("replace", 3) if *mutable && args[2].ty == elem && *dest == elem => {
+                let index = args[1].value.ok_or_else(|| Error::bug("vector index"))?;
+                self.vec_bounds(index, len);
+                let at = self.vec_element(data, index, &elem)?;
+                let old = self.vec_take(at, &elem)?;
+                self.vec_put(at, &args[2])?;
+                old
+            }
+            ("swap_remove", 2) if *mutable && *dest == elem => {
+                let index = args[1].value.ok_or_else(|| Error::bug("vector index"))?;
+                self.vec_bounds(index, len);
+                let at = self.vec_element(data, index, &elem)?;
+                let old = self.vec_take(at, &elem)?;
+                let last = self.b.ins().iadd_imm(len, -1);
+                let from = self.vec_element(data, last, &elem)?;
+                let size = layout::layout(self.t, &elem)?.size;
+                self.copy(at, from, size);
+                self.b.ins().store(flags, last, addr, len_at);
+                old
+            }
+            _ => return Err(Error::bug(format!("vector operation ABI: {operation}"))),
+        };
+        Ok(Some(value))
+    }
+
+    /// Destroy every remaining element in index order, then free storage.
+    pub(super) fn drop_vector(&mut self, addr: cl::Value, vec: &Ty) -> Result<()> {
+        let (data_at, len_at, _, elem) = self.vec_fields(vec)?;
+        let flags = cl::MemFlags::new();
+        let data = self.b.ins().load(types::I64, flags, addr, data_at);
+        let len = self.b.ins().load(types::I64, flags, addr, len_at);
+        if !self.t.decls.is_copy(&elem) && !matches!(elem, Ty::Ref(..)) {
+            let header = self.b.create_block();
+            let body = self.b.create_block();
+            let exit = self.b.create_block();
+            self.b.append_block_param(header, types::I64);
+            let zero = self.b.ins().iconst(types::I64, 0);
+            self.b.ins().jump(header, &[zero.into()]);
+            self.b.switch_to_block(header);
+            let i = self.b.block_params(header)[0];
+            let more = self.b.ins().icmp(IntCC::UnsignedLessThan, i, len);
+            self.b.ins().brif(more, body, &[], exit, &[]);
+            self.b.switch_to_block(body);
+            let at = self.vec_element(data, i, &elem)?;
+            self.drop_at(at, &elem)?;
+            let next = self.b.ins().iadd_imm(i, 1);
+            self.b.ins().jump(header, &[next.into()]);
+            self.b.switch_to_block(exit);
+        }
+        self.runtime("tarn_rt_env_free", &[data]);
+        Ok(())
+    }
+}

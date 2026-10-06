@@ -85,6 +85,10 @@ pub struct Prelude {
     pub channel_fn: SymbolId,
 }
 
+/// Private trusted `net` task-record intrinsics (ADR 0038). They are storage
+/// primitives for cooperative tasks, not part of the network syscall ABI.
+pub const TASK_INTRINSICS: [&str; 7] = ["_task_new", "_task_complete", "_task_take", "_task_wait", "_task_abandoned", "_inbox_push", "_inbox_pop"];
+
 /// Declarations as types. Produced by the type checker and handed to later
 /// phases (IR lowering) so they never re-derive layouts or signatures.
 #[derive(Default)]
@@ -103,9 +107,16 @@ pub struct Decls {
     /// Private trusted async-body primitives: per-poll waker, bare suspension.
     pub exec_async_waker: Option<SymbolId>,
     pub exec_async_park: Option<SymbolId>,
+    /// Phase 14A cooperative tasks: handle, runner reference, spawn, and the
+    /// private task-record intrinsics (kept out of the network ABI set).
+    pub async_task: Option<SymbolId>,
+    pub task_ref: Option<SymbolId>,
+    pub exec_spawn: Option<SymbolId>,
+    pub task_intrinsics: Vec<SymbolId>,
     pub result: Option<SymbolId>,
     pub net_intrinsics: HashMap<String, SymbolId>,
     pub mutex: Option<SymbolId>,
+    pub vec: Option<SymbolId>,
     pub mutex_guard: Option<SymbolId>,
     pub atomics: HashMap<SymbolId, Ty>,
     pub transfer: Option<SymbolId>,
@@ -164,6 +175,7 @@ impl<'a> Env<'a> {
         let mut decls = decls;
         decls.result = ps.get("Result");
         decls.mutex = ps.get("Mutex");
+        decls.vec = ps.get("Vec");
         decls.mutex_guard = ps.get("MutexGuard");
         for (name, ty) in [("AtomicBool", "bool"), ("AtomicI32", "i32"), ("AtomicI64", "i64"), ("AtomicU32", "u32"), ("AtomicU64", "u64"), ("AtomicUsize", "usize")] {
             if let Some(id) = ps.get(name) { decls.atomics.insert(id, primitive(ty)); }
@@ -179,6 +191,13 @@ impl<'a> Env<'a> {
                 env.decls.exec_progress = scope.get("Progress");
                 env.decls.exec_async_waker = scope.get("_with_waker");
                 env.decls.exec_async_park = scope.get("_async_park");
+                env.decls.async_task = scope.get("AsyncTask");
+                env.decls.task_ref = scope.get("_TaskRef");
+                env.decls.task_intrinsics = TASK_INTRINSICS.iter().filter_map(|n| scope.get(n)).collect();
+                env.decls.exec_spawn = r.symbols.iter().enumerate().find(|(_, s)| {
+                    s.name == "spawn_async" && s.module == Some(ModuleId(index as u32))
+                        && matches!(s.kind, SymbolKind::Method { owner } if Some(owner) == env.decls.exec_owner)
+                }).map(|(i, _)| SymbolId(i as u32));
                 env.decls.exec_poll_with = r.symbols.iter().enumerate().find(|(_, s)| {
                     s.name == "poll_with" && s.module == Some(ModuleId(index as u32))
                         && matches!(s.kind, SymbolKind::Method { owner } if Some(owner) == env.decls.exec_operation)
@@ -207,7 +226,7 @@ impl<'a> Env<'a> {
                 }
                 for id in &scope.symbols {
                     let symbol = r.symbol(*id);
-                    let async_primitive = Some(*id) == env.decls.exec_async_waker || Some(*id) == env.decls.exec_async_park;
+                    let async_primitive = Some(*id) == env.decls.exec_async_waker || Some(*id) == env.decls.exec_async_park || env.decls.task_intrinsics.contains(id);
                     if !async_primitive && symbol.name.starts_with("_") && env.decls.fns.get(id).is_some_and(|sig| sig.abi.as_deref() == Some("intrinsic")) {
                         env.decls.net_intrinsics.insert(format!("net.{}", symbol.name), *id);
                     }
@@ -354,8 +373,9 @@ impl<'a> Env<'a> {
         // Trusted bootstrap read copies its payload. Express its restriction
         // through the existing generic obligation table, not a new conditional
         // method syntax (ordinary owner bounds remain forbidden by ADR 0015).
-        if f.abi.as_deref() == Some("intrinsic") && f.name.name == "read"
-            && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.mutex_guard)
+        if f.abi.as_deref() == Some("intrinsic")
+            && ((f.name.name == "read" && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.mutex_guard))
+                || (f.name.name == "at" && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.vec)))
             && let (Some(parameter), Some(copy)) = (generics.first(), self.decls.copy) {
             self.decls.bounds.entry(*parameter).or_default().push(copy);
         }
@@ -385,7 +405,7 @@ impl<'a> Env<'a> {
         let task_join = f.abi.as_deref() == Some("intrinsic") && f.name.name == "join"
             && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.task);
         let sync_constructor = f.abi.as_deref() == Some("intrinsic") && f.name.name == "new"
-            && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.mutex || self.decls.atomics.contains_key(id));
+            && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.mutex || Some(*id) == self.decls.vec || self.decls.atomics.contains_key(id));
         let result = if task_join || sync_constructor { ResultContract::Owned } else if !holds(&ret) {
             if self.decls.is_copy(&ret) { ResultContract::Copy } else { ResultContract::Owned }
         } else if f.body.is_some() {

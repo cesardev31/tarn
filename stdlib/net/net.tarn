@@ -437,7 +437,27 @@ pub struct Operation<R> {
     waker Waker
     complete bool
 }
-pub struct Executor { tasks [16]Option<Operation<void>> }
+/// Handle of a cooperative task spawned into an executor (ADR 0038). Owned and
+/// non-Copy: moving it moves the only authority over the result. Destroying it
+/// destroys an unjoined result, or abandons a pending task; never detaches.
+pub struct AsyncTask<R> {
+    record usize
+    result [0]R
+}
+/// The runner's reference to a task record; its destruction releases it.
+struct _TaskRef { record usize }
+struct _Spawned {
+    operation Operation<void>
+    record usize
+}
+pub struct Executor { tasks Vec<_Spawned> }
+extern "intrinsic" fn _task_new<R>(owner &Execution) AsyncTask<R>
+extern "intrinsic" fn _task_complete<R>(task &_TaskRef, value R)
+extern "intrinsic" fn _task_take<R>(task &AsyncTask<R>) Option<R>
+extern "intrinsic" fn _task_wait(record usize, waker &Waker) _Raw
+extern "intrinsic" fn _task_abandoned(record usize) bool
+extern "intrinsic" fn _inbox_push(owner &Execution, spawned _Spawned)
+extern "intrinsic" fn _inbox_pop(owner &Execution) Option<_Spawned>
 extern "intrinsic" fn _exec_new(poll usize) _Raw
 extern "intrinsic" fn _waker_new(owner &Execution) Waker
 extern "intrinsic" fn _wake(waker &Waker) _Raw
@@ -472,54 +492,109 @@ pub fn Operation<R>.poll(&mut self) Progress<R> {
 }
 // Consume the operation to release its conservative across-suspension loans.
 pub fn Operation<R>.finish(self) {}
-pub fn Executor.new() Executor {
-    return Executor{tasks: [16]Option<Operation<void>>{None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None}}
-}
+pub fn Executor.new() Executor { return Executor{tasks: Vec.new()} }
 // Consuming insertion returns the new loan holder through ordinary provenance.
 pub fn Executor.add(self, operation Operation<void>) Executor {
     var executor = self
-    for i in 0..16 {
-        match &executor.tasks[i] {
-            None => { executor.tasks[i] = Some(operation)
-                return executor
-            }
-            Some(value) => {}
+    executor.tasks.push(_Spawned{operation: operation, record: usize(0)})
+    return executor
+}
+// Move spawned operations from the Execution mailbox into this executor.
+fn Executor.drain(&mut self, owner &Execution) {
+    for {
+        match _inbox_pop(owner) {
+            Some(spawned) => { self.tasks.push(spawned) }
+            None => { return }
         }
     }
-    panic("manual executor capacity exceeded")
+}
+// One fair turn: each live task is polled at most once if its wake bit is set.
+// Completed tasks are removed; tasks whose handle was dropped are abandoned
+// (their frame is destroyed through its verified abandonment path).
+fn Executor.step(&mut self, owner &Execution) Result<bool, Error> {
+    self.drain(owner)
+    var polled = false
+    var i = usize(0)
+    var count = self.tasks.len()
+    for i < count {
+        var finished = false
+        entry := self.tasks.get_mut(i)
+        if entry.record != usize(0) && _task_abandoned(entry.record) {
+            finished = true
+        } else {
+            try _check(_wake_owner(&entry.operation.waker, owner.state.native))
+            if entry.operation.runnable() {
+                polled = true
+                match entry.operation.poll() {
+                    Progress.Pending => {}
+                    Progress.Ready(value) => { finished = true }
+                }
+            }
+        }
+        if finished {
+            // Destroys the finished or abandoned operation. The last task,
+            // not yet visited this turn, moves into slot i and is visited next.
+            self.tasks.swap_remove(i)
+            count = count - usize(1)
+        } else {
+            i = i + usize(1)
+        }
+    }
+    return Ok(polled)
 }
 pub fn Executor.turn(&mut self, owner &Execution, timeout i32) Result<usize, Error> {
     // Readiness is serviced even when a task self-wakes continuously.
     try owner.wait(0)
-    var remaining = usize(0)
-    var polled = false
-    for i in 0..16 {
-        var complete = false
-        match &mut self.tasks[i] {
-            None => {}
-            Some(operation) => {
-                try _check(_wake_owner(&operation.waker, owner.state.native))
-                remaining = remaining + usize(1)
-                if operation.runnable() {
-                    polled = true
-                    match operation.poll() {
-                        Progress.Pending => {}
-                        Progress.Ready(value) => { complete = true }
-                    }
-                }
-            }
-        }
-        if complete { self.tasks[i] = None
-            remaining = remaining - usize(1)
-        }
-    }
-    if !polled && remaining != usize(0) { try owner.wait(timeout) }
-    return Ok(remaining)
+    if !(try self.step(owner)) && self.tasks.len() != usize(0) { try owner.wait(timeout) }
+    return Ok(self.tasks.len())
 }
 pub fn Executor.run(self, owner &Execution) Result<void, Error> {
     var executor = self
     for {
-        if try executor.turn(owner, -1) == usize(0) { return Ok(()) }
+        if try executor.turn(owner, -1) == usize(0) {
+            executor.drain(owner)
+            if executor.tasks.len() == usize(0) { return Ok(()) }
+        }
+    }
+}
+
+// Runs a spawned computation; stores its result in the task record once.
+async fn _runner<R>(computation mut fn(&Waker) Progress<R>, task _TaskRef) {
+    var poller = computation
+    var poll_once = fn(waker &Waker) Progress<R> { return poller(waker) }
+    for {
+        match _with_waker(poll_once) {
+            Progress.Ready(value) => {
+                _task_complete(&task, value)
+                return
+            }
+            Progress.Pending => {}
+        }
+        _async_park()
+    }
+}
+// Spawn a cooperative task on this Execution (not an OS thread; see `spawn`).
+// v0: the computation may borrow only this Execution (E4209).
+pub fn Execution.spawn_async<R>(&self, computation mut fn(&Waker) Progress<R>) AsyncTask<R> {
+    task := _task_new(self)
+    runner := Operation.new(self, _runner(computation, _TaskRef{record: task.record}))
+    _inbox_push(self, _Spawned{operation: runner, record: task.record})
+    return task
+}
+// Await the result; consuming the handle makes a second join impossible.
+pub async fn AsyncTask<R>.join(self) R {
+    for {
+        match _task_take(&self) {
+            Some(value) => { return value }
+            None => {}
+        }
+        var waiting = false
+        raw := _with_waker(fn(waker &Waker) _Raw {
+            waiting = true
+            return _task_wait(self.record, waker)
+        })
+        if raw.code != 0 { panic("async task joined from another execution") }
+        _async_park()
     }
 }
 
@@ -681,21 +756,28 @@ pub fn Operation<R>.poll_with(&mut self, parent &Waker) Progress<R> {
 }
 
 // Drive one top-level operation on the current thread until Ready (ADR 0037).
-// The caller owns the Operation (an async computation is accepted as its
-// poller by Operation.new); its result may borrow what the poller borrowed,
-// and the Operation is destroyed exactly once by the caller's scope.
+// Tasks spawned meanwhile run on an internal executor with fair turns; when the
+// operation completes, unfinished spawned tasks are abandoned (structured: no
+// task outlives block_on). The caller owns the Operation.
 pub fn Execution.block_on<R>(&self, operation &mut Operation<R>) Result<R, Error> {
+    var executor = Executor.new()
     try _check(_wake_owner(&operation.waker, self.state.native))
     operation.wake()
     for {
+        var progressed = false
         if operation.runnable() {
+            progressed = true
             match operation.poll() {
                 Progress.Pending => {}
-                Progress.Ready(value) => { return Ok(value) }
+                Progress.Ready(value) => {
+                    executor.drain(self)
+                    return Ok(value)
+                }
             }
-        } else {
-            try self.wait(-1)
         }
+        try self.wait(0)
+        if try executor.step(self) { progressed = true }
+        if !progressed { try self.wait(-1) }
     }
 }
 
