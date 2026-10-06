@@ -171,4 +171,4 @@ correctness-first array bitmaps. Open tradeoffs: whether a future backend wants
 flat branch CFGs earlier; whether iteration bitmaps should later become a
 consumption cursor; and how much redundant flag resetting can safely be removed.
 None of these choices blocks executable destruction semantics, and none is
-optimized in this phase. Native code generation remains unimplemented.
+optimized in this phase. Native code generation is specified separately in [ADR 0027](0027-native-backend.md).

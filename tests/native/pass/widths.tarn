@@ -1,0 +1,72 @@
+fn main() {
+    a0: i8 := 40
+    b0: i8 := 2
+    print(a0 + b0)
+    print(a0 - b0)
+    print(a0 / b0)
+    print(a0 % b0)
+    print(a0 > b0)
+    a1: i16 := 40
+    b1: i16 := 2
+    print(a1 + b1)
+    print(a1 - b1)
+    print(a1 / b1)
+    print(a1 % b1)
+    print(a1 > b1)
+    a2: i32 := 40
+    b2: i32 := 2
+    print(a2 + b2)
+    print(a2 - b2)
+    print(a2 / b2)
+    print(a2 % b2)
+    print(a2 > b2)
+    a3: i64 := 40
+    b3: i64 := 2
+    print(a3 + b3)
+    print(a3 - b3)
+    print(a3 / b3)
+    print(a3 % b3)
+    print(a3 > b3)
+    a4: u8 := 40
+    b4: u8 := 2
+    print(a4 + b4)
+    print(a4 - b4)
+    print(a4 / b4)
+    print(a4 % b4)
+    print(a4 > b4)
+    a5: u16 := 40
+    b5: u16 := 2
+    print(a5 + b5)
+    print(a5 - b5)
+    print(a5 / b5)
+    print(a5 % b5)
+    print(a5 > b5)
+    a6: u32 := 40
+    b6: u32 := 2
+    print(a6 + b6)
+    print(a6 - b6)
+    print(a6 / b6)
+    print(a6 % b6)
+    print(a6 > b6)
+    a7: u64 := 40
+    b7: u64 := 2
+    print(a7 + b7)
+    print(a7 - b7)
+    print(a7 / b7)
+    print(a7 % b7)
+    print(a7 > b7)
+    a8: isize := 40
+    b8: isize := 2
+    print(a8 + b8)
+    print(a8 - b8)
+    print(a8 / b8)
+    print(a8 % b8)
+    print(a8 > b8)
+    a9: usize := 40
+    b9: usize := 2
+    print(a9 + b9)
+    print(a9 - b9)
+    print(a9 / b9)
+    print(a9 % b9)
+    print(a9 > b9)
+}

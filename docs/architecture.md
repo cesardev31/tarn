@@ -1,8 +1,9 @@
 # Compiler architecture
 
 ```
-Source ─▶ Lexer ─▶ Parser ─▶ AST ─▶ Resolve ─▶ Types ─▶ Ownership/Borrow ─▶ IR ─▶ Backend ─▶ binary
-                                                          (on IR CFG)          (Cranelift)
+Source → Lexer → Parser → AST → Resolve → Types → Typed IR
+    → Move/init (6A) → Borrows (6B) → Post-drop IR (6C)
+    → Cranelift backend → ELF object → system cc + runtime → executable
 ```
 
 ## Crates (Cargo workspace)
@@ -18,9 +19,9 @@ Source ─▶ Lexer ─▶ Parser ─▶ AST ─▶ Resolve ─▶ Types ─▶ 
 | `compiler/driver` | `tarn_driver` | load modules from disk, run phases, sort diagnostics | done (v0) |
 | `compiler/ir` | `tarn_ir` | typed CFG IR, lowering, verifier, printer (ADR 0023) | done (v0) |
 | `compiler/ownership` | `tarn_ownership` | 6A move/init + drop decisions (ADR 0024), 6B borrows + provenance (ADR 0025), 6C executable drop elaboration (ADR 0026) | done (v0) |
-| `compiler/backend` | `tarn_backend` | IR ─▶ Cranelift ─▶ object | planned |
+| `compiler/backend` | `tarn_backend` | post-drop IR → Cranelift → ELF object/link | initial Linux x86_64 subset (ADR 0027) |
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
-| `runtime` | `tarn_runtime` | `print`, `panic`, startup (staticlib) | planned |
+| `runtime` | — | embedded C runtime: primitive print, strings, panic/abort; libc startup | initial (ADR 0027) |
 | `tools/cli` | `tarn` | the single CLI | started |
 | `tools/fmt` | `tarn_fmt` | canonical formatter | planned |
 | `tools/lsp` | `tarn-lsp` | stdio LSP: diagnostics, hover, definition, unsaved buffers | initial |
@@ -43,12 +44,14 @@ Each external crate needs a line in this table with a justification.
 |-------|---------|-----|
 | `serde_json` | tools/lsp | JSON-RPC messages and robust JSON encoding/decoding |
 | `url` | tools/lsp | Correct file URI encoding/decoding, including escaped paths |
-| `cranelift-*` (planned) | backend | native code generation; the reason the backend exists |
+| `cranelift-codegen/frontend/module/object/native` | backend | ISA/codegen, SSA builder, symbols, ELF object emission; pinned 0.125.3, dependency audit in ADR 0027 |
 
-## Linking (planned)
+## Linking
 
-Debug builds: Cranelift object file + prebuilt `libtarn_runtime.a`, linked with
-the system `cc` (Linux x86_64 only). Evaluate invoking `ld` directly later.
+Cranelift ELF object + embedded `runtime/native.c`, compiled/linked through system
+`cc -std=c11 -O0 -fno-strict-aliasing -no-pie ... -lm`. Linux x86_64 only;
+requires a C toolchain with libc/libm headers. No installed runtime archive needed.
+ABI, canonical layout, output paths and limits: [ADR 0027](adr/0027-native-backend.md).
 
 ## Caching (planned, phase 17)
 
@@ -62,4 +65,4 @@ After successful ownership checking, the driver produces `CheckResult.drops`: a
 separate `tarn_ir::post_drop::Program` with explicit destruction plans, runtime
 flags and verified CFG edges. A backend consumes it without reading move/borrow
 results. See [ADR 0026](adr/0026-drop-elaboration.md). Inspect it with
-`tarn ir file.tarn --drops`. Native code generation is still deferred.
+`tarn ir file.tarn --drops`. Native code generation consumes this boundary; see [ADR 0027](adr/0027-native-backend.md).

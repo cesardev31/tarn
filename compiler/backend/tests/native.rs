@@ -139,3 +139,36 @@ fn backend_rejects_invalid_call_and_return_abi() {
     let err = tarn_backend::emit_object(p, res.typed.as_ref().unwrap()).unwrap_err();
     assert!(err.to_string().contains("parameter ABI mismatch"));
 }
+
+#[test]
+fn native_line_deletions_never_panic_or_emit_invalid_code() {
+    let dir = std::env::temp_dir().join(format!("tarn-native-mutations-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.tarn");
+    let mut runs = 0;
+    for category in ["pass", "fail"] {
+        for file in std::fs::read_dir(format!("../../tests/native/{category}")).unwrap() {
+            let path = file.unwrap().path();
+            if path.extension().is_none_or(|x| x != "tarn") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).unwrap();
+            let lines: Vec<_> = src.lines().collect();
+            for i in 0..lines.len() {
+                std::fs::write(&entry, [&lines[..i], &lines[i + 1..]].concat().join("\n")).unwrap();
+                let res = tarn_driver::check(&entry).unwrap();
+                if res.has_errors() {
+                    continue;
+                }
+                let emitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tarn_backend::emit_object(res.drops.as_ref().unwrap(), res.typed.as_ref().unwrap())));
+                assert!(emitted.is_ok(), "backend panic in {} without line {}", path.display(), i + 1);
+                if let Err(e) = emitted.unwrap() {
+                    assert!(e.to_string().starts_with("backend not implemented:"), "{} without line {}: {e}", path.display(), i + 1);
+                }
+                runs += 1;
+            }
+        }
+    }
+    assert!(runs > 40);
+    std::fs::remove_dir_all(dir).unwrap();
+}

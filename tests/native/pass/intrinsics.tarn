@@ -8,4 +8,7 @@ fn main() {
     print(s.is_empty())
     cloned := s.clone()
     print(cloned)
+    empty := ""
+    print(empty.len())
+    print(empty.is_empty())
 }

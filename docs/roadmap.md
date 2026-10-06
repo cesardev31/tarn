@@ -15,7 +15,7 @@ tested and documented.
 | 6A | Move/init checking on the IR (ADR 0024) | **done** |
 | 6B | Borrow checking on the IR (ADR 0025) | **done** |
 | 6C | Drop elaboration (ADR 0026) | **done** |
-| 7 | Cranelift backend, `tarn build`/`run` | after drop elaboration |
+| 7 | Cranelift backend, `tarn build`/`run` (ADR 0027) | **done for the initial Linux x86_64 subset** |
 | 8 | Structs | |
 | 9 | Ownership (moves) | |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |

@@ -259,8 +259,7 @@ impl Cx<'_, '_> {
             self.term(&block.term)?;
         }
         self.b.seal_all_blocks();
-        // finalize consumes a builder; replacing would require an invalid
-        // temporary builder. The outer caller finalizes once lowering returns.
+        // The outer caller consumes/finalizes the builder after lowering.
         Ok(())
     }
     fn stack(&mut self, size: u32, alignment: u32) -> cl::StackSlot {
