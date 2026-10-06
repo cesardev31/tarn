@@ -24,6 +24,7 @@ tested and documented.
 | 12A | Blocking native TCP/UDP, owned sockets, resolution and Result errors (ADR 0034) | **done within documented blocking Linux v0 subset** |
 | 12B | Nonblocking I/O and level-triggered epoll (ADR 0035) | **done within documented Linux v0 subset** |
 | 12C | Manual suspended operations and single-thread execution (ADR 0036) | **done within documented bootstrap limits; no async syntax** |
+| 13 | Source async lowering over Phase 12C | **in progress: syntax/type foundation; executable frames pending** |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
 | 19 | Formatter (basic) | |
 | 20 | VS Code extension (TextMate) | **started**: language + highlighting |

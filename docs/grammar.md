@@ -11,7 +11,7 @@ item        = [ "pub" ] ( import | fn_decl | extern_fn | struct_decl
                         | enum_decl | interface | impl_decl ) ;
 import      = "import" STRING ;
 extern_fn   = "extern" STRING fn_decl ;                 (* body optional *)
-fn_decl     = "fn" IDENT [ generics ] [ "." IDENT [ generics ] ]
+fn_decl     = [ "async" ] "fn" IDENT [ generics ] [ "." IDENT [ generics ] ]
               "(" [ params ] ")" [ type ] [ block ] ;
               (* `fn Pair<A, B>.m<C>(…)`: a list before `.` binds the owner's
                  type parameters (ADR 0015); the token after it decides *)
@@ -57,7 +57,7 @@ cond        = expr ;                             (* no bare struct literals *)
 
 expr        = [ range_lhs ] ( ".." | "..=" ) [ binary ] | binary ;
 binary      = unary { BINOP binary } ;           (* precedence climbing, see below *)
-unary       = ( "-" | "!" | "&" [ "mut" ] | "try" ) unary | postfix ;
+unary       = ( "-" | "!" | "&" [ "mut" ] | "try" | "await" ) unary | postfix ;
 postfix     = primary { "." IDENT | "(" [ args ] ")" | "[" expr "]"
                       | "{" [ field_inits ] "}" } ;   (* struct literal: path-only primary *)
 primary     = INT | FLOAT | STRING | "true" | "false" | IDENT
@@ -89,12 +89,18 @@ literal     = [ "-" ] ( INT | FLOAT ) | STRING | "true" | "false" ;
 | 7 | `<<` `>>` | left |
 | 8 | `+` `-` | left |
 | 9 | `*` `/` `%` | left |
-| 10 | prefix `-` `!` `&` `&mut` `try` | right (prefix) |
+| 10 | prefix `-` `!` `&` `&mut` `try` `await` | right (prefix) |
 | 11 | postfix `.name` `(args)` `[i]` `Path{...}` | left |
 
 Bitwise operators bind tighter than comparisons (unlike C), so
 `a & mask == 0` means `(a & mask) == 0`. `try` is a prefix operator:
 `try a.b() + 1` is `(try a.b()) + 1`.
+`try await f()` is `try (await f())`; `await f() + 1` is
+`(await f()) + 1`. Async blocks, async closures and nested function items are
+not introduced. The Phase-13 syntax/type foundation is in progress: executable
+state-machine lowering is not available yet and async declarations report E3062.
+At this checkpoint the modifier is recognized on free and inherent method items;
+async interface/impl declarations remain outside the parser's supported surface.
 
 ## Newlines (ADR 0008)
 

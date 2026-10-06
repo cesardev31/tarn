@@ -56,6 +56,7 @@ pub struct SemanticContract {
 }
 #[derive(Clone)]
 pub struct FnSig {
+    pub is_async: bool,
     /// Owner binders, then the function's own generics.
     pub generics: Vec<ParamId>,
     pub receiver: Option<ReceiverKind>,
@@ -95,6 +96,7 @@ pub struct Decls {
     pub exec_waker: Option<SymbolId>,
     pub exec_state: Option<SymbolId>,
     pub exec_owner: Option<SymbolId>,
+    pub exec_operation: Option<SymbolId>,
     pub result: Option<SymbolId>,
     pub net_intrinsics: HashMap<String, SymbolId>,
     pub mutex: Option<SymbolId>,
@@ -166,6 +168,7 @@ impl<'a> Env<'a> {
                 let scope = r.scope(r.modules[index].scope);
                 env.decls.exec_waker = scope.get("Waker");
                 env.decls.exec_owner = scope.get("Execution");
+                env.decls.exec_operation = scope.get("Operation");
                 env.decls.exec_state = scope.get("_ExecutionState");
                 for name in ["Waker", "_ExecutionState", "Execution"] {
                     if let Some(id) = scope.get(name) {
@@ -413,7 +416,7 @@ impl<'a> Env<'a> {
                 contract.result = ResultContract::Borrowed(explicit);
             }
         }
-        let sig = FnSig { generics, receiver, self_ty, params, ret, abi: f.abi.clone(), module: m, span: f.name.span, contract };
+        let sig = FnSig { is_async: f.is_async, generics, receiver, self_ty, params, ret, abi: f.abi.clone(), module: m, span: f.name.span, contract };
         self.decls.fns.insert(sym, sig);
     }
 

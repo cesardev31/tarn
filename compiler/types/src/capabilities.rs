@@ -21,7 +21,7 @@ impl Decls {
             *budget -= 1;
             path.push(ty.clone());
             let answer = match ty {
-                Ty::Ref(..) | Ty::Fn(..) | Ty::Param(_) | Ty::Any(_) | Ty::Opaque | Ty::Var(_) => true,
+                Ty::Ref(..) | Ty::Fn(..) | Ty::Async(..) | Ty::Param(_) | Ty::Any(_) | Ty::Opaque | Ty::Var(_) => true,
                 Ty::Adt(s, _) if Some(*s) == d.mutex_guard || Some(*s) == d.exec_waker => true,
                 Ty::Array(t, _) | Ty::Slice(t) => visit(d, t, path, budget),
                 Ty::Adt(s, args) if Some(*s) == d.task => args.iter().any(|t| visit(d, t, path, budget)),
@@ -48,7 +48,7 @@ impl Decls {
 
     /// Resources whose destruction ends a retained loan (unlock or retire wake).
     pub fn contains_loan_resource(&self, ty: &Ty) -> bool {
-        self.contains_guard(ty) || self.contains_resource(ty, self.exec_waker)
+        matches!(ty, Ty::Async(_)) || self.contains_guard(ty) || self.contains_resource(ty, self.exec_waker)
     }
 
     pub fn contains_task(&self, ty: &Ty) -> bool {
@@ -72,6 +72,7 @@ impl Decls {
                     } else { false }
                 }
                 Ty::Array(t, _) | Ty::Slice(t) | Ty::Ref(_, t) => visit(d, t, path, budget, target),
+                Ty::Async(_) => target.is_some() && target == d.exec_waker,
                 Ty::Param(_) | Ty::Opaque => true,
                 _ => false,
             };
@@ -114,7 +115,7 @@ impl Decls {
                 } else { false }
             }
             Ty::Any(s) => self.native_capabilities.get(s).is_some_and(|c| match cap { Capability::Transfer => c.transfer, Capability::Share => c.share }),
-            Ty::Fn(..) | Ty::Opaque | Ty::Var(_) => false,
+            Ty::Fn(..) | Ty::Async(..) | Ty::Opaque | Ty::Var(_) => false,
         };
         path.pop();
         answer

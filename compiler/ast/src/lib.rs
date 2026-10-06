@@ -60,6 +60,8 @@ pub struct Import {
 pub struct FnDecl {
     pub id: NodeId,
     pub span: Span,
+    /// Source modifier only; execution and frame metadata live in later tables.
+    pub is_async: bool,
     /// `extern "C"` ABI string, if any.
     pub abi: Option<String>,
     /// `User` in `fn User.new()`, `Pair<A, B>` in `fn Pair<A, B>.first()`.
@@ -373,6 +375,8 @@ pub enum ExprKind {
     },
     /// `try e`
     Try(Box<Expr>),
+    /// Source suspension expression, retained until typed state lowering.
+    Await(Box<Expr>),
     /// `Name{field: e, other}`
     StructLit {
         path: Path,

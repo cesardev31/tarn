@@ -1071,6 +1071,10 @@ impl<'a, 'l> Builder<'a, 'l> {
                 self.assign(dest, rv, span);
             }
             ExprKind::Try(inner) => self.try_into(e, inner, dest),
+            ExprKind::Await(_) => {
+                self.diags.push(Diagnostic::error("E3062", "async_lowering_unavailable", "await reached ordinary lowering before state-machine transformation")
+                    .primary(e.span, "suspension must be lowered before ownership checking"));
+            }
             ExprKind::StructLit { fields, .. } => {
                 let Ty::Adt(s, targs) = &ty else {
                     self.assign(dest, Rvalue::Use(Operand::Const(Const::Opaque)), span);

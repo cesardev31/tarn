@@ -54,8 +54,8 @@
     },
     "keywords": {
       "patterns": [
-        { "name": "keyword.control.tarn", "match": "\\b(return|if|else|for|in|break|continue|match|try|spawn)\\b" },
-        { "name": "keyword.other.tarn", "match": "\\b(fn|struct|enum|interface|impl|copy|var|mut|pub|import|unsafe|extern|any|scope)\\b" },
+        { "name": "keyword.control.tarn", "match": "\\b(return|if|else|for|in|break|continue|match|try|await|spawn)\\b" },
+        { "name": "keyword.other.tarn", "match": "\\b(async|fn|struct|enum|interface|impl|copy|var|mut|pub|import|unsafe|extern|any|scope)\\b" },
         { "name": "constant.language.boolean.tarn", "match": "\\b(true|false)\\b" },
         { "name": "variable.language.self.tarn", "match": "\\bself\\b" }
       ]

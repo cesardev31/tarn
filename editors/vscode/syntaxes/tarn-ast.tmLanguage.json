@@ -23,7 +23,7 @@
     },
     {
       "name": "keyword.other.tarn-ast",
-      "match": "\\b(?:fn|pub|copy|struct|enum|interface|impl|block|let|var|return|if|else|for|match|arm|call|try|unsafe|spawn|scope|import|break|continue)\\b"
+      "match": "\\b(?:async|await|fn|pub|copy|struct|enum|interface|impl|block|let|var|return|if|else|for|match|arm|call|try|unsafe|spawn|scope|import|break|continue)\\b"
     },
     {
       "name": "constant.language.tarn-ast",

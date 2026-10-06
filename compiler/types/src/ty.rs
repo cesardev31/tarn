@@ -80,6 +80,8 @@ pub enum Ty {
     /// Unsized; only valid behind a reference.
     Slice(Box<Ty>),
     Fn(tarn_ast::CallMode, Vec<Ty>, Box<Ty>),
+    /// Source-level owned computation; the declared function output is the inner type.
+    Async(Box<Ty>),
     /// A generic parameter, rigid inside its declaration.
     Param(ParamId),
     /// `any I` — dynamic dispatch through interface `I`.
@@ -146,6 +148,7 @@ impl Infer {
             Ty::Array(x, n) => Ty::Array(Box::new(self.zonk(&x)), n),
             Ty::Slice(x) => Ty::Slice(Box::new(self.zonk(&x))),
             Ty::Fn(mode, ps, r) => Ty::Fn(mode, ps.iter().map(|p| self.zonk(p)).collect(), Box::new(self.zonk(&r))),
+            Ty::Async(r) => Ty::Async(Box::new(self.zonk(&r))),
             t => t,
         }
     }
@@ -156,6 +159,7 @@ impl Infer {
             Ty::Adt(_, args) => args.iter().any(|a| self.occurs(v, a)),
             Ty::Ref(_, x) | Ty::Array(x, _) | Ty::Slice(x) => self.occurs(v, &x),
             Ty::Fn(_, ps, r) => ps.iter().any(|p| self.occurs(v, p)) || self.occurs(v, &r),
+            Ty::Async(r) => self.occurs(v, &r),
             _ => false,
         }
     }
@@ -241,6 +245,7 @@ impl Infer {
             (Ty::Array(x, n1), Ty::Array(y, n2)) => n1 == n2 && self.unify_inner(x, y),
             (Ty::Slice(x), Ty::Slice(y)) => self.unify_inner(x, y),
             (Ty::Fn(m1, p1, r1), Ty::Fn(m2, p2, r2)) => m1 == m2 && p1.len() == p2.len() && p1.iter().zip(p2).all(|(x, y)| self.unify_inner(x, y)) && self.unify_inner(r1, r2),
+            (Ty::Async(a), Ty::Async(b)) => self.unify_inner(a, b),
             _ => a == b,
         }
     }
@@ -265,6 +270,7 @@ impl Infer {
             Ty::Adt(_, args) => args.iter().any(|a| self.has_unresolved(a)),
             Ty::Ref(_, x) | Ty::Array(x, _) | Ty::Slice(x) => self.has_unresolved(&x),
             Ty::Fn(_, ps, r) => ps.iter().any(|p| self.has_unresolved(p)) || self.has_unresolved(&r),
+            Ty::Async(r) => self.has_unresolved(&r),
             _ => false,
         }
     }

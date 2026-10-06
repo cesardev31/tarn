@@ -179,3 +179,15 @@ stream them:
 | E4207 | `borrow_escapes_through_reference` | cannot store a reference to `x` into `out.f` |
 
 Golden tests in `tests/**/fail/*.tarn` pin the rendered text of each code.
+
+## Phase-13 checkpoint diagnostics
+
+| Code | Name | Meaning |
+|------|------|---------|
+| E3060 | `await_outside_async` | await requires an async function context; an ordinary closure does not inherit that context |
+| E3061 | `not_awaitable` | the operand is neither a source async computation nor the trusted Phase-12C Operation declaration |
+| E3062 | `async_lowering_unavailable` | temporary implementation gate: executable async frame lowering has not been implemented |
+
+E3062 is not a language restriction or evidence that an async body executes
+synchronously. The gate prevents any native compilation of async declarations
+until their state machines and destruction are implemented and verified.

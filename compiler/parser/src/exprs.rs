@@ -69,6 +69,7 @@ fn starts_expr(k: &TokenKind) -> bool {
             | T::Amp
             | T::AmpAmp
             | T::Try
+            | T::Await
             | T::Spawn
             | T::Fn
     )
@@ -193,6 +194,11 @@ impl Parser {
                 self.bump();
                 self.skip_newlines();
                 ExprKind::Try(Box::new(self.parse_unary()))
+            }
+            TokenKind::Await => {
+                self.bump();
+                self.skip_newlines();
+                ExprKind::Await(Box::new(self.parse_unary()))
             }
             _ => {
                 let primary = self.parse_primary();

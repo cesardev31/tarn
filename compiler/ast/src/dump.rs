@@ -113,6 +113,7 @@ impl Dumper {
     fn func(&mut self, f: &FnDecl, vis: &str, ind: usize) {
         self.s("(");
         self.s(vis);
+        if f.is_async { self.s("async "); }
         self.s("fn ");
         if let Some(abi) = &f.abi {
             let _ = write!(self.out, "extern {abi:?} ");
@@ -415,6 +416,11 @@ impl Dumper {
             }
             ExprKind::Try(inner) => {
                 self.s("(try ");
+                self.expr(inner, ind);
+                self.s(")");
+            }
+            ExprKind::Await(inner) => {
+                self.s("(await ");
                 self.expr(inner, ind);
                 self.s(")");
             }

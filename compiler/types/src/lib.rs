@@ -344,6 +344,7 @@ fn show(t: &Ty, r: &Resolved, names: &HashMap<ParamId, String>, var: &dyn Fn(u32
         Ty::Ref(m, x) => format!("&{}{}", if *m { "mut " } else { "" }, show(x)),
         Ty::Array(x, n) => format!("[{n}]{}", show(x)),
         Ty::Slice(x) => format!("[]{}", show(x)),
+        Ty::Async(output) => format!("async computation<{}>", show(output)),
         Ty::Fn(mode, ps, ret) => {
             let ret = match &**ret {
                 Ty::Void => String::new(),

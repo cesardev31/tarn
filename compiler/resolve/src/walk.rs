@@ -829,7 +829,7 @@ impl<'c, 'a> Walker<'c, 'a> {
                 self.expr(index);
                 None
             }
-            ExprKind::Unary { operand, .. } | ExprKind::Try(operand) => {
+            ExprKind::Unary { operand, .. } | ExprKind::Try(operand) | ExprKind::Await(operand) => {
                 self.expr(operand);
                 None
             }

@@ -79,6 +79,29 @@ with tempfile.TemporaryDirectory(prefix='tarn lsp ñ ') as directory:
     assert child.read_text() == 'pub fn get() i32 { return 1 }\n'
 print('PASS: stdio lifecycle, unsaved diagnostics/clearing, UTF-16, hover, definition, imported buffers, unchanged disk')
 
+# Async source facts are visible even while executable frame lowering is gated.
+with tempfile.TemporaryDirectory(prefix='tarn async lsp ') as directory:
+    entry = Path(directory) / 'main.tarn'
+    entry.write_text('fn main() {}\n')
+    uri = entry.as_uri()
+    source = 'async fn get() i32 { return 42 }\nfn main() {\n    op := get()\n    op\n}\n'
+    out = exchange([
+        {'id': 1, 'method': 'initialize', 'params': {}}, opened(uri, source),
+        request('textDocument/hover', 2, uri, 3, 5),
+        request('textDocument/definition', 3, uri, 2, 11),
+        changed(uri, 'fn main() { await 42 }\n', 2),
+        {'id': 4, 'method': 'shutdown'}, {'method': 'exit'},
+    ])
+    diagnostics = [m['params']['diagnostics'] for m in out if m.get('method') == 'textDocument/publishDiagnostics']
+    assert [d['code'] for d in diagnostics[0]] == ['E3062'], diagnostics
+    assert diagnostics[0][0]['range']['start'] == {'line': 0, 'character': 9}
+    assert [d['code'] for d in diagnostics[1]] == ['E3060'], diagnostics
+    responses = {m['id']: m for m in out if 'id' in m}
+    assert responses[2]['result']['contents']['value'] == 'op: async computation<i32>', responses[2]
+    assert responses[3]['result']['range']['start'] == {'line': 0, 'character': 9}, responses[3]
+    assert entry.read_text() == 'fn main() {}\n'
+print('PASS: async source types, definition, context diagnostics and explicit lowering gate')
+
 # Official stdlib buffers keep their declaration identities, including intrinsics.
 # A user file named net.tarn must not acquire that authority.
 for module in ('core', 'net', 'string'):

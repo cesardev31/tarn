@@ -17,7 +17,7 @@ pub(crate) enum FnContext {
 
 pub(crate) fn starts_item(k: &TokenKind) -> bool {
     use TokenKind::*;
-    matches!(k, Fn | Struct | Enum | Interface | Impl | Import | Pub | Copy | Extern)
+    matches!(k, Fn | Async | Struct | Enum | Interface | Impl | Import | Pub | Copy | Extern)
 }
 
 impl Parser {
@@ -85,6 +85,7 @@ impl Parser {
                 }
             }
             TokenKind::Fn => ItemKind::Fn(self.parse_fn(FnContext::Free, None)),
+            TokenKind::Async => ItemKind::Fn(self.parse_fn(FnContext::Free, None)),
             TokenKind::Extern => {
                 self.bump();
                 let abi = match self.peek().clone() {
@@ -137,6 +138,7 @@ impl Parser {
     pub(crate) fn parse_fn(&mut self, ctx: FnContext, abi: Option<String>) -> FnDecl {
         let start = if abi.is_some() { self.prev_span } else { self.span() };
         let id = self.id();
+        let is_async = self.eat(&TokenKind::Async);
         self.expect(&TokenKind::Fn);
         let mut name = self.expect_ident("function name");
         // `fn f<T>(` vs `fn Pair<A, B>.m(`: the token after the list decides
@@ -191,12 +193,12 @@ impl Parser {
                 if *self.peek() == TokenKind::Newline && *self.peek_past_newlines() == TokenKind::LBrace {
                     self.skip_newlines();
                     let b = self.parse_block();
-                    return FnDecl { id, span: self.since(start), abi, owner, name, generics, receiver, params, ret, borrows, body: Some(b) };
+                    return FnDecl { id, span: self.since(start), is_async, abi, owner, name, generics, receiver, params, ret, borrows, body: Some(b) };
                 }
             }
             None
         };
-        FnDecl { id, span: self.since(start), abi, owner, name, generics, receiver, params, ret, borrows, body }
+        FnDecl { id, span: self.since(start), is_async, abi, owner, name, generics, receiver, params, ret, borrows, body }
     }
 
     /// `(` [receiver] {`,` param} [`,`] `)`

@@ -105,6 +105,16 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
         let res = tarn_parser::parse_file(id, sources.file(id));
         diags.extend(res.diagnostics);
         for item in &res.module.items {
+            // Async syntax depends on the validated execution declarations,
+            // even when application source does not explicitly import net.
+            let needs_execution = match &item.kind {
+                ItemKind::Fn(function) => function.is_async,
+                ItemKind::Impl(implementation) => implementation.methods.iter().any(|f| f.is_async),
+                _ => false,
+            };
+            if needs_execution {
+                queue.push(("net".to_string(), root.join("net.tarn")));
+            }
             if let ItemKind::Import(imp) = &item.kind {
                 let file = root.join(format!("{}.tarn", imp.path));
                 let valid = imp.path.split('/').all(|s| !s.is_empty() && s != "." && s != "..");

@@ -18,6 +18,7 @@ pub struct FnCx<'e, 'a> {
     pub locals: HashMap<SymbolId, Ty>,
     pub tables: TypeTables,
     rets: Vec<Ty>,
+    async_context: bool,
     unsafe_depth: u32,
     task_scope_depth: u32,
     /// Integer literals to range-check once types are known: (span, value, type).
@@ -54,6 +55,7 @@ pub fn subst(t: &Ty, map: &HashMap<ParamId, Ty>) -> Ty {
         Ty::Array(x, n) => Ty::Array(Box::new(subst(x, map)), *n),
         Ty::Slice(x) => Ty::Slice(Box::new(subst(x, map))),
         Ty::Fn(mode, ps, r) => Ty::Fn(*mode, ps.iter().map(|x| subst(x, map)).collect(), Box::new(subst(r, map))),
+        Ty::Async(r) => Ty::Async(Box::new(subst(r, map))),
         t => t.clone(),
     }
 }
@@ -68,6 +70,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             locals: HashMap::new(),
             tables: TypeTables::default(),
             rets: Vec::new(),
+            async_context: false,
             unsafe_depth: 0,
             task_scope_depth: 0,
             literals: Vec::new(),
@@ -195,6 +198,11 @@ impl<'e, 'a> FnCx<'e, 'a> {
     // ------------------------------------------------------------ functions
 
     pub fn function(&mut self, f: &FnDecl, sig: &FnSig) {
+        self.async_context = f.is_async;
+        if f.is_async {
+            self.err(Diagnostic::error("E3062", "async_lowering_unavailable", "async state-machine lowering is not implemented at this checkpoint")
+                .primary(f.name.span, "this declaration requires generated suspended state"));
+        }
         if let (Some(r), Some(st)) = (&f.receiver, &sig.self_ty) {
             let t = match r.kind {
                 ReceiverKind::Value => st.clone(),
@@ -857,6 +865,26 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 Ty::Error
             }
             ExprKind::Try(inner) => self.try_expr(e, inner),
+            ExprKind::Await(inner) => {
+                let expected_operation = expected.map(|output| Ty::Async(Box::new(output.clone())));
+                let operand = self.expr(inner, expected_operation.as_ref());
+                if !self.async_context {
+                    self.err(Diagnostic::error("E3060", "await_outside_async", "`await` is only allowed inside an async function")
+                        .primary(e.span, "this function does not suspend"));
+                    return Ty::Error;
+                }
+                match self.infer.shallow(&operand) {
+                    Ty::Async(output) => return *output,
+                    Ty::Adt(id, args) if Some(id) == self.env.decls.exec_operation && args.len() == 1 => return args[0].clone(),
+                    Ty::Error => return Ty::Error,
+                    _ => {}
+                }
+                {
+                    self.err(Diagnostic::error("E3061", "not_awaitable", "`await` requires a suspended computation")
+                        .primary(inner.span, "this value is not awaitable"));
+                }
+                Ty::Error
+            }
             ExprKind::StructLit { fields, .. } => self.struct_lit(e, fields),
             ExprKind::ArrayLit { ty, elems } => {
                 let at = self.env_lower(ty);
@@ -965,7 +993,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
                         ps.push(receiver_ty(r, st));
                     }
                     ps.extend(sig.params.iter().cloned());
-                    Ty::Fn(CallMode::Shared, ps.iter().map(|p| subst(p, &map)).collect(), Box::new(subst(&sig.ret, &map)))
+                    let output = subst(&sig.ret, &map);
+                    let result = if sig.is_async { Ty::Async(Box::new(output)) } else { output };
+                    Ty::Fn(CallMode::Shared, ps.iter().map(|p| subst(p, &map)).collect(), Box::new(result))
                 }
                 SymbolKind::Module(_) => Ty::Error,
                 k => {
@@ -1373,10 +1403,13 @@ impl<'e, 'a> FnCx<'e, 'a> {
             (None, None) => Ty::Void,
         };
         self.rets.push(rt.clone());
+        let parent_async_context = self.async_context;
+        self.async_context = false;
         let parent_task_depth = self.task_scope_depth;
         self.task_scope_depth = 0;
         self.stmts(&body.stmts);
         self.task_scope_depth = parent_task_depth;
+        self.async_context = parent_async_context;
         self.rets.pop();
         if !matches!(self.infer.shallow(&rt), Ty::Void | Ty::Never | Ty::Opaque) && !self.diverges(&body.stmts) {
             let shown = self.show(&rt);
@@ -1595,7 +1628,8 @@ impl<'e, 'a> FnCx<'e, 'a> {
         // Propagate the expected result type into the generics first, so
         // arguments like `None` or closures see concrete types.
         if let Some(x) = expected {
-            let r = subst(&sig.ret, &map);
+            let output = subst(&sig.ret, &map);
+            let r = if sig.is_async { Ty::Async(Box::new(output)) } else { output };
             self.infer.unify(&r, x);
         }
         let mut ps: Vec<Ty> = Vec::new();
@@ -1639,7 +1673,8 @@ impl<'e, 'a> FnCx<'e, 'a> {
             if found && complete { evidence_updates.push((index, components)); }
         }
         for (index, evidence) in evidence_updates { self.obligations[index].3 = Some(evidence); }
-        subst(&sig.ret, &map)
+        let output = subst(&sig.ret, &map);
+        if sig.is_async { Ty::Async(Box::new(output)) } else { output }
     }
 
     fn method_call(&mut self, e: &Expr, base: &Expr, name: &Ident, args: &[Expr]) -> Ty {

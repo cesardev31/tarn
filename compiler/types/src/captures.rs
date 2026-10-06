@@ -93,7 +93,7 @@ pub(crate) fn mutated_symbols(body: &Block, uses: &HashMap<NodeId, tarn_resolve:
                         self.expr(a);
                     }
                 }
-                ExprKind::Field { base, .. } | ExprKind::Paren(base) | ExprKind::Try(base) | ExprKind::Unary { operand: base, .. } => self.expr(base),
+                ExprKind::Field { base, .. } | ExprKind::Paren(base) | ExprKind::Try(base) | ExprKind::Await(base) | ExprKind::Unary { operand: base, .. } => self.expr(base),
                 ExprKind::Index { base, index } => {
                     self.expr(base);
                     self.expr(index);
@@ -175,7 +175,7 @@ pub(crate) fn consumed_symbols(body: &Block, uses: &HashMap<NodeId, tarn_resolve
                     }
                 }
                 ExprKind::Field { base, .. } => self.expr(base, false),
-                ExprKind::Paren(base) | ExprKind::Try(base) => self.expr(base, moving),
+                ExprKind::Paren(base) | ExprKind::Try(base) | ExprKind::Await(base) => self.expr(base, moving),
                 ExprKind::Index { base, index } => {
                     self.expr(base, false);
                     self.expr(index, true);

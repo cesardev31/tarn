@@ -33,6 +33,37 @@ fn codes(src: &str) -> Vec<&'static str> {
 // ---------------------------------------------------------------- milestones
 
 #[test]
+fn async_declarations_retain_the_source_modifier() {
+    let (_, parsed) = parse("pub async fn identity<T>(value T) T { return value }\n");
+    assert!(parsed.diagnostics.is_empty());
+    let ItemKind::Fn(function) = &parsed.module.items[0].kind else { panic!("expected function") };
+    assert!(function.is_async);
+    assert!(parsed.module.items[0].is_pub);
+    assert_eq!(function.generics.len(), 1);
+    assert!(ok("async fn f() i32 { return 1 }\n").starts_with("(async fn f"));
+    let (_, ordinary) = parse("fn f() {}\n");
+    let ItemKind::Fn(function) = &ordinary.module.items[0].kind else { panic!("expected function") };
+    assert!(!function.is_async);
+}
+
+#[test]
+fn await_precedence_preserves_calls_try_and_binary_expressions() {
+    assert_eq!(body("x := try await f()"), "(let x (try (await (call f))))");
+    assert_eq!(body("x := await f() + 1"), "(let x (+ (await (call f)) 1))");
+    assert_eq!(body("x := await (f() + 1)"), "(let x (await (paren (+ (call f) 1))))");
+    assert_eq!(body("x := await value"), "(let x (await value))");
+    assert_eq!(body("x := try await\nf()"), "(let x (try (await (call f))))");
+}
+
+#[test]
+fn async_blocks_closures_and_nested_items_are_not_added() {
+    assert!(!codes("fn f() { x := async { return 1 } }\n").is_empty());
+    assert!(!codes("fn f() { x := async fn() i32 { return 1 } }\n").is_empty());
+    assert!(!codes("fn f() { async fn child() {} }\n").is_empty());
+    assert!(!codes("async unexpected() {}\n").is_empty());
+}
+
+#[test]
 fn hello_world() {
     assert_eq!(ok("fn main() {\n    print(\"hello\")\n}\n"), "(fn main ()\n  (block\n    (call print \"hello\")))\n");
 }

@@ -22,6 +22,8 @@ pub enum TokenKind {
 
     // Keywords.
     Fn,
+    Async,
+    Await,
     Return,
     If,
     Else,
@@ -93,6 +95,8 @@ pub fn keyword(ident: &str) -> Option<TokenKind> {
     use TokenKind::*;
     Some(match ident {
         "fn" => Fn,
+        "async" => Async,
+        "await" => Await,
         "return" => Return,
         "if" => If,
         "else" => Else,
@@ -130,6 +134,8 @@ impl TokenKind {
             Float(_) => "float",
             Str(_) => "string",
             Fn => "fn",
+            Async => "async",
+            Await => "await",
             Return => "return",
             If => "if",
             Else => "else",
