@@ -1,0 +1,9 @@
+== exhaustive_nested
+12:11 value: Option<Result<i64, string>>
+14:17 x: i64
+15:18 e: string
+20:10 m: Move
+28:10 a: Option<bool>
+36:12 n: Option<i64>
+38:14 x: i64
+39:14 x: i64

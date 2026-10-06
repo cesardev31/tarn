@@ -1,0 +1,6 @@
+error[E3001]: expected `Pair<i64, bool>`, found `Pair<{integer}, {integer}>`
+  --> tests/types/fail/E3001_failed_unify_no_contamination.tarn:15:10
+   |
+15 |     take(q)
+   |          ^ this is `Pair<{integer}, {integer}>`
+

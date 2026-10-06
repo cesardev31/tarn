@@ -1,0 +1,101 @@
+fn collatz(_1: i64) -> i64 {
+    _0: i64    // return
+    _1: i64    // param start
+    _2: i64    // var n
+    _3: i64    // var steps
+    _4: bool    // temp
+    _5: bool    // temp
+    _6: i64    // temp
+    _7: i64    // temp
+    _8: i64    // temp
+    _9: i64    // temp
+    _10: i64    // temp
+  bb0:
+    live _2
+    _2 = copy _1
+    live _3
+    _3 = 0_i64
+    goto bb2
+  bb1:
+    _0 = copy _3
+    dead _3
+    dead _2
+    return
+  bb2:
+    _4 = ne(copy _2, 1_i64)
+    switch copy _4 [0 => bb1, _ => bb3]
+  bb3:
+    _6 = rem(copy _2, 2_i64)
+    _5 = eq(copy _6, 0_i64)
+    switch copy _5 [0 => bb5, _ => bb4]
+  bb4:
+    _7 = div(copy _2, 2_i64)
+    _2 = copy _7
+    goto bb6
+  bb5:
+    _9 = mul(3_i64, copy _2)
+    _8 = add(copy _9, 1_i64)
+    _2 = copy _8
+    goto bb6
+  bb6:
+    _10 = add(copy _3, 1_i64)
+    _3 = copy _10
+    goto bb2
+}
+
+fn sum_until(_1: i64) -> i64 {
+    _0: i64    // return
+    _1: i64    // param limit
+    _2: i64    // var total
+    _3: i64    // temp
+    _4: i64    // temp
+    _5: bool    // temp
+    _6: i64    // let i
+    _7: bool    // temp
+    _8: bool    // temp
+    _9: i64    // temp
+    _10: bool    // temp
+  bb0:
+    live _2
+    _2 = 0_i64
+    _3 = 0_i64
+    _4 = copy _1
+    goto bb2
+  bb1:
+    _0 = copy _2
+    dead _2
+    return
+  bb2:
+    _5 = le(copy _3, copy _4)
+    switch copy _5 [0 => bb1, _ => bb3]
+  bb3:
+    live _6
+    _6 = copy _3
+    _7 = eq(copy _6, 7_i64)
+    switch copy _7 [0 => bb6, _ => bb5]
+  bb4:
+    _10 = eq(copy _3, copy _4)
+    switch copy _10 [0 => bb11, _ => bb1]
+  bb5:
+    dead _6
+    goto bb4
+  bb6:
+    goto bb7
+  bb7:
+    _8 = gt(copy _2, 100_i64)
+    switch copy _8 [0 => bb9, _ => bb8]
+  bb8:
+    dead _6
+    goto bb1
+  bb9:
+    goto bb10
+  bb10:
+    _9 = add(copy _2, copy _6)
+    _2 = copy _9
+    dead _6
+    goto bb4
+  bb11:
+    _3 = add(copy _3, 1_i64)
+    goto bb2
+}
+

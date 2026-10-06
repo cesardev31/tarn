@@ -1,0 +1,18 @@
+struct Big {
+    name string
+}
+
+fn make() Big {
+    return Big{name: "b"}
+}
+
+fn len_of(b &Big) usize {
+    return b.name.len()
+}
+
+fn main() {
+    n := len_of(&make())
+    r := &make()
+    make()
+    print(r.name)
+}

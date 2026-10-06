@@ -579,6 +579,17 @@ impl<'c, 'a> Walker<'c, 'a> {
     /// ADR 0016: the impl lives in the module of the interface or of the type,
     /// and there is at most one per (interface, type).
     fn check_coherence(&mut self, item: &Item, i: &ImplDecl, iface: Option<SymbolId>, target: Option<SymbolId>) {
+        if let Some(iface) = iface
+            && self.cx.sym(iface).name == "Copy"
+            && self.cx.sym(iface).module.is_some_and(|m| self.cx.r.modules[m.0 as usize].name == prelude::CORE)
+        {
+            self.cx.diags.push(
+                Diagnostic::error("E2026", "impl_copy", "`Copy` is not implemented with `impl`")
+                    .primary(i.interface.span, "")
+                    .help("declare the type with the `copy` keyword: `copy struct T { ... }` (ADR 0021)"),
+            );
+            return;
+        }
         let (Some(iface), Some(target)) = (iface, target) else { return };
         let (im, tm) = (self.cx.sym(iface).module, self.cx.sym(target).module);
         if im != Some(self.m) && tm != Some(self.m) {

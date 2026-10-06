@@ -1,0 +1,11 @@
+struct S {
+}
+
+impl Copy for S {
+}
+
+extern "intrinsic" fn magic() i32
+
+fn string.shout(&self) string {
+    return "!"
+}

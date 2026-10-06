@@ -1,0 +1,21 @@
+// ADR 0021: `T: Copy` lets a generic type be `copy`.
+copy struct Point<T: Copy> {
+    x T
+    y T
+}
+
+fn Point<T>.swap(self) Point<T> {
+    return Point{x: self.y, y: self.x}
+}
+
+fn duplicate<T: Copy>(value T) Point<T> {
+    return Point{x: value, y: value}
+}
+
+fn main() {
+    p := Point{x: 1, y: 2}
+    q := p                       // copied: `p` stays usable
+    r := p.swap()
+    d := duplicate(2.5)
+    print(q.x + r.x)
+}

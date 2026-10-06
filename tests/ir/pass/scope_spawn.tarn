@@ -1,0 +1,10 @@
+fn work(n i64) {
+    print(n)
+}
+
+fn main() {
+    scope {
+        spawn work(1)
+        spawn work(2)
+    }
+}

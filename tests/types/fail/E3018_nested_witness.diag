@@ -1,0 +1,36 @@
+error[E3018]: `match` does not cover `Some(Err(_))`
+ --> tests/types/fail/E3018_nested_witness.tarn:7:11
+  |
+7 |     match value {
+  |           ^^^^^ `Some(Err(_))` is not handled
+  |
+  = note: arms with an `if` guard do not count as covering
+  = help: add an arm for `Some(Err(_))`
+
+error[E3018]: `match` does not cover `Some(South)`
+  --> tests/types/fail/E3018_nested_witness.tarn:11:11
+   |
+11 |     match d {
+   |           ^ `Some(South)` is not handled
+   |
+   = note: arms with an `if` guard do not count as covering
+   = help: add an arm for `Some(South)`
+
+error[E3018]: `match` does not cover `Some(_)`
+  --> tests/types/fail/E3018_nested_witness.tarn:15:11
+   |
+15 |     match d {
+   |           ^ `Some(_)` is not handled
+   |
+   = note: arms with an `if` guard do not count as covering
+   = help: add an arm for `Some(_)`
+
+error[E3018]: `match` does not cover `_`
+  --> tests/types/fail/E3018_nested_witness.tarn:19:11
+   |
+19 |     match n {
+   |           ^ `_` is not handled
+   |
+   = note: arms with an `if` guard do not count as covering
+   = help: add an arm for `_`
+

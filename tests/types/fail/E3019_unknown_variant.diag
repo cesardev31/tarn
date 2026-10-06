@@ -6,3 +6,12 @@ error[E3019]: enum `Dir` has no variant `Sout`
   |
   = note: its variants are: North, South
 
+warning[W3001]: this arm can never match
+  --> tests/types/fail/E3019_unknown_variant.tarn:10:9
+   |
+10 |         _ => print(3)
+   |         ^
+   |
+   = note: every value it matches is handled by an earlier arm
+   = help: remove it, or move it before the arm that covers it
+

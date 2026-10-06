@@ -4,7 +4,7 @@
 
 use crate::env::{Env, FnSig};
 use crate::ty::*;
-use crate::{MethodTarget, TypeTables};
+use crate::{BindingMode, Coercion, CoercionKind, MethodTarget, Receiver, TypeTables};
 use std::collections::HashMap;
 use tarn_ast::*;
 use tarn_diagnostics::{Diagnostic, Span};
@@ -107,28 +107,27 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     /// `actual` is used where `expected` is required. Applies the implicit
     /// coercions: `&mut T → &T`, `&[N]T → &[]T`, `&T → &any I`.
-    fn coerce(&mut self, actual: &Ty, expected: &Ty, span: Span) -> bool {
+    /// Records the coercion applied to `node` (for IR lowering).
+    fn coerce(&mut self, actual: &Ty, expected: &Ty, span: Span, node: Option<NodeId>) -> bool {
         let (a, x) = (self.infer.shallow(actual), self.infer.shallow(expected));
         if let (Ty::Ref(am, ai), Ty::Ref(xm, xi)) = (&a, &x)
             && (*am || !*xm)
         {
+            let mut_to_shared = *am && !*xm;
             let (ai, xi) = (self.infer.shallow(ai), self.infer.shallow(xi));
-            match (&ai, &xi) {
-                (Ty::Array(ae, _), Ty::Slice(xe)) => {
-                    if self.infer.unify(ae, xe) {
-                        return true;
-                    }
+            let applied = match (&ai, &xi) {
+                (Ty::Array(ae, _), Ty::Slice(xe)) => self.infer.unify(ae, xe).then_some(CoercionKind::Unsize),
+                (Ty::Any(i), Ty::Any(j)) if i == j => Some(CoercionKind::None),
+                (_, Ty::Any(iface)) => self.implements(&ai, *iface).then_some(CoercionKind::ToDyn(*iface)),
+                _ => self.infer.unify(&ai, &xi).then_some(CoercionKind::None),
+            };
+            if let Some(kind) = applied {
+                if let Some(n) = node
+                    && (mut_to_shared || kind != CoercionKind::None)
+                {
+                    self.tables.coercions.insert(n, Coercion { mut_to_shared, kind });
                 }
-                (_, Ty::Any(iface)) => {
-                    if self.implements(&ai, *iface) {
-                        return true;
-                    }
-                }
-                _ => {
-                    if self.infer.unify(&ai, &xi) {
-                        return true;
-                    }
-                }
+                return true;
             }
         }
         if self.infer.unify(&a, &x) {
@@ -141,7 +140,8 @@ impl<'e, 'a> FnCx<'e, 'a> {
     fn implements(&self, t: &Ty, iface: SymbolId) -> bool {
         match self.infer.shallow(t) {
             Ty::Adt(s, _) => self.env.has_impl(iface, s),
-            Ty::Param(p) => self.env.bounds.get(&p).is_some_and(|b| b.contains(&iface)),
+            _ if Some(iface) == self.env.prelude.copy => self.is_copy(t),
+            Ty::Param(p) => self.env.decls.bounds.get(&p).is_some_and(|b| b.contains(&iface)),
             Ty::Any(i) => i == iface,
             Ty::Opaque | Ty::Error => true,
             _ => false,
@@ -150,14 +150,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     pub fn is_copy(&self, t: &Ty) -> bool {
         match self.infer.zonk(t) {
-            Ty::Bool | Ty::Int(_) | Ty::Float(_) | Ty::Never | Ty::Void | Ty::Opaque | Ty::Error => true,
-            Ty::Ref(m, _) => !m,
-            Ty::Array(e, _) => self.is_copy(&e),
-            Ty::Adt(s, _) => {
-                self.env.structs.get(&s).is_some_and(|d| d.is_copy) || self.env.enums.get(&s).is_some_and(|d| d.is_copy)
-            }
+            // Unresolved literal variables are numbers, hence copy.
             Ty::Var(v) => self.infer.kind(v) != VarKind::General,
-            _ => false,
+            z => self.env.decls.is_copy(&z),
         }
     }
 
@@ -167,7 +162,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     fn obligations_for(&mut self, generics: &[ParamId], map: &HashMap<ParamId, Ty>, span: Span) {
         for p in generics {
-            for iface in self.env.bounds.get(p).cloned().unwrap_or_default() {
+            for iface in self.env.decls.bounds.get(p).cloned().unwrap_or_default() {
                 self.obligations.push((map[p].clone(), iface, span));
             }
         }
@@ -242,7 +237,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
             let z = self.infer.zonk(&t);
             if !self.implements(&z, iface) && !matches!(z, Ty::Var(_)) {
                 let (tn, iname) = (self.show(&z), self.env.r.symbol(iface).name.clone());
-                let help = if matches!(z, Ty::Adt(..)) {
+                let help = if Some(iface) == self.env.prelude.copy {
+                    format!("`{tn}` is not a copy type; copy types are numbers, `bool`, `&T` and types declared with `copy`")
+                } else if matches!(z, Ty::Adt(..)) {
                     format!("add `impl {iname} for {tn}` in the module of `{iname}` or of `{tn}`")
                 } else {
                     format!("only structs and enums can implement interfaces; wrap the `{tn}` in a struct (ADR 0016)")
@@ -269,6 +266,11 @@ impl<'e, 'a> FnCx<'e, 'a> {
         for t in self.tables.expr_types.values_mut() {
             *t = self.infer.zonk(t);
         }
+        for ts in self.tables.type_args.values_mut() {
+            for t in ts.iter_mut() {
+                *t = self.infer.zonk(t);
+            }
+        }
         for t in self.locals.values_mut() {
             *t = self.infer.zonk(t);
         }
@@ -289,7 +291,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 let vt = self.expr(value, ann.as_ref());
                 let t = match ann {
                     Some(a) => {
-                        self.coerce(&vt, &a, value.span);
+                        self.coerce(&vt, &a, value.span, Some(value.id));
                         a
                     }
                     None => vt,
@@ -309,7 +311,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 let tt = self.expr(target, None);
                 self.require_mut(target, false);
                 let vt = self.expr(value, Some(&tt));
-                self.coerce(&vt, &tt, value.span);
+                self.coerce(&vt, &tt, value.span, Some(value.id));
             }
             StmtKind::Expr(e) => {
                 self.expr(e, None);
@@ -333,7 +335,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                             );
                         } else {
                             let t = self.expr(v, Some(&ret));
-                            self.coerce(&t, &ret, v.span);
+                            self.coerce(&t, &ret, v.span, Some(v.id));
                         }
                     }
                     None if !matches!(ret, Ty::Void | Ty::Never) => {
@@ -365,7 +367,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     fn cond(&mut self, e: &Expr) {
         let t = self.expr(e, Some(&Ty::Bool));
-        self.coerce(&t, &Ty::Bool, e.span);
+        self.coerce(&t, &Ty::Bool, e.span, Some(e.id));
     }
 
     fn if_stmt(&mut self, i: &IfStmt) {
@@ -388,19 +390,21 @@ impl<'e, 'a> FnCx<'e, 'a> {
                         let t = self.infer.fresh(VarKind::Int);
                         for b in [start, end].into_iter().flatten() {
                             let bt = self.expr(b, Some(&t));
-                            self.coerce(&bt, &t, b.span);
+                            self.coerce(&bt, &t, b.span, Some(b.id));
                         }
                         if start.is_none() || end.is_none() {
                             self.err(Diagnostic::error("E3027", "invalid_for_iter", "a `for` range needs a start and an end").primary(iter.span, ""));
                         }
                         self.record(iter, Ty::Opaque);
-                        t
+                        (t, BindingMode::Copy)
                     }
                     _ => {
                         let it = self.expr(iter, None);
                         self.iter_elem(&it, iter.span)
                     }
                 };
+                let (elem, mode) = elem;
+                self.tables.binding_modes.insert(s.id, mode);
                 if let Some(sym) = self.def(s.id) {
                     self.locals.insert(sym, elem);
                 }
@@ -411,16 +415,16 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     /// ADR 0018: iterating through a reference yields copies of copy elements
     /// and references to non-copy elements.
-    fn iter_elem(&mut self, t: &Ty, span: Span) -> Ty {
+    fn iter_elem(&mut self, t: &Ty, span: Span) -> (Ty, BindingMode) {
         let z = self.infer.zonk(t);
         match &z {
             Ty::Ref(m, inner) => match &**inner {
-                Ty::Array(e, _) | Ty::Slice(e) => self.project(e, Some(*m)),
-                _ => self.bad_iter(&z, span),
+                Ty::Array(e, _) | Ty::Slice(e) => (self.project(e, Some(*m)), self.mode(e, Some(*m))),
+                _ => (self.bad_iter(&z, span), BindingMode::Copy),
             },
-            Ty::Array(e, _) => (**e).clone(),
-            Ty::Opaque | Ty::Error => Ty::Opaque,
-            _ => self.bad_iter(&z, span),
+            Ty::Array(e, _) => ((**e).clone(), self.mode(e, None)),
+            Ty::Opaque | Ty::Error => (Ty::Opaque, BindingMode::Copy),
+            _ => (self.bad_iter(&z, span), BindingMode::Copy),
         }
     }
 
@@ -432,6 +436,15 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 .note("v0 iterates over ranges `a..b`, arrays and `&` / `&mut` arrays and slices"),
         );
         Ty::Error
+    }
+
+    /// ADR 0018: how a binding receives a value reached through `through`.
+    fn mode(&self, t: &Ty, through: Option<bool>) -> BindingMode {
+        match through {
+            _ if self.is_copy(t) => BindingMode::Copy,
+            None => BindingMode::Move,
+            Some(m) => BindingMode::Ref(m),
+        }
     }
 
     /// Element/field reached through a reference (ADR 0018).
@@ -470,6 +483,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     if let Some(sym) = self.def(p.id) {
                         let bt = self.project(&inner, through);
                         self.locals.insert(sym, bt);
+                        self.tables.binding_modes.insert(p.id, self.mode(&inner, through));
                     }
                 }
                 Some(r) => {
@@ -513,7 +527,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                         return;
                     }
                 };
-                let Some(def) = self.env.structs.get(&s) else { return };
+                let Some(def) = self.env.decls.structs.get(&s) else { return };
                 let map: HashMap<ParamId, Ty> = def.generics.iter().copied().zip(targs).collect();
                 for fp in fields {
                     let Some(fd) = def.fields.iter().find(|f| f.name == fp.name.name) else {
@@ -536,6 +550,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                             if let Some(sym) = self.def(fp.id) {
                                 let bt = self.project(&ft, through);
                                 self.locals.insert(sym, bt);
+                                self.tables.binding_modes.insert(fp.id, self.mode(&ft, through));
                             }
                         }
                     }
@@ -546,7 +561,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     fn variant_pattern(&mut self, p: &Pattern, r: &Res, scrut: &Ty, through: Option<bool>, args: &[Pattern]) {
         let (enum_sym, targs) = match scrut {
-            Ty::Adt(s, a) if self.env.enums.contains_key(s) => (*s, a.clone()),
+            Ty::Adt(s, a) if self.env.decls.enums.contains_key(s) => (*s, a.clone()),
             Ty::Opaque | Ty::Error | Ty::Var(_) => {
                 for a in args {
                     self.pattern(a, &Ty::Opaque);
@@ -563,7 +578,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 return;
             }
         };
-        let def = &self.env.enums[&enum_sym];
+        let def = &self.env.decls.enums[&enum_sym];
         let enum_name = self.env.r.symbol(enum_sym).name.clone();
         let variant = match r {
             Res::Symbol(v) => def.variants.iter().find(|x| x.sym == *v),
@@ -606,63 +621,36 @@ impl<'e, 'a> FnCx<'e, 'a> {
         }
     }
 
-    /// Conservative exhaustiveness: top-level coverage of enum variants and
-    /// booleans; other types need a catch-all arm. Nested refutable patterns
-    /// never count as covering (the program may need an extra `_` arm).
+    /// Exhaustiveness and reachability with the usefulness algorithm
+    /// (ADR 0019, `exhaust.rs`). Guarded arms never count as covering.
     fn exhaustive(&mut self, m: &MatchStmt, st: &Ty) {
-        let (inner, _) = peel(&self.infer.zonk(st));
-        let unguarded: Vec<&MatchArm> = m.arms.iter().filter(|a| a.guard.is_none()).collect();
-        if unguarded.iter().any(|a| self.irrefutable(&a.pattern)) {
+        if matches!(self.infer.shallow(st), Ty::Opaque | Ty::Error) {
             return;
         }
-        let missing: Vec<String> = match &inner {
-            Ty::Adt(s, _) if self.env.enums.contains_key(s) => self.env.enums[s]
-                .variants
-                .iter()
-                .filter(|v| {
-                    !unguarded.iter().any(|a| {
-                        self.tables.pattern_variants.get(&a.pattern.id) == Some(&v.sym)
-                            && match &a.pattern.kind {
-                                PatternKind::Variant { args, .. } => args.iter().all(|x| self.irrefutable(x)),
-                                _ => true,
-                            }
-                    })
-                })
-                .map(|v| v.name.clone())
-                .collect(),
-            Ty::Bool => {
-                let has = |b: bool| unguarded.iter().any(|a| matches!(&a.pattern.kind, PatternKind::Literal(e) if e.kind == ExprKind::Bool(b)));
-                [true, false].into_iter().filter(|b| !has(*b)).map(|b| b.to_string()).collect()
+        let tys = vec![st.clone()];
+        let mut rows: Vec<Vec<crate::exhaust::Pat>> = Vec::new();
+        for arm in &m.arms {
+            let row = vec![self.lower_pat(&arm.pattern, st)];
+            if !self.useful(&rows, &row, &tys) {
+                let mut d = Diagnostic::error("W3001", "unreachable_arm", "this arm can never match")
+                    .primary(arm.pattern.span, "")
+                    .note("every value it matches is handled by an earlier arm")
+                    .help("remove it, or move it before the arm that covers it");
+                d.severity = tarn_diagnostics::Severity::Warning;
+                self.err(d);
             }
-            Ty::Opaque | Ty::Error | Ty::Var(_) => return,
-            Ty::Adt(s, _) if self.env.structs.contains_key(s) => return,
-            other => {
-                let shown = self.show(other);
-                self.err(
-                    Diagnostic::error("E3018", "non_exhaustive_match", format!("`match` on `{shown}` does not cover every value"))
-                        .primary(m.scrutinee.span, "")
-                        .help("add a final `_ => ...` arm"),
-                );
-                return;
+            if arm.guard.is_none() {
+                rows.push(row);
             }
-        };
-        if !missing.is_empty() {
-            let list = missing.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
-            self.err(
-                Diagnostic::error("E3018", "non_exhaustive_match", format!("`match` does not cover {list}"))
-                    .primary(m.scrutinee.span, "")
-                    .help("add the missing arms, or a final `_ => ...` arm")
-                    .note("guarded arms and nested refutable patterns do not count as covering in v0"),
-            );
         }
-    }
-
-    fn irrefutable(&self, p: &Pattern) -> bool {
-        match &p.kind {
-            PatternKind::Wildcard | PatternKind::Error => true,
-            PatternKind::Ident(_) => self.def(p.id).is_some(),
-            PatternKind::Struct { fields, .. } => fields.iter().all(|f| f.pattern.as_ref().is_none_or(|x| self.irrefutable(x))),
-            _ => false,
+        if let Some(w) = self.witness(&rows, &tys) {
+            let missing = self.show_pat(&w[0]);
+            self.err(
+                Diagnostic::error("E3018", "non_exhaustive_match", format!("`match` does not cover `{missing}`"))
+                    .primary(m.scrutinee.span, format!("`{missing}` is not handled"))
+                    .help(format!("add an arm for `{missing}`"))
+                    .note("arms with an `if` guard do not count as covering"),
+            );
         }
     }
 
@@ -819,7 +807,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 };
                 for x in elems {
                     let xt = self.expr(x, Some(&elem));
-                    self.coerce(&xt, &elem, x.span);
+                    self.coerce(&xt, &elem, x.span, Some(x.id));
                 }
                 if let Some(n) = len
                     && n != elems.len() as u64
@@ -852,10 +840,10 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     let (fields, generics) = self.variant_info(parent, s);
                     let map = self.instantiate(&generics);
                     if !fields.is_empty() {
-                        let name = match self.env.r.symbol(s).module {
-                            Some(_) => format!("{}.{}", self.env.r.symbol(parent).name, self.env.r.symbol(s).name),
-                            None => self.env.r.symbol(s).name.clone(),
-                        };
+                        // Written as the user would: `Some(...)`, `Shape.Circle(...)`.
+                        let vname = self.env.r.symbol(s).name.clone();
+                        let in_prelude = self.env.r.scope(tarn_resolve::ScopeId(0)).get(&vname) == Some(s);
+                        let name = if in_prelude { vname } else { format!("{}.{vname}", self.env.r.symbol(parent).name) };
                         self.err(
                             Diagnostic::error("E3038", "variant_needs_args", format!("variant `{name}` takes {} value{}", fields.len(), if fields.len() == 1 { "" } else { "s" }))
                                 .primary(e.span, "")
@@ -866,8 +854,11 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     Ty::Adt(parent, generics.iter().map(|p| map[p].clone()).collect())
                 }
                 SymbolKind::Function | SymbolKind::Method { .. } | SymbolKind::ImplMethod { .. } => {
-                    let Some(sig) = self.env.fns.get(&s).cloned() else { return Ty::Error };
+                    let Some(sig) = self.env.decls.fns.get(&s).cloned() else { return Ty::Error };
                     let map = self.instantiate(&sig.generics);
+                    if !sig.generics.is_empty() {
+                        self.tables.type_args.insert(e.id, sig.generics.iter().map(|p| map[p].clone()).collect());
+                    }
                     let mut ps: Vec<Ty> = Vec::new();
                     if let (Some(r), Some(st)) = (sig.receiver, &sig.self_ty) {
                         ps.push(receiver_ty(r, st));
@@ -895,7 +886,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
     }
 
     fn variant_info(&self, parent: SymbolId, v: SymbolId) -> (Vec<Ty>, Vec<ParamId>) {
-        let Some(def) = self.env.enums.get(&parent) else { return (Vec::new(), Vec::new()) };
+        let Some(def) = self.env.decls.enums.get(&parent) else { return (Vec::new(), Vec::new()) };
         let fields = def.variants.iter().find(|x| x.sym == v).map(|x| x.fields.clone()).unwrap_or_default();
         (fields, def.generics.clone())
     }
@@ -906,8 +897,8 @@ impl<'e, 'a> FnCx<'e, 'a> {
         let _ = through;
         match &inner {
             Ty::Opaque | Ty::Error => Ty::Opaque,
-            Ty::Adt(s, args) if self.env.structs.contains_key(s) => {
-                let def = &self.env.structs[s];
+            Ty::Adt(s, args) if self.env.decls.structs.contains_key(s) => {
+                let def = &self.env.decls.structs[s];
                 let Some(f) = def.fields.iter().find(|f| f.name == name.name) else {
                     let tname = self.show(&inner);
                     let names: Vec<&str> = def.fields.iter().map(|f| f.name.as_str()).collect();
@@ -960,13 +951,13 @@ impl<'e, 'a> FnCx<'e, 'a> {
         if let ExprKind::Range { start, end, .. } = &index.kind {
             for b in [start, end].into_iter().flatten() {
                 let t = self.expr(b, Some(&usize_));
-                self.coerce(&t, &usize_, b.span);
+                self.coerce(&t, &usize_, b.span, Some(b.id));
             }
             self.record(index, Ty::Opaque);
             return Ty::Slice(Box::new(elem));
         }
         let it = self.expr(index, Some(&usize_));
-        self.coerce(&it, &usize_, index.span);
+        self.coerce(&it, &usize_, index.span, Some(index.id));
         elem
     }
 
@@ -998,7 +989,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             }
             UnaryOp::Not => {
                 let t = self.expr(operand, Some(&Ty::Bool));
-                self.coerce(&t, &Ty::Bool, operand.span);
+                self.coerce(&t, &Ty::Bool, operand.span, Some(operand.id));
                 Ty::Bool
             }
             UnaryOp::Ref | UnaryOp::RefMut => {
@@ -1070,8 +1061,8 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 l
             }
             And | Or => {
-                self.coerce(&lt, &Ty::Bool, lhs.span);
-                self.coerce(&rt, &Ty::Bool, rhs.span);
+                self.coerce(&lt, &Ty::Bool, lhs.span, Some(lhs.id));
+                self.coerce(&rt, &Ty::Bool, rhs.span, Some(rhs.id));
                 Ty::Bool
             }
             Eq | Ne | Lt | Le | Gt | Ge => {
@@ -1142,7 +1133,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             }
             return Ty::Opaque;
         };
-        let Some(def) = self.env.structs.get(&s) else { return Ty::Error };
+        let Some(def) = self.env.decls.structs.get(&s) else { return Ty::Error };
         let name = self.env.r.symbol(s).name.clone();
         let map = self.instantiate(&def.generics.clone());
         let mut seen: HashMap<&str, Span> = HashMap::new();
@@ -1170,7 +1161,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             if def.module != self.m && !fd.is_pub {
                 self.err(Diagnostic::error("E3014", "private_field", format!("field `{}` of `{name}` is private", f.name.name)).primary(f.name.span, ""));
             }
-            self.coerce(&vt, &expected.unwrap(), f.span);
+            self.coerce(&vt, &expected.unwrap(), f.span, f.value.as_ref().map(|v| v.id));
         }
         let missing: Vec<String> = def.fields.iter().filter(|f| !seen.contains_key(f.name.as_str())).map(|f| format!("`{}`", f.name)).collect();
         if !missing.is_empty() {
@@ -1180,7 +1171,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     .note("every field must be given; there are no default values"),
             );
         }
-        Ty::Adt(s, def.generics.iter().map(|p| map[p].clone()).collect())
+        let generics = def.generics.clone();
+        self.obligations_for(&generics, &map, e.span);
+        Ty::Adt(s, generics.iter().map(|p| map[p].clone()).collect())
     }
 
     fn closure(&mut self, params: &[ClosureParam], ret: Option<&Type>, body: &Block, expected: Option<&Ty>) -> Ty {
@@ -1256,10 +1249,11 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     let ps: Vec<Ty> = fields.iter().map(|f| subst(f, &map)).collect();
                     let name = self.env.r.symbol(s).name.clone();
                     self.args(e, &format!("variant `{name}`"), &ps, args);
+                    self.obligations_for(&generics, &map, e.span);
                     result
                 }
                 SymbolKind::Function | SymbolKind::Method { .. } | SymbolKind::ImplMethod { .. } => {
-                    let Some(sig) = self.env.fns.get(&s).cloned() else { return Ty::Error };
+                    let Some(sig) = self.env.decls.fns.get(&s).cloned() else { return Ty::Error };
                     self.sig_call(e, s, &sig, None, args, expected)
                 }
                 SymbolKind::Local { .. }
@@ -1326,7 +1320,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             match params.get(i) {
                 Some(p) => {
                     let at = self.expr(a, Some(p));
-                    self.coerce(&at, p, a.span);
+                    self.coerce(&at, p, a.span, Some(a.id));
                 }
                 None => {
                     self.expr(a, None);
@@ -1339,7 +1333,8 @@ impl<'e, 'a> FnCx<'e, 'a> {
     /// call syntax; for static calls (`T.m(x)`) the receiver is the first arg.
     fn sig_call(&mut self, e: &Expr, s: SymbolId, sig: &FnSig, recv: Option<(&Expr, Ty, HashMap<ParamId, Ty>)>, args: &[Expr], expected: Option<&Ty>) -> Ty {
         let name = self.env.r.symbol(s).name.clone();
-        if sig.is_extern && self.unsafe_depth == 0 {
+        // Intrinsics are safe; foreign functions are not.
+        if sig.abi.as_deref().is_some_and(|a| a != "intrinsic") && self.unsafe_depth == 0 {
             self.err(
                 Diagnostic::error("E3031", "extern_call_outside_unsafe", format!("calling the extern function `{name}` requires `unsafe`"))
                     .primary(e.span, "")
@@ -1363,6 +1358,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
         }
         ps.extend(sig.params.iter().cloned());
         let ps: Vec<Ty> = ps.iter().map(|p| subst(p, &map)).collect();
+        if !sig.generics.is_empty() {
+            self.tables.type_args.insert(e.id, sig.generics.iter().map(|p| map[p].clone()).collect());
+        }
         let what = if has_recv { format!("method `{name}`") } else { format!("`{name}`") };
         self.args(e, &what, &ps, args);
         self.obligations_for(&sig.generics, &map, e.span);
@@ -1393,8 +1391,16 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 }
                 self.lookup_method(*s, targs, &name.name)
             }
-            Ty::Param(p) => self.interface_method(self.env.bounds.get(p).cloned().unwrap_or_default(), &name.name),
+            Ty::Param(p) => self.interface_method(self.env.decls.bounds.get(p).cloned().unwrap_or_default(), &name.name),
             Ty::Any(i) => self.interface_method(vec![*i], &name.name),
+            // Methods of primitive types are declared in `core` (ADR 0020).
+            Ty::Str | Ty::Int(_) | Ty::Float(_) | Ty::Bool => {
+                let pname = crate::display_vars(&inner, self.env, &self.infer);
+                match self.env.r.scope(tarn_resolve::ScopeId(0)).get(&pname) {
+                    Some(prim) => self.lookup_method(prim, &[], &name.name),
+                    None => None,
+                }
+            }
             _ => None,
         };
         let Some((msym, sig, fixed)) = found else {
@@ -1415,6 +1421,15 @@ impl<'e, 'a> FnCx<'e, 'a> {
             return Ty::Error;
         };
         self.tables.method_calls.insert(e.id, MethodTarget::Symbol(msym));
+        if let Some(kind) = sig.receiver {
+            let mut derefs = 0u8;
+            let mut t = z.clone();
+            while let Ty::Ref(_, inner) = t {
+                derefs += 1;
+                t = *inner;
+            }
+            self.tables.receivers.insert(e.id, Receiver { derefs, kind });
+        }
         let Some(rk) = sig.receiver else {
             let tn = self.env.r.symbol(msym).name.clone();
             self.err(
@@ -1472,7 +1487,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             }
         }
         let m = *cands.first()?;
-        let sig = self.env.fns.get(&m)?.clone();
+        let sig = self.env.decls.fns.get(&m)?.clone();
         let fixed: HashMap<ParamId, Ty> = sig.generics.iter().copied().zip(targs.iter().cloned()).collect();
         Some((m, sig, fixed))
     }
@@ -1480,7 +1495,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
     fn interface_method(&self, ifaces: Vec<SymbolId>, name: &str) -> Option<(SymbolId, FnSig, HashMap<ParamId, Ty>)> {
         for i in ifaces {
             if let Some(m) = self.env.r.member(i, name)
-                && let Some(sig) = self.env.fns.get(&m)
+                && let Some(sig) = self.env.decls.fns.get(&m)
             {
                 return Some((m, sig.clone(), HashMap::new()));
             }
@@ -1488,17 +1503,29 @@ impl<'e, 'a> FnCx<'e, 'a> {
         None
     }
 
-    /// Provisional built-in methods until the standard library exists.
+    /// The last methods still known only to the compiler: arrays and slices
+    /// cannot be named as method owners in `core` yet (ADR 0020, open item).
+    /// Do not add entries here; declare them in `core` instead.
     fn intrinsic(&mut self, e: &Expr, recv: &Ty, name: &Ident, args: &[Expr]) -> Option<Ty> {
         let ret = match (recv, name.name.as_str()) {
-            (Ty::Str | Ty::Array(..) | Ty::Slice(_), "len") => Ty::Int(IntTy::Usize),
-            (Ty::Str | Ty::Array(..) | Ty::Slice(_), "is_empty") => Ty::Bool,
-            (Ty::Str, "clone") => Ty::Str,
-            (Ty::Float(_), "sqrt" | "abs") => recv.clone(),
-            (Ty::Int(i), "abs") if i.signed() => recv.clone(),
+            (Ty::Array(..) | Ty::Slice(_), "len") => Ty::Int(IntTy::Usize),
+            (Ty::Array(..) | Ty::Slice(_), "is_empty") => Ty::Bool,
             _ => return None,
         };
         self.tables.method_calls.insert(e.id, MethodTarget::Intrinsic(name.name.clone()));
+        let mut derefs = 0u8;
+        let mut t = self.infer.zonk(&self.tables.expr_types.get(&match &e.kind {
+            ExprKind::Call { callee, .. } => match &callee.kind {
+                ExprKind::Field { base, .. } => base.id,
+                _ => callee.id,
+            },
+            _ => e.id,
+        }).cloned().unwrap_or(Ty::Error));
+        while let Ty::Ref(_, inner) = t {
+            derefs += 1;
+            t = *inner;
+        }
+        self.tables.receivers.insert(e.id, Receiver { derefs, kind: ReceiverKind::Ref });
         self.args(e, &format!("method `{}`", name.name), &[], args);
         Some(ret)
     }

@@ -1,0 +1,34 @@
+fn main() -> void {
+    _0: void    // return
+    _1: Point    // temp
+    _2: Point    // let p
+    _3: Point    // let q
+    _4: Name    // temp
+    _5: Name    // let n
+    _6: Name    // let m
+    _7: i64    // let x
+  bb0:
+    _1 = Point{1_i64, 2_i64}
+    live _2
+    _2 = copy _1
+    live _3
+    _3 = copy _2
+    _4 = Name{"a"}
+    live _5
+    _5 = move _4
+    drop _4
+    live _6
+    _6 = move _5
+    live _7
+    _7 = copy _2.0
+    _0 = ()
+    dead _7
+    drop _6
+    dead _6
+    drop _5
+    dead _5
+    dead _3
+    dead _2
+    return
+}
+

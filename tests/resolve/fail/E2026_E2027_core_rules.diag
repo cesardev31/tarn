@@ -1,0 +1,24 @@
+error[E2026]: `Copy` is not implemented with `impl`
+ --> tests/resolve/fail/E2026_E2027_core_rules.tarn:4:6
+  |
+4 | impl Copy for S {
+  |      ^^^^
+  |
+  = help: declare the type with the `copy` keyword: `copy struct T { ... }` (ADR 0021)
+
+error[E2027]: `extern "intrinsic"` functions can only be declared in `core`
+ --> tests/resolve/fail/E2026_E2027_core_rules.tarn:7:23
+  |
+7 | extern "intrinsic" fn magic() i32
+  |                       ^^^^^
+  |
+  = help: use `extern "C"` to call a C function
+
+error[E2011]: cannot declare method `shout` on primitive type `string`
+ --> tests/resolve/fail/E2026_E2027_core_rules.tarn:9:4
+  |
+9 | fn string.shout(&self) string {
+  |    ^^^^^^
+  |
+  = note: the methods of primitive types are declared in `core`
+

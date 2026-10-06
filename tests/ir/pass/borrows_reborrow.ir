@@ -1,0 +1,86 @@
+fn Counter.bump(_1: &mut Counter) -> void {
+    _0: void    // return
+    _1: &mut Counter    // param self
+    _2: i64    // temp
+  bb0:
+    _2 = add(copy (*_1).0, 1_i64)
+    (*_1).0 = copy _2
+    _0 = ()
+    return
+}
+
+fn peek(_1: &Counter) -> i64 {
+    _0: i64    // return
+    _1: &Counter    // param c
+  bb0:
+    _0 = copy (*_1).0
+    return
+}
+
+fn twice(_1: &mut Counter) -> void {
+    _0: void    // return
+    _1: &mut Counter    // param c
+    _2: void    // temp
+    _3: &mut Counter    // temp
+    _4: void    // temp
+    _5: &mut Counter    // temp
+    _6: i64    // temp
+    _7: &Counter    // temp
+    _8: i64    // let v
+  bb0:
+    _3 = &mut (*_1)
+    _2 = call Counter.bump(move _3) -> bb1
+  bb1:
+    _5 = &mut (*_1)
+    _4 = call Counter.bump(move _5) -> bb2
+  bb2:
+    _7 = &(*_1)
+    _6 = call peek(copy _7) -> bb3
+  bb3:
+    live _8
+    _8 = copy _6
+    _0 = ()
+    dead _8
+    return
+}
+
+fn main() -> void {
+    _0: void    // return
+    _1: Counter    // temp
+    _2: Counter    // var c
+    _3: &mut Counter    // temp
+    _4: &mut Counter    // let r
+    _5: void    // temp
+    _6: &mut Counter    // temp
+    _7: void    // temp
+    _8: &mut Counter    // temp
+    _9: &Counter    // temp
+    _10: &Counter    // let s
+    _11: void    // temp
+  bb0:
+    _1 = Counter{0_i64}
+    live _2
+    _2 = move _1
+    drop _1
+    _3 = &mut _2
+    live _4
+    _4 = move _3
+    _6 = &mut (*_4)
+    _5 = call twice(move _6) -> bb1
+  bb1:
+    _8 = &mut (*_4)
+    _7 = call twice(move _8) -> bb2
+  bb2:
+    _9 = &_2
+    live _10
+    _10 = copy _9
+    _11 = call builtin print(copy (*_10).0) -> bb3
+  bb3:
+    _0 = ()
+    dead _10
+    dead _4
+    drop _2
+    dead _2
+    return
+}
+

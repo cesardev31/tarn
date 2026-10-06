@@ -1,0 +1,27 @@
+fn collatz(start i64) i64 {
+    var n = start
+    var steps = 0
+    for n != 1 {
+        if n % 2 == 0 {
+            n = n / 2
+        } else {
+            n = 3 * n + 1
+        }
+        steps = steps + 1
+    }
+    return steps
+}
+
+fn sum_until(limit i64) i64 {
+    var total = 0
+    for i in 0..=limit {
+        if i == 7 {
+            continue
+        }
+        if total > 100 {
+            break
+        }
+        total = total + i
+    }
+    return total
+}

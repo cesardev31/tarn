@@ -6,9 +6,11 @@
 
 mod check;
 mod env;
+mod exhaust;
 mod ty;
 
-pub use env::{Env, FnSig};
+pub use check::subst;
+pub use env::{Decls, EnumDef, Env, FieldDef, FnSig, Prelude, StructDef, VariantDef};
 pub use ty::{FloatTy, IntTy, ParamId, Ty};
 
 use std::collections::HashMap;
@@ -25,20 +27,73 @@ pub enum MethodTarget {
     Opaque,
 }
 
+/// An implicit conversion applied by the checker at an expected-type site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Coercion {
+    /// `&mut T` used as `&T`.
+    pub mut_to_shared: bool,
+    pub kind: CoercionKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoercionKind {
+    None,
+    /// `&[N]T → &[]T`.
+    Unsize,
+    /// `&T → &any I`.
+    ToDyn(SymbolId),
+}
+
+/// How a binding introduced by a pattern or `for` gets its value (ADR 0018).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BindingMode {
+    Move,
+    Copy,
+    /// Borrow (`true` = mutable) of the matched place, reached through a reference.
+    Ref(bool),
+}
+
+/// Receiver adjustment of a method call: dereference `derefs` times, then
+/// borrow (`&self`, `&mut self`) or copy/move (`self`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Receiver {
+    pub derefs: u8,
+    pub kind: tarn_ast::ReceiverKind,
+}
+
+/// Every semantic decision the checker makes, keyed by node, so that later
+/// phases never re-derive them (ADR 0023).
 #[derive(Default, Debug)]
 pub struct TypeTables {
     pub expr_types: HashMap<NodeId, Ty>,
     /// Method-call expression → method.
     pub method_calls: HashMap<NodeId, MethodTarget>,
+    /// Method-call expression → receiver adjustment.
+    pub receivers: HashMap<NodeId, Receiver>,
     /// Pattern node → enum variant it matches (resolves `ScrutineeVariant`).
     pub pattern_variants: HashMap<NodeId, SymbolId>,
+    /// Expression → coercion applied to its value.
+    pub coercions: HashMap<NodeId, Coercion>,
+    /// Call (or generic function used as a value) → type arguments, in the
+    /// order of the callee's generic parameters.
+    pub type_args: HashMap<NodeId, Vec<Ty>>,
+    /// Binding node (pattern, field shorthand, `for` statement) → mode.
+    pub binding_modes: HashMap<NodeId, BindingMode>,
 }
 
 pub struct Typed {
     pub tables: Vec<TypeTables>,
     /// Types of locals, parameters and bindings.
     pub locals: HashMap<SymbolId, Ty>,
-    pub param_names: HashMap<ParamId, String>,
+    /// Struct/enum layouts, signatures, bounds — for later phases.
+    pub decls: Decls,
+    pub prelude: env::Prelude,
+}
+
+impl Typed {
+    pub fn display(&self, t: &Ty, r: &Resolved) -> String {
+        show(t, r, &self.decls.param_names, &|_| "_")
+    }
 }
 
 /// Type-check a resolved program.
@@ -61,7 +116,7 @@ pub fn check(inputs: &[ModuleInput], r: &Resolved) -> (Typed, Vec<Diagnostic>) {
         }
         for f in fns {
             let Some(sym) = r.tables[mi].defs.get(&f.id) else { continue };
-            let Some(sig) = env.fns.get(sym).cloned() else { continue };
+            let Some(sig) = env.decls.fns.get(sym).cloned() else { continue };
             let mut cx = check::FnCx::new(&env, m);
             cx.function(f, &sig);
             cx.finish();
@@ -71,9 +126,14 @@ pub fn check(inputs: &[ModuleInput], r: &Resolved) -> (Typed, Vec<Diagnostic>) {
             t.expr_types.extend(cx.tables.expr_types);
             t.method_calls.extend(cx.tables.method_calls);
             t.pattern_variants.extend(cx.tables.pattern_variants);
+            t.receivers.extend(cx.tables.receivers);
+            t.coercions.extend(cx.tables.coercions);
+            t.type_args.extend(cx.tables.type_args);
+            t.binding_modes.extend(cx.tables.binding_modes);
         }
     }
-    (Typed { tables, locals, param_names: env.param_names.clone() }, diags)
+    let Env { decls, prelude, .. } = env;
+    (Typed { tables, locals, decls, prelude }, diags)
 }
 
 /// `copy struct` / `copy enum` may only contain copy types (E3024).
@@ -95,13 +155,13 @@ fn validate_copy(env: &Env, diags: &mut Vec<Diagnostic>) {
             }
         }
     };
-    let mut syms: Vec<_> = env.structs.keys().chain(env.enums.keys()).copied().collect();
+    let mut syms: Vec<_> = env.decls.structs.keys().chain(env.decls.enums.keys()).copied().collect();
     syms.sort();
     for s in syms {
-        if let Some(d) = env.structs.get(&s).filter(|d| d.is_copy) {
+        if let Some(d) = env.decls.structs.get(&s).filter(|d| d.is_copy) {
             check(s, d.fields.iter().map(|f| &f.ty).collect());
         }
-        if let Some(d) = env.enums.get(&s).filter(|d| d.is_copy) {
+        if let Some(d) = env.decls.enums.get(&s).filter(|d| d.is_copy) {
             check(s, d.variants.iter().flat_map(|v| v.fields.iter()).collect());
         }
     }
@@ -114,7 +174,7 @@ fn validate_impls(env: &Env, diags: &mut Vec<Diagnostic>) {
         for &m in &imp.methods {
             let name = &env.r.symbol(m).name;
             let Some(decl) = env.r.member(iface, name) else { continue };
-            let (Some(have), Some(want)) = (env.fns.get(&m), env.fns.get(&decl)) else { continue };
+            let (Some(have), Some(want)) = (env.decls.fns.get(&m), env.decls.fns.get(&decl)) else { continue };
             let mut problems = Vec::new();
             if have.receiver != want.receiver {
                 problems.push(format!("receiver is `{}`, the interface declares `{}`", recv_name(have.receiver), recv_name(want.receiver)));
@@ -186,12 +246,12 @@ pub(crate) fn binding_kind(k: &SymbolKind) -> &'static str {
 
 /// Source-like rendering of a type.
 pub fn display(t: &Ty, env: &Env) -> String {
-    show(t, env.r, &env.param_names, &|_| "_")
+    show(t, env.r, &env.decls.param_names, &|_| "_")
 }
 
 /// Like `display`, naming unresolved literal variables `{integer}` / `{float}`.
 pub(crate) fn display_vars(t: &Ty, env: &Env, infer: &ty::Infer) -> String {
-    show(t, env.r, &env.param_names, &|v| match infer.kind(v) {
+    show(t, env.r, &env.decls.param_names, &|v| match infer.kind(v) {
         ty::VarKind::Int => "{integer}",
         ty::VarKind::Float => "{float}",
         ty::VarKind::General => "_",
@@ -233,6 +293,9 @@ fn show(t: &Ty, r: &Resolved, names: &HashMap<ParamId, String>, var: &dyn Fn(u32
 pub fn dump_types(typed: &Typed, r: &Resolved, sources: &SourceMap) -> String {
     let mut out = String::new();
     for (mi, info) in r.modules.iter().enumerate() {
+        if info.name == "core" {
+            continue;
+        }
         out.push_str(&format!("== {}\n", info.name));
         let mut rows: Vec<(u32, String)> = typed
             .locals
@@ -242,7 +305,7 @@ pub fn dump_types(typed: &Typed, r: &Resolved, sources: &SourceMap) -> String {
                 let sym = r.symbol(*s);
                 let span = sym.span?;
                 let lc = sources.line_col(span);
-                Some((span.start, format!("{}:{} {}: {}", lc.line, lc.column, sym.name, show(t, r, &typed.param_names, &|_| "_"))))
+                Some((span.start, format!("{}:{} {}: {}", lc.line, lc.column, sym.name, show(t, r, &typed.decls.param_names, &|_| "_"))))
             })
             .collect();
         rows.sort();

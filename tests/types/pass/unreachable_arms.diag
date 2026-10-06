@@ -1,0 +1,18 @@
+warning[W3001]: this arm can never match
+ --> tests/types/pass/unreachable_arms.tarn:6:9
+  |
+6 |         Some(1) => print(1)
+  |         ^^^^^^^
+  |
+  = note: every value it matches is handled by an earlier arm
+  = help: remove it, or move it before the arm that covers it
+
+warning[W3001]: this arm can never match
+  --> tests/types/pass/unreachable_arms.tarn:10:9
+   |
+10 |         None => print(1)
+   |         ^^^^
+   |
+   = note: every value it matches is handled by an earlier arm
+   = help: remove it, or move it before the arm that covers it
+

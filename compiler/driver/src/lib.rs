@@ -9,6 +9,8 @@ use tarn_ast::{ItemKind, Module};
 use tarn_diagnostics::{Diagnostic, Severity, SourceMap};
 use tarn_resolve::{ModuleInput, Resolved};
 
+const CORE_SOURCE: &str = include_str!("../../../stdlib/core/core.tarn");
+
 pub struct Program {
     pub sources: SourceMap,
     /// (module name, AST); the entry module is first.
@@ -21,6 +23,8 @@ pub struct CheckResult {
     pub resolved: Option<Resolved>,
     /// `None` when parsing or resolution had errors.
     pub typed: Option<tarn_types::Typed>,
+    /// `None` when any earlier phase had errors.
+    pub ir: Option<tarn_ir::Program>,
     /// Sorted by file, then position.
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -59,6 +63,14 @@ pub fn load(entry: &Path) -> Result<(Program, Vec<Diagnostic>), String> {
         }
         modules.push((name, res.module));
     }
+    // `core` is always part of the program (ADR 0020). Embedded in the
+    // binary so the compiler is self-contained.
+    if !modules.iter().any(|(n, _)| n == "core") {
+        let id = sources.add("stdlib/core/core.tarn", CORE_SOURCE);
+        let res = tarn_parser::parse_file(id, sources.file(id));
+        diags.extend(res.diagnostics);
+        modules.push(("core".to_string(), res.module));
+    }
     Ok((Program { sources, modules }, diags))
 }
 
@@ -68,6 +80,7 @@ pub fn check(entry: &Path) -> Result<CheckResult, String> {
     let (program, mut diagnostics) = load(entry)?;
     let mut resolved = None;
     let mut typed = None;
+    let mut ir = None;
     let errors = |ds: &[Diagnostic]| ds.iter().any(|d| d.severity == Severity::Error);
     if !errors(&diagnostics) {
         let inputs: Vec<ModuleInput> = program.modules.iter().map(|(n, m)| ModuleInput { name: n.clone(), ast: m }).collect();
@@ -77,10 +90,15 @@ pub fn check(entry: &Path) -> Result<CheckResult, String> {
         if !errors(&diagnostics) {
             let (t, d) = tarn_types::check(&inputs, &r);
             diagnostics.extend(d);
+            if !errors(&diagnostics) {
+                let (p, d) = tarn_ir::lower_program(&inputs, &r, &t);
+                diagnostics.extend(d);
+                ir = Some(p);
+            }
             typed = Some(t);
         }
         resolved = Some(r);
     }
     diagnostics.sort_by_key(|d| d.primary_span().map(|s| (s.file, s.start)));
-    Ok(CheckResult { program, resolved, typed, diagnostics })
+    Ok(CheckResult { program, resolved, typed, ir, diagnostics })
 }

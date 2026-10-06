@@ -1,0 +1,1621 @@
+//! Lowering from the typed AST to IR.
+//!
+//! Consumes only decisions recorded by earlier phases: resolution (`uses`,
+//! `defs`, captures), types and the type checker's decision tables
+//! (coercions, receivers, binding modes, type arguments, pattern variants).
+
+use crate::*;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
+use tarn_ast::{self as ast, ElseBranch, Expr, ExprKind, ForKind, ItemKind, Pattern, PatternKind, ReceiverKind, Stmt, StmtKind};
+use tarn_diagnostics::{Diagnostic, Severity};
+use tarn_resolve::{ModuleId, ModuleInput, Res, Resolved, SymbolKind};
+use tarn_types::{BindingMode, CoercionKind, MethodTarget, Typed};
+
+/// Program-wide lowering context.
+struct Lx<'a> {
+    r: &'a Resolved,
+    t: &'a Typed,
+    by_symbol: HashMap<SymbolId, FunctionId>,
+    kinds: HashMap<FunctionId, FnKind>,
+    next_id: Cell<u32>,
+    /// Closures lowered while lowering their parents.
+    extra: RefCell<Vec<Function>>,
+}
+
+pub fn lower_program(inputs: &[ModuleInput], r: &Resolved, t: &Typed) -> (Program, Vec<Diagnostic>) {
+    // 1. Assign an id to every function, method and impl method.
+    let mut decls: Vec<(ModuleId, &ast::FnDecl, String)> = Vec::new();
+    for (mi, input) in inputs.iter().enumerate() {
+        for item in &input.ast.items {
+            match &item.kind {
+                ItemKind::Fn(f) => {
+                    let name = match &f.owner {
+                        Some(o) => format!("{}.{}", o.name.name, f.name.name),
+                        None => f.name.name.clone(),
+                    };
+                    decls.push((ModuleId(mi as u32), f, name));
+                }
+                ItemKind::Impl(i) => {
+                    let tname = match &i.target.kind {
+                        ast::TypeKind::Path(p) => p.segments.last().map(|s| s.name.clone()).unwrap_or_default(),
+                        _ => "?".into(),
+                    };
+                    for f in &i.methods {
+                        decls.push((ModuleId(mi as u32), f, format!("{tname}.{}", f.name.name)));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut by_symbol = HashMap::new();
+    let mut kinds = HashMap::new();
+    let mut ids = Vec::new();
+    for (i, (m, f, _)) in decls.iter().enumerate() {
+        let id = FunctionId(i as u32);
+        let kind = match f.abi.as_deref() {
+            Some("intrinsic") => FnKind::Intrinsic,
+            Some(_) => FnKind::Extern,
+            None => FnKind::Body,
+        };
+        kinds.insert(id, kind);
+        if let Some(sym) = r.tables[m.0 as usize].defs.get(&f.id) {
+            by_symbol.insert(*sym, id);
+        }
+        ids.push(id);
+    }
+    let lx = Lx { r, t, by_symbol, kinds, next_id: Cell::new(decls.len() as u32), extra: RefCell::new(Vec::new()) };
+
+    // 2. Lower bodies.
+    let mut functions = Vec::new();
+    let mut diags = Vec::new();
+    for ((m, f, name), id) in decls.iter().zip(ids) {
+        let mut b = Builder::new(&lx, *m, id, name.clone(), f.span);
+        b.function(f);
+        diags.append(&mut b.diags);
+        functions.push(b.finish());
+    }
+    functions.extend(lx.extra.into_inner());
+    functions.sort_by_key(|f| f.id);
+    (Program { functions, by_symbol: lx.by_symbol }, diags)
+}
+
+struct LoopCx {
+    continue_to: BlockId,
+    break_to: BlockId,
+    depth: usize,
+}
+
+struct Builder<'a, 'l> {
+    lx: &'l Lx<'a>,
+    m: ModuleId,
+    f: Function,
+    terminated: Vec<bool>,
+    cur: BlockId,
+    /// The current block is unreachable (after `return`, `break`, `panic`...).
+    dead: bool,
+    warned_dead: bool,
+    vars: HashMap<SymbolId, LocalId>,
+    /// In a closure: captured symbol → parameter holding `&T`/`&mut T`.
+    captures: HashMap<SymbolId, LocalId>,
+    scopes: Vec<Vec<LocalId>>,
+    loops: Vec<LoopCx>,
+    /// Temporaries of the statements being lowered (dropped at statement end).
+    stmt_temps: Vec<Vec<LocalId>>,
+    /// Lowering `x := &<temporary>`: that temporary lives to the end of the scope.
+    extend_temps: bool,
+    closure_count: u32,
+    diags: Vec<Diagnostic>,
+}
+
+impl<'a, 'l> Builder<'a, 'l> {
+    fn new(lx: &'l Lx<'a>, m: ModuleId, id: FunctionId, name: String, span: Span) -> Self {
+        let kind = lx.kinds.get(&id).cloned().unwrap_or(FnKind::Body);
+        let f = Function {
+            id,
+            name,
+            symbol: None,
+            kind,
+            generics: Vec::new(),
+            param_count: 0,
+            ret: Ty::Void,
+            locals: Vec::new(),
+            blocks: Vec::new(),
+            span,
+        };
+        let mut b = Builder {
+            lx,
+            m,
+            f,
+            terminated: Vec::new(),
+            cur: BlockId(0),
+            dead: false,
+            warned_dead: false,
+            vars: HashMap::new(),
+            captures: HashMap::new(),
+            scopes: Vec::new(),
+            loops: Vec::new(),
+            stmt_temps: Vec::new(),
+            extend_temps: false,
+            closure_count: 0,
+            diags: Vec::new(),
+        };
+        b.cur = b.new_block();
+        b
+    }
+
+    // ------------------------------------------------------------ tables
+
+    fn tables(&self) -> &'a tarn_types::TypeTables {
+        &self.lx.t.tables[self.m.0 as usize]
+    }
+
+    fn res(&self, node: ast::NodeId) -> Option<&'a Res> {
+        self.lx.r.tables[self.m.0 as usize].uses.get(&node).map(|u| &u.res)
+    }
+
+    fn def(&self, node: ast::NodeId) -> Option<SymbolId> {
+        self.lx.r.tables[self.m.0 as usize].defs.get(&node).copied()
+    }
+
+    fn ty(&self, e: &Expr) -> Ty {
+        self.tables().expr_types.get(&e.id).cloned().unwrap_or(Ty::Error)
+    }
+
+    fn sym_ty(&self, s: SymbolId) -> Ty {
+        self.lx.t.locals.get(&s).cloned().unwrap_or(Ty::Error)
+    }
+
+    fn is_copy(&self, t: &Ty) -> bool {
+        self.lx.t.decls.is_copy(t)
+    }
+
+    /// Values with ownership to release. References, functions and closures
+    /// (whose captures are references) own nothing.
+    fn needs_drop(&self, t: &Ty) -> bool {
+        match t {
+            Ty::Ref(..) | Ty::Fn(..) | Ty::Never | Ty::Void | Ty::Opaque | Ty::Error => false,
+            _ => !self.is_copy(t),
+        }
+    }
+
+    // ------------------------------------------------------------ building blocks
+
+    fn new_block(&mut self) -> BlockId {
+        self.f.blocks.push(BasicBlock { stmts: Vec::new(), term: Terminator::Unreachable, term_span: self.f.span });
+        self.terminated.push(false);
+        BlockId(self.f.blocks.len() as u32 - 1)
+    }
+
+    fn push(&mut self, kind: StatementKind, span: Span) {
+        self.f.blocks[self.cur.0 as usize].stmts.push(Statement { kind, span });
+    }
+
+    fn assign(&mut self, place: Place, rv: Rvalue, span: Span) {
+        self.push(StatementKind::Assign(place, rv), span);
+    }
+
+    /// End the current block; following code goes to a fresh (dead) block.
+    fn terminate(&mut self, term: Terminator, span: Span) {
+        let i = self.cur.0 as usize;
+        self.f.blocks[i].term = term;
+        self.f.blocks[i].term_span = span;
+        self.terminated[i] = true;
+        self.cur = self.new_block();
+        self.dead = true;
+    }
+
+    fn switch_to(&mut self, b: BlockId) {
+        self.cur = b;
+        self.dead = false;
+    }
+
+    fn goto(&mut self, target: BlockId, span: Span) {
+        self.terminate(Terminator::Goto(target), span);
+    }
+
+    fn new_local(&mut self, ty: Ty, kind: LocalKind, name: Option<String>, symbol: Option<SymbolId>, mutable: bool, span: Span) -> LocalId {
+        self.f.locals.push(LocalDecl { ty, kind, name, symbol, mutable, span });
+        LocalId(self.f.locals.len() as u32 - 1)
+    }
+
+    /// A temporary; non-copy temporaries are dropped (if still initialized)
+    /// at the end of the enclosing statement.
+    fn temp(&mut self, ty: Ty, span: Span) -> LocalId {
+        let drop = self.needs_drop(&ty);
+        let l = self.new_local(ty, LocalKind::Temp, None, None, false, span);
+        if drop && let Some(ts) = self.stmt_temps.last_mut() {
+            ts.push(l);
+        }
+        l
+    }
+
+    fn declare_user(&mut self, sym: SymbolId, span: Span) -> LocalId {
+        let s = self.lx.r.symbol(sym);
+        let mutable = matches!(s.kind, SymbolKind::Local { mutable: true });
+        let l = self.new_local(self.sym_ty(sym), LocalKind::User, Some(s.name.clone()), Some(sym), mutable, span);
+        self.vars.insert(sym, l);
+        self.push(StatementKind::StorageLive(l), span);
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.push(l);
+        }
+        l
+    }
+
+    // ------------------------------------------------------------ scopes and drops
+
+    fn drop_locals(&mut self, locals: &[LocalId], span: Span) {
+        for &l in locals.iter().rev() {
+            if self.needs_drop(&self.f.locals[l.0 as usize].ty.clone()) {
+                self.push(StatementKind::Drop(Place::local(l)), span);
+            }
+            if self.f.locals[l.0 as usize].kind == LocalKind::User {
+                self.push(StatementKind::StorageDead(l), span);
+            }
+        }
+    }
+
+    fn pop_scope(&mut self, span: Span) {
+        let locals = self.scopes.pop().unwrap_or_default();
+        if !self.dead {
+            self.drop_locals(&locals, span);
+        }
+    }
+
+    /// Drops for leaving every scope deeper than `depth` (and all pending
+    /// statement temporaries), without popping them: `return`, `break`, `try`.
+    fn exit_to(&mut self, depth: usize, span: Span) {
+        let temps: Vec<LocalId> = self.stmt_temps.iter().rev().flatten().copied().collect();
+        for t in temps {
+            self.push(StatementKind::Drop(Place::local(t)), span);
+        }
+        let scopes: Vec<Vec<LocalId>> = self.scopes[depth..].iter().rev().cloned().collect();
+        for s in scopes {
+            self.drop_locals(&s, span);
+        }
+    }
+
+    fn emit_return(&mut self, span: Span) {
+        self.exit_to(0, span);
+        self.terminate(Terminator::Return, span);
+    }
+
+    // ------------------------------------------------------------ functions
+
+    fn function(&mut self, f: &ast::FnDecl) {
+        let sym = self.def(f.id);
+        self.f.symbol = sym;
+        let sig = sym.and_then(|s| self.lx.t.decls.fns.get(&s));
+        if let Some(sig) = sig {
+            self.f.ret = sig.ret.clone();
+            self.f.generics = sig.generics.clone();
+        }
+        let ret = self.f.ret.clone();
+        self.new_local(ret, LocalKind::Return, None, None, false, f.span);
+        self.scopes.push(Vec::new());
+        if let Some(r) = &f.receiver
+            && let Some(s) = self.def(r.id)
+        {
+            let l = self.new_local(self.sym_ty(s), LocalKind::Param, Some("self".into()), Some(s), false, r.span);
+            self.vars.insert(s, l);
+            self.scopes[0].push(l);
+        }
+        for p in &f.params {
+            if let Some(s) = self.def(p.id) {
+                let l = self.new_local(self.sym_ty(s), LocalKind::Param, Some(p.name.name.clone()), Some(s), false, p.span);
+                self.vars.insert(s, l);
+                self.scopes[0].push(l);
+            }
+        }
+        self.f.param_count = self.f.locals.len() as u32 - 1;
+        match &f.body {
+            Some(body) => {
+                self.stmts(&body.stmts);
+                self.fall_off_end(body.span);
+            }
+            None => {
+                // Extern / intrinsic declaration: no blocks.
+                self.f.blocks.clear();
+                self.terminated.clear();
+            }
+        }
+    }
+
+    fn fall_off_end(&mut self, span: Span) {
+        if self.dead {
+            return;
+        }
+        let end = Span::new(span.file, span.end.saturating_sub(1), span.end);
+        if matches!(self.f.ret, Ty::Void) {
+            self.assign(Place::local(RETURN), Rvalue::Use(Operand::Const(Const::Unit)), end);
+            self.emit_return(end);
+        } else {
+            // The type checker proved this point unreachable (E3009 otherwise).
+            self.terminate(Terminator::Unreachable, end);
+        }
+    }
+
+    fn finish(mut self) -> Function {
+        prune(&mut self.f);
+        self.f
+    }
+
+    // ------------------------------------------------------------ statements
+
+    fn stmts(&mut self, stmts: &[Stmt]) {
+        for s in stmts {
+            if self.dead && !self.warned_dead && !matches!(s.kind, StmtKind::Error) {
+                self.warned_dead = true;
+                let mut d = Diagnostic::error("W3002", "unreachable_code", "unreachable code")
+                    .primary(s.span, "this statement can never run")
+                    .note("an earlier statement in this block always returns, breaks or panics");
+                d.severity = Severity::Warning;
+                self.diags.push(d);
+            }
+            self.stmt_temps.push(Vec::new());
+            self.stmt(s);
+            let temps = self.stmt_temps.pop().unwrap_or_default();
+            if !self.dead {
+                for t in temps.into_iter().rev() {
+                    self.push(StatementKind::Drop(Place::local(t)), s.span);
+                }
+            }
+        }
+    }
+
+    fn block(&mut self, b: &ast::Block) {
+        self.scopes.push(Vec::new());
+        self.stmts(&b.stmts);
+        self.pop_scope(Span::new(b.span.file, b.span.end.saturating_sub(1), b.span.end));
+    }
+
+    fn stmt(&mut self, s: &Stmt) {
+        let span = s.span;
+        match &s.kind {
+            StmtKind::Let { value, .. } => {
+                let Some(sym) = self.def(s.id) else { return };
+                // Evaluate before declaring: the initializer cannot see the name.
+                // `r := &make()` keeps the temporary alive as long as `r`'s
+                // scope; a temporary only borrowed *inside* the initializer
+                // (`n := len(&make())`) dies at the end of the statement.
+                self.extend_temps = matches!(value.kind, ExprKind::Unary { op: ast::UnaryOp::Ref | ast::UnaryOp::RefMut, .. });
+                let op = self.operand(value);
+                self.extend_temps = false;
+                let l = self.declare_user(sym, span);
+                self.assign(Place::local(l), Rvalue::Use(op), span);
+            }
+            StmtKind::Assign { target, value } => {
+                let op = self.operand(value);
+                let place = self.place(target);
+                let ty = self.ty(target);
+                if self.needs_drop(&ty) {
+                    // The old value is dropped before being overwritten.
+                    self.push(StatementKind::Drop(place.clone()), span);
+                }
+                self.assign(place, Rvalue::Use(op), span);
+            }
+            StmtKind::Expr(e) => {
+                let ty = self.ty(e);
+                let t = self.temp(ty, e.span);
+                self.expr_into(e, Place::local(t));
+            }
+            StmtKind::Spawn(e) => {
+                let t = self.temp(Ty::Void, e.span);
+                if let ExprKind::Call { callee, args } = &e.kind {
+                    self.call(e, callee, args, Place::local(t), true);
+                }
+            }
+            StmtKind::Return(value) => {
+                match value {
+                    Some(v) => self.expr_into(v, Place::local(RETURN)),
+                    None => self.assign(Place::local(RETURN), Rvalue::Use(Operand::Const(Const::Unit)), span),
+                }
+                if !self.dead {
+                    self.emit_return(span);
+                }
+            }
+            StmtKind::Break => {
+                if let Some(l) = self.loops.last() {
+                    let (to, depth) = (l.break_to, l.depth);
+                    self.exit_to(depth, span);
+                    self.goto(to, span);
+                }
+            }
+            StmtKind::Continue => {
+                if let Some(l) = self.loops.last() {
+                    let (to, depth) = (l.continue_to, l.depth);
+                    self.exit_to(depth, span);
+                    self.goto(to, span);
+                }
+            }
+            StmtKind::If(i) => self.if_stmt(i),
+            StmtKind::For(f) => self.for_stmt(s, f),
+            StmtKind::Match(m) => self.match_stmt(m),
+            StmtKind::Block(b) | StmtKind::Unsafe(b) => self.block(b),
+            StmtKind::Scope(b) => {
+                self.block(b);
+                if !self.dead {
+                    let t = self.temp(Ty::Void, span);
+                    let next = self.new_block();
+                    self.terminate(
+                        Terminator::Call { callee: Callee::Builtin(Builtin::JoinScope), args: Vec::new(), dest: Place::local(t), next: Some(next), spawn: false },
+                        span,
+                    );
+                    self.switch_to(next);
+                }
+            }
+            StmtKind::Error => {}
+        }
+    }
+
+    fn if_stmt(&mut self, i: &ast::IfStmt) {
+        let cond = self.operand(&i.cond);
+        let (then_bb, else_bb, join) = (self.new_block(), self.new_block(), self.new_block());
+        self.terminate(Terminator::Switch { discr: cond, cases: vec![(0, else_bb)], otherwise: then_bb }, i.cond.span);
+        self.switch_to(then_bb);
+        self.block(&i.then_block);
+        if !self.dead {
+            self.goto(join, i.span);
+        }
+        self.switch_to(else_bb);
+        match i.else_branch.as_deref() {
+            Some(ElseBranch::If(e)) => self.if_stmt(e),
+            Some(ElseBranch::Block(b)) => self.block(b),
+            None => {}
+        }
+        if !self.dead {
+            self.goto(join, i.span);
+        }
+        self.switch_to(join);
+        // `join` is unreachable when every branch diverged.
+        self.dead = !self.has_predecessor(join);
+    }
+
+    fn has_predecessor(&self, b: BlockId) -> bool {
+        self.f.blocks.iter().enumerate().any(|(i, blk)| self.terminated[i] && blk.term.successors().contains(&b))
+    }
+
+    fn loop_body(&mut self, body: &ast::Block, continue_to: BlockId, break_to: BlockId, before: impl FnOnce(&mut Self)) {
+        let depth = self.scopes.len();
+        self.loops.push(LoopCx { continue_to, break_to, depth });
+        self.scopes.push(Vec::new());
+        before(self);
+        self.stmts(&body.stmts);
+        self.pop_scope(Span::new(body.span.file, body.span.end.saturating_sub(1), body.span.end));
+        self.loops.pop();
+        if !self.dead {
+            self.goto(continue_to, body.span);
+        }
+    }
+
+    fn for_stmt(&mut self, s: &Stmt, f: &ast::ForStmt) {
+        let span = s.span;
+        let exit = self.new_block();
+        match &f.kind {
+            ForKind::Infinite => {
+                let head = self.new_block();
+                self.goto(head, span);
+                self.switch_to(head);
+                self.loop_body(&f.body, head, exit, |_| {});
+            }
+            ForKind::While(c) => {
+                let (head, body) = (self.new_block(), self.new_block());
+                self.goto(head, span);
+                self.switch_to(head);
+                let cond = self.operand(c);
+                self.terminate(Terminator::Switch { discr: cond, cases: vec![(0, exit)], otherwise: body }, c.span);
+                self.switch_to(body);
+                self.loop_body(&f.body, head, exit, |_| {});
+            }
+            ForKind::In { iter, .. } => {
+                let sym = self.def(s.id);
+                match &iter.kind {
+                    ExprKind::Range { start, end, inclusive } => self.for_range(span, sym, start, end, *inclusive, &f.body, exit),
+                    _ => self.for_elements(span, sym, s, iter, &f.body, exit),
+                }
+            }
+        }
+        self.switch_to(exit);
+        self.dead = !self.has_predecessor(exit);
+    }
+
+    /// `for i in a..b`: counter loop; `a..=b` stops *at* `b` without
+    /// computing `b + 1` (no overflow at the type's maximum).
+    #[allow(clippy::too_many_arguments)]
+    fn for_range(&mut self, span: Span, sym: Option<SymbolId>, start: &Option<Box<Expr>>, end: &Option<Box<Expr>>, inclusive: bool, body: &ast::Block, exit: BlockId) {
+        let elem = sym.map(|s| self.sym_ty(s)).unwrap_or(Ty::Error);
+        let (Some(start), Some(end)) = (start, end) else { return };
+        let cur = self.new_local(elem.clone(), LocalKind::Temp, None, None, false, span);
+        let lo = self.operand(start);
+        self.assign(Place::local(cur), Rvalue::Use(lo), start.span);
+        let hi_op = self.operand(end);
+        let hi = self.new_local(elem.clone(), LocalKind::Temp, None, None, false, end.span);
+        self.assign(Place::local(hi), Rvalue::Use(hi_op), end.span);
+        let (head, body_bb, latch) = (self.new_block(), self.new_block(), self.new_block());
+        self.goto(head, span);
+        self.switch_to(head);
+        let c = self.new_local(Ty::Bool, LocalKind::Temp, None, None, false, span);
+        let op = if inclusive { BinOp::Le } else { BinOp::Lt };
+        self.assign(Place::local(c), Rvalue::Binary(op, Operand::Copy(Place::local(cur)), Operand::Copy(Place::local(hi))), span);
+        self.terminate(Terminator::Switch { discr: Operand::Copy(Place::local(c)), cases: vec![(0, exit)], otherwise: body_bb }, span);
+        self.switch_to(body_bb);
+        self.loop_body(body, latch, exit, |b| {
+            if let Some(sym) = sym {
+                let l = b.declare_user(sym, span);
+                b.assign(Place::local(l), Rvalue::Use(Operand::Copy(Place::local(cur))), span);
+            }
+        });
+        // latch: (inclusive: stop at the last value) cur = cur + 1
+        self.switch_to(latch);
+        if inclusive {
+            let last = self.new_local(Ty::Bool, LocalKind::Temp, None, None, false, span);
+            self.assign(Place::local(last), Rvalue::Binary(BinOp::Eq, Operand::Copy(Place::local(cur)), Operand::Copy(Place::local(hi))), span);
+            let step = self.new_block();
+            self.terminate(Terminator::Switch { discr: Operand::Copy(Place::local(last)), cases: vec![(0, step)], otherwise: exit }, span);
+            self.switch_to(step);
+        }
+        let one = match &elem {
+            Ty::Int(it) => Const::Int(1, *it),
+            _ => Const::Int(1, tarn_types::IntTy::I64),
+        };
+        self.assign(Place::local(cur), Rvalue::Binary(BinOp::Add, Operand::Copy(Place::local(cur)), Operand::Const(one)), span);
+        self.goto(head, span);
+    }
+
+    /// `for x in &xs` / `for x in arr`: index loop with ADR 0018 binding modes.
+    fn for_elements(&mut self, span: Span, sym: Option<SymbolId>, s: &Stmt, iter: &Expr, body: &ast::Block, exit: BlockId) {
+        let it_ty = self.ty(iter);
+        let mode = self.tables().binding_modes.get(&s.id).copied().unwrap_or(BindingMode::Copy);
+        if matches!(it_ty, Ty::Opaque | Ty::Error) {
+            // Opaque std iterator: the loop shape is kept, the values are opaque.
+            let _ = self.operand(iter);
+            let (head, body_bb) = (self.new_block(), self.new_block());
+            self.goto(head, span);
+            self.switch_to(head);
+            self.terminate(Terminator::Switch { discr: Operand::Const(Const::Opaque), cases: vec![(0, exit)], otherwise: body_bb }, span);
+            self.switch_to(body_bb);
+            self.loop_body(body, head, exit, |b| {
+                if let Some(sym) = sym {
+                    let l = b.declare_user(sym, span);
+                    b.assign(Place::local(l), Rvalue::Use(Operand::Const(Const::Opaque)), span);
+                }
+            });
+            return;
+        }
+        // Base place of the elements: `*it` through a reference, or the array itself.
+        let it = self.new_local(it_ty.clone(), LocalKind::Temp, None, None, false, iter.span);
+        let it_op = self.operand(iter);
+        self.assign(Place::local(it), Rvalue::Use(it_op), iter.span);
+        if !matches!(it_ty, Ty::Ref(..)) && self.needs_drop(&it_ty) {
+            self.scopes.last_mut().unwrap().push(it);
+        }
+        let base = match it_ty {
+            Ty::Ref(..) => Place::local(it).project(Proj::Deref),
+            _ => Place::local(it),
+        };
+        let usize_ = Ty::Int(tarn_types::IntTy::Usize);
+        let len = self.new_local(usize_.clone(), LocalKind::Temp, None, None, false, span);
+        self.assign(Place::local(len), Rvalue::Len(base.clone()), span);
+        let idx = self.new_local(usize_.clone(), LocalKind::Temp, None, None, false, span);
+        self.assign(Place::local(idx), Rvalue::Use(Operand::Const(Const::Int(0, tarn_types::IntTy::Usize))), span);
+        let (head, body_bb, latch) = (self.new_block(), self.new_block(), self.new_block());
+        self.goto(head, span);
+        self.switch_to(head);
+        let c = self.new_local(Ty::Bool, LocalKind::Temp, None, None, false, span);
+        self.assign(Place::local(c), Rvalue::Binary(BinOp::Lt, Operand::Copy(Place::local(idx)), Operand::Copy(Place::local(len))), span);
+        self.terminate(Terminator::Switch { discr: Operand::Copy(Place::local(c)), cases: vec![(0, exit)], otherwise: body_bb }, span);
+        self.switch_to(body_bb);
+        let elem = base.project(Proj::Index(idx));
+        self.loop_body(body, latch, exit, |b| {
+            if let Some(sym) = sym {
+                let l = b.declare_user(sym, span);
+                let rv = match mode {
+                    BindingMode::Copy => Rvalue::Use(Operand::Copy(elem.clone())),
+                    BindingMode::Move => Rvalue::Use(Operand::Move(elem.clone())),
+                    BindingMode::Ref(m) => Rvalue::Ref(m, elem.clone()),
+                };
+                b.assign(Place::local(l), rv, span);
+            }
+        });
+        self.switch_to(latch);
+        self.assign(
+            Place::local(idx),
+            Rvalue::Binary(BinOp::Add, Operand::Copy(Place::local(idx)), Operand::Const(Const::Int(1, tarn_types::IntTy::Usize))),
+            span,
+        );
+        self.goto(head, span);
+    }
+
+    // ------------------------------------------------------------ match
+
+    fn match_stmt(&mut self, m: &ast::MatchStmt) {
+        let st = self.ty(&m.scrutinee);
+        let scrut = self.place(&m.scrutinee);
+        let join = self.new_block();
+        let tests: Vec<BlockId> = m.arms.iter().map(|_| self.new_block()).collect();
+        let fallthrough = self.new_block();
+        self.goto(tests[0], m.scrutinee.span);
+        for (i, arm) in m.arms.iter().enumerate() {
+            let fail = tests.get(i + 1).copied().unwrap_or(fallthrough);
+            self.switch_to(tests[i]);
+            self.test(&arm.pattern, scrut.clone(), st.clone(), fail);
+            self.scopes.push(Vec::new());
+            self.bind(&arm.pattern, scrut.clone(), st.clone());
+            if let Some(g) = &arm.guard {
+                let c = self.operand(g);
+                let body = self.new_block();
+                // Guard failed: leave the arm scope (bindings dead) and try the next arm.
+                let undo = self.new_block();
+                self.terminate(Terminator::Switch { discr: c, cases: vec![(0, undo)], otherwise: body }, g.span);
+                self.switch_to(undo);
+                let locals = self.scopes.last().cloned().unwrap_or_default();
+                self.drop_locals(&locals, g.span);
+                self.goto(fail, g.span);
+                self.switch_to(body);
+            }
+            match &arm.body.kind {
+                StmtKind::Block(b) => self.stmts(&b.stmts),
+                _ => {
+                    self.stmt_temps.push(Vec::new());
+                    self.stmt(&arm.body);
+                    let temps = self.stmt_temps.pop().unwrap_or_default();
+                    if !self.dead {
+                        for t in temps.into_iter().rev() {
+                            self.push(StatementKind::Drop(Place::local(t)), arm.span);
+                        }
+                    }
+                }
+            }
+            self.pop_scope(arm.span);
+            if !self.dead {
+                self.goto(join, arm.span);
+            }
+        }
+        // Exhaustiveness was proven by the type checker.
+        self.switch_to(fallthrough);
+        self.terminate(Terminator::Unreachable, m.scrutinee.span);
+        self.switch_to(join);
+        self.dead = !self.has_predecessor(join);
+    }
+
+    fn variant_index(&self, enum_sym: SymbolId, v: SymbolId) -> u32 {
+        self.lx.t.decls.enums.get(&enum_sym).and_then(|d| d.variants.iter().position(|x| x.sym == v)).unwrap_or(0) as u32
+    }
+
+    fn variant_field_tys(&self, ty: &Ty, v: SymbolId) -> Vec<Ty> {
+        let Ty::Adt(e, args) = ty else { return Vec::new() };
+        let Some(def) = self.lx.t.decls.enums.get(e) else { return Vec::new() };
+        let map: HashMap<_, _> = def.generics.iter().copied().zip(args.iter().cloned()).collect();
+        def.variants.iter().find(|x| x.sym == v).map(|x| x.fields.iter().map(|f| tarn_types::subst(f, &map)).collect()).unwrap_or_default()
+    }
+
+    fn struct_field(&self, ty: &Ty, name: &str) -> Option<(u32, Ty)> {
+        let Ty::Adt(s, args) = ty else { return None };
+        let def = self.lx.t.decls.structs.get(s)?;
+        let map: HashMap<_, _> = def.generics.iter().copied().zip(args.iter().cloned()).collect();
+        let i = def.fields.iter().position(|f| f.name == name)?;
+        Some((i as u32, tarn_types::subst(&def.fields[i].ty, &map)))
+    }
+
+    /// Emit the tests of `p` against `place`; continue in the current block
+    /// on success, jump to `fail` otherwise. References are transparent.
+    fn test(&mut self, p: &Pattern, mut place: Place, mut ty: Ty, fail: BlockId) {
+        while let Ty::Ref(_, inner) = ty {
+            place = place.project(Proj::Deref);
+            ty = *inner;
+        }
+        let span = p.span;
+        match &p.kind {
+            PatternKind::Wildcard | PatternKind::Error => {}
+            PatternKind::Ident(_) | PatternKind::Variant { .. } => {
+                let Some(&v) = self.tables().pattern_variants.get(&p.id) else { return };
+                let Ty::Adt(enum_sym, _) = &ty else { return };
+                let idx = self.variant_index(*enum_sym, v);
+                let d = self.new_local(Ty::Int(tarn_types::IntTy::U32), LocalKind::Temp, None, None, false, span);
+                self.assign(Place::local(d), Rvalue::Discriminant(place.clone()), span);
+                let ok = self.new_block();
+                self.terminate(Terminator::Switch { discr: Operand::Copy(Place::local(d)), cases: vec![(idx as i128, ok)], otherwise: fail }, span);
+                self.switch_to(ok);
+                if let PatternKind::Variant { args, .. } = &p.kind {
+                    let ftys = self.variant_field_tys(&ty, v);
+                    for (i, (a, ft)) in args.iter().zip(ftys).enumerate() {
+                        let sub = place.project(Proj::Downcast(idx)).project(Proj::Field(i as u32));
+                        self.test(a, sub, ft, fail);
+                    }
+                }
+            }
+            PatternKind::Literal(e) => {
+                if let ExprKind::Bool(b) = e.kind {
+                    let ok = self.new_block();
+                    self.terminate(Terminator::Switch { discr: Operand::Copy(place), cases: vec![(b as i128, ok)], otherwise: fail }, span);
+                    self.switch_to(ok);
+                } else {
+                    let c = self.compare(BinOp::Eq, place, &ty, e, span);
+                    self.branch_on(c, fail, span);
+                }
+            }
+            PatternKind::Range { start, end, inclusive } => {
+                let lo = self.compare(BinOp::Ge, place.clone(), &ty, start, span);
+                self.branch_on(lo, fail, span);
+                let hi = self.compare(if *inclusive { BinOp::Le } else { BinOp::Lt }, place, &ty, end, span);
+                self.branch_on(hi, fail, span);
+            }
+            PatternKind::Struct { fields, .. } => {
+                for fp in fields {
+                    if let (Some(sub), Some((i, ft))) = (&fp.pattern, self.struct_field(&ty, &fp.name.name)) {
+                        self.test(sub, place.project(Proj::Field(i)), ft, fail);
+                    }
+                }
+            }
+        }
+    }
+
+    /// `place <op> literal` as a bool temp (strings compare through an intrinsic).
+    fn compare(&mut self, op: BinOp, place: Place, ty: &Ty, lit: &Expr, span: Span) -> LocalId {
+        let c = self.new_local(Ty::Bool, LocalKind::Temp, None, None, false, span);
+        let rhs = self.operand(lit);
+        if matches!(ty, Ty::Str) {
+            let lhs_ref = self.new_local(Ty::Ref(false, Box::new(Ty::Str)), LocalKind::Temp, None, None, false, span);
+            self.assign(Place::local(lhs_ref), Rvalue::Ref(false, place), span);
+            let rhs_t = self.new_local(Ty::Str, LocalKind::Temp, None, None, false, span);
+            self.assign(Place::local(rhs_t), Rvalue::Use(rhs), span);
+            let rhs_ref = self.new_local(Ty::Ref(false, Box::new(Ty::Str)), LocalKind::Temp, None, None, false, span);
+            self.assign(Place::local(rhs_ref), Rvalue::Ref(false, Place::local(rhs_t)), span);
+            let next = self.new_block();
+            self.terminate(
+                Terminator::Call {
+                    callee: Callee::Intrinsic(format!("string.{}", binop_name(op))),
+                    args: vec![Operand::Copy(Place::local(lhs_ref)), Operand::Copy(Place::local(rhs_ref))],
+                    dest: Place::local(c),
+                    next: Some(next),
+                    spawn: false,
+                },
+                span,
+            );
+            self.switch_to(next);
+            self.push(StatementKind::Drop(Place::local(rhs_t)), span);
+        } else {
+            self.assign(Place::local(c), Rvalue::Binary(op, Operand::Copy(place), rhs), span);
+        }
+        c
+    }
+
+    fn branch_on(&mut self, c: LocalId, fail: BlockId, span: Span) {
+        let ok = self.new_block();
+        self.terminate(Terminator::Switch { discr: Operand::Copy(Place::local(c)), cases: vec![(0, fail)], otherwise: ok }, span);
+        self.switch_to(ok);
+    }
+
+    /// Create the pattern's bindings after all its tests succeeded, using the
+    /// binding modes recorded by the type checker (ADR 0018).
+    fn bind(&mut self, p: &Pattern, mut place: Place, mut ty: Ty) {
+        while let Ty::Ref(_, inner) = ty {
+            place = place.project(Proj::Deref);
+            ty = *inner;
+        }
+        match &p.kind {
+            PatternKind::Ident(_) => {
+                if self.tables().pattern_variants.contains_key(&p.id) {
+                    return;
+                }
+                if let Some(sym) = self.def(p.id) {
+                    self.bind_one(p.id, sym, place, p.span);
+                }
+            }
+            PatternKind::Variant { args, .. } => {
+                let Some(&v) = self.tables().pattern_variants.get(&p.id) else { return };
+                let Ty::Adt(enum_sym, _) = &ty else { return };
+                let idx = self.variant_index(*enum_sym, v);
+                let ftys = self.variant_field_tys(&ty, v);
+                for (i, (a, ft)) in args.iter().zip(ftys).enumerate() {
+                    self.bind(a, place.project(Proj::Downcast(idx)).project(Proj::Field(i as u32)), ft);
+                }
+            }
+            PatternKind::Struct { fields, .. } => {
+                for fp in fields {
+                    let Some((i, ft)) = self.struct_field(&ty, &fp.name.name) else { continue };
+                    let sub = place.project(Proj::Field(i));
+                    match &fp.pattern {
+                        Some(sp) => self.bind(sp, sub, ft),
+                        None => {
+                            if let Some(sym) = self.def(fp.id) {
+                                self.bind_one(fp.id, sym, sub, fp.span);
+                            }
+                        }
+                    }
+                }
+            }
+            PatternKind::Wildcard | PatternKind::Literal(_) | PatternKind::Range { .. } | PatternKind::Error => {}
+        }
+    }
+
+    fn bind_one(&mut self, node: ast::NodeId, sym: SymbolId, place: Place, span: Span) {
+        let mode = self.tables().binding_modes.get(&node).copied().unwrap_or(BindingMode::Copy);
+        let l = self.declare_user(sym, span);
+        let rv = match mode {
+            BindingMode::Copy => Rvalue::Use(Operand::Copy(place)),
+            BindingMode::Move => Rvalue::Use(Operand::Move(place)),
+            BindingMode::Ref(m) => Rvalue::Ref(m, place),
+        };
+        self.assign(Place::local(l), rv, span);
+    }
+
+    // ------------------------------------------------------------ places and operands
+
+    /// Place of a local symbol (a capture is reached through its reference).
+    fn symbol_place(&self, s: SymbolId) -> Option<Place> {
+        if let Some(&l) = self.vars.get(&s) {
+            return Some(Place::local(l));
+        }
+        self.captures.get(&s).map(|&l| Place::local(l).project(Proj::Deref))
+    }
+
+    /// Is `e` a place expression (named storage), as opposed to a value?
+    fn is_place(&self, e: &Expr) -> bool {
+        match &e.kind {
+            ExprKind::Ident(_) => matches!(self.res(e.id), Some(Res::Symbol(s)) if self.symbol_place(*s).is_some()),
+            ExprKind::Field { .. } => self.res(e.id).is_none(),
+            ExprKind::Index { index, .. } => !matches!(index.kind, ExprKind::Range { .. }),
+            ExprKind::Paren(inner) => self.is_place(inner),
+            _ => false,
+        }
+    }
+
+    /// The place `e` denotes; values are first stored in a temporary.
+    fn place(&mut self, e: &Expr) -> Place {
+        match &e.kind {
+            ExprKind::Paren(inner) => self.place(inner),
+            ExprKind::Ident(_) if self.is_place(e) => {
+                let Some(Res::Symbol(s)) = self.res(e.id) else { unreachable!() };
+                self.symbol_place(*s).unwrap()
+            }
+            ExprKind::Field { base, name } if self.res(e.id).is_none() => {
+                let (mut p, mut bt) = (self.place(base), self.ty(base));
+                while let Ty::Ref(_, inner) = bt {
+                    p = p.project(Proj::Deref);
+                    bt = *inner;
+                }
+                match self.struct_field(&bt, &name.name) {
+                    Some((i, _)) => p.project(Proj::Field(i)),
+                    None => p,
+                }
+            }
+            ExprKind::Index { base, index } if !matches!(index.kind, ExprKind::Range { .. }) => {
+                let (mut p, mut bt) = (self.place(base), self.ty(base));
+                while let Ty::Ref(_, inner) = bt {
+                    p = p.project(Proj::Deref);
+                    bt = *inner;
+                }
+                let iop = self.operand(index);
+                let i = self.new_local(Ty::Int(tarn_types::IntTy::Usize), LocalKind::Temp, None, None, false, index.span);
+                self.assign(Place::local(i), Rvalue::Use(iop), index.span);
+                p.project(Proj::Index(i))
+            }
+            _ => {
+                let t = self.temp(self.ty(e), e.span);
+                self.expr_into(e, Place::local(t));
+                Place::local(t)
+            }
+        }
+    }
+
+    fn read(&self, place: Place, ty: &Ty) -> Operand {
+        if self.is_copy(ty) { Operand::Copy(place) } else { Operand::Move(place) }
+    }
+
+    /// A `&mut T` place used where a reference is expected is *reborrowed*
+    /// (`&*p` / `&mut *p`) instead of moved, so it stays usable afterwards.
+    fn reborrow(&mut self, e: &Expr, mutable: bool) -> Option<Operand> {
+        let Ty::Ref(true, inner) = self.ty(e) else { return None };
+        if !self.is_place(e) {
+            return None;
+        }
+        let p = self.place(e).project(Proj::Deref);
+        Some(self.ref_temp(mutable, p, &inner, e.span))
+    }
+
+    /// Argument of a call: like `operand`, but a `&mut` place is reborrowed.
+    fn arg(&mut self, e: &Expr) -> Operand {
+        if !self.tables().coercions.contains_key(&e.id)
+            && let Some(op) = self.reborrow(e, true)
+        {
+            return op;
+        }
+        self.operand(e)
+    }
+
+    /// The value of `e` as an operand, with the checker's coercion applied.
+    fn operand(&mut self, e: &Expr) -> Operand {
+        let Some(c) = self.tables().coercions.get(&e.id).copied() else { return self.operand_raw(e) };
+        // `&mut T → &T` of a place: a shared reborrow, not a conversion.
+        if c.mut_to_shared
+            && c.kind == CoercionKind::None
+            && let Some(op) = self.reborrow(e, false)
+        {
+            return op;
+        }
+        let op = self.operand_raw(e);
+        let Ty::Ref(m, inner) = self.ty(e) else { return op };
+        let shared = m && !c.mut_to_shared;
+        let (kind, target) = match (c.kind, *inner) {
+            (CoercionKind::Unsize, Ty::Array(el, _)) => (CoerceKind::Unsize, Ty::Ref(shared, Box::new(Ty::Slice(el)))),
+            (CoercionKind::ToDyn(i), _) => (CoerceKind::ToDyn(i), Ty::Ref(shared, Box::new(Ty::Any(i)))),
+            (_, inner) => (CoerceKind::MutToShared, Ty::Ref(false, Box::new(inner))),
+        };
+        let t = self.new_local(target.clone(), LocalKind::Temp, None, None, false, e.span);
+        self.assign(Place::local(t), Rvalue::Coerce(kind, op, target.clone()), e.span);
+        self.read(Place::local(t), &target)
+    }
+
+    fn operand_raw(&mut self, e: &Expr) -> Operand {
+        let ty = self.ty(e);
+        match &e.kind {
+            ExprKind::Int(v) => Operand::Const(int_const(*v as i128, &ty)),
+            ExprKind::Float(s) => Operand::Const(Const::Float(s.clone(), match ty {
+                Ty::Float(f) => f,
+                _ => tarn_types::FloatTy::F64,
+            })),
+            ExprKind::Str(s) => Operand::Const(Const::Str(s.clone())),
+            ExprKind::Bool(b) => Operand::Const(Const::Bool(*b)),
+            ExprKind::Unit => Operand::Const(Const::Unit),
+            ExprKind::Unary { op: ast::UnaryOp::Neg, operand } if matches!(operand.kind, ExprKind::Int(_)) => {
+                let ExprKind::Int(v) = operand.kind else { unreachable!() };
+                Operand::Const(int_const(-(v as i128), &ty))
+            }
+            ExprKind::Paren(inner) => self.operand(inner),
+            _ if self.is_place(e) => {
+                let p = self.place(e);
+                self.read(p, &ty)
+            }
+            _ => {
+                if matches!(ty, Ty::Opaque) && matches!(e.kind, ExprKind::Ident(_) | ExprKind::Field { .. }) {
+                    return Operand::Const(Const::Opaque);
+                }
+                let t = self.temp(ty.clone(), e.span);
+                self.expr_into_raw(e, Place::local(t));
+                self.read(Place::local(t), &ty)
+            }
+        }
+    }
+
+    /// Store the value of `e` into `dest`, with the checker's coercion applied.
+    fn expr_into(&mut self, e: &Expr, dest: Place) {
+        if self.tables().coercions.contains_key(&e.id) {
+            let op = self.operand(e);
+            self.assign(dest, Rvalue::Use(op), e.span);
+        } else {
+            self.expr_into_raw(e, dest);
+        }
+    }
+
+    /// Store the uncoerced value of `e` into `dest`. Never consults
+    /// coercions, so `operand` → `operand_raw` → here cannot loop.
+    fn expr_into_raw(&mut self, e: &Expr, dest: Place) {
+        let span = e.span;
+        let ty = self.ty(e);
+        match &e.kind {
+            ExprKind::Call { callee, args } => self.call(e, callee, args, dest, false),
+            ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs, dest),
+            ExprKind::Unary { op: ast::UnaryOp::Ref | ast::UnaryOp::RefMut, operand } => {
+                let rv = self.borrow(e, operand);
+                self.assign(dest, rv, span);
+            }
+            ExprKind::Unary { op, operand } if !matches!(operand.kind, ExprKind::Int(_)) => {
+                let o = self.operand(operand);
+                let rv = match op {
+                    ast::UnaryOp::Neg => Rvalue::Unary(UnOp::Neg, o),
+                    ast::UnaryOp::Not => Rvalue::Unary(UnOp::Not, o),
+                    _ => unreachable!(),
+                };
+                self.assign(dest, rv, span);
+            }
+            ExprKind::Try(inner) => self.try_into(e, inner, dest),
+            ExprKind::StructLit { fields, .. } => {
+                let Ty::Adt(s, targs) = &ty else {
+                    self.assign(dest, Rvalue::Use(Operand::Const(Const::Opaque)), span);
+                    return;
+                };
+                let Some(def) = self.lx.t.decls.structs.get(s) else { return };
+                // Operands in the order the fields are written (evaluation
+                // order), then assembled in declaration order.
+                let mut by_name: HashMap<&str, Operand> = HashMap::new();
+                for f in fields {
+                    let op = match &f.value {
+                        Some(v) => self.operand(v),
+                        None => match self.res(f.id) {
+                            Some(Res::Symbol(sym)) => {
+                                let p = self.symbol_place(*sym).unwrap_or(Place::local(RETURN));
+                                self.read(p, &self.sym_ty(*sym))
+                            }
+                            _ => Operand::Const(Const::Opaque),
+                        },
+                    };
+                    by_name.insert(&f.name.name, op);
+                }
+                let ops = def.fields.iter().map(|f| by_name.remove(f.name.as_str()).unwrap_or(Operand::Const(Const::Opaque))).collect();
+                self.assign(dest, Rvalue::Aggregate(Aggregate::Struct(*s, targs.clone()), ops), span);
+            }
+            ExprKind::ArrayLit { elems, .. } => {
+                let elem = match &ty {
+                    Ty::Array(el, _) => (**el).clone(),
+                    _ => Ty::Error,
+                };
+                let ops = elems.iter().map(|x| self.operand(x)).collect();
+                self.assign(dest, Rvalue::Aggregate(Aggregate::Array(elem), ops), span);
+            }
+            ExprKind::Closure { params, body, .. } => self.closure(e, params, body, dest),
+            ExprKind::Ident(_) | ExprKind::Field { .. } if !self.is_place(e) => {
+                let rv = self.static_value(e, &ty);
+                self.assign(dest, rv, span);
+            }
+            // An unsized slice value outside `&` has no representation.
+            ExprKind::Index { index, .. } if matches!(index.kind, ExprKind::Range { .. }) => {
+                self.assign(dest, Rvalue::Use(Operand::Const(Const::Opaque)), span);
+            }
+            // Constants, places, parenthesized expressions: no recursion back here.
+            _ => {
+                let op = self.operand_raw(e);
+                self.assign(dest, Rvalue::Use(op), span);
+            }
+        }
+    }
+
+    /// A name that is not a place: unit variant, function value, std member.
+    fn static_value(&mut self, e: &Expr, ty: &Ty) -> Rvalue {
+        match self.res(e.id) {
+            Some(Res::Symbol(s)) => match &self.lx.r.symbol(*s).kind {
+                SymbolKind::Variant { parent } => {
+                    let targs = match ty {
+                        Ty::Adt(_, a) => a.clone(),
+                        _ => Vec::new(),
+                    };
+                    Rvalue::Aggregate(Aggregate::Variant(*parent, self.variant_index(*parent, *s), targs), Vec::new())
+                }
+                SymbolKind::Function | SymbolKind::Method { .. } | SymbolKind::ImplMethod { .. } => match self.lx.by_symbol.get(s) {
+                    Some(id) => Rvalue::Use(Operand::Const(Const::Fn(*id, self.tables().type_args.get(&e.id).cloned().unwrap_or_default()))),
+                    None => Rvalue::Use(Operand::Const(Const::Opaque)),
+                },
+                _ => Rvalue::Use(Operand::Const(Const::Opaque)),
+            },
+            _ => Rvalue::Use(Operand::Const(Const::Opaque)),
+        }
+    }
+
+    /// `&e` / `&mut e`. Borrowing a value (not a place) borrows a temporary;
+    /// in a `let` initializer that temporary lives until the end of the scope.
+    fn borrow(&mut self, e: &Expr, operand: &Expr) -> Rvalue {
+        let mutable = matches!(e.kind, ExprKind::Unary { op: ast::UnaryOp::RefMut, .. });
+        if let ExprKind::Index { base, index } = &operand.kind
+            && let ExprKind::Range { start, end, .. } = &index.kind
+        {
+            let (mut p, mut bt) = (self.place(base), self.ty(base));
+            while let Ty::Ref(_, inner) = bt {
+                p = p.project(Proj::Deref);
+                bt = *inner;
+            }
+            let start = start.as_ref().map(|s| self.operand(s));
+            let end = end.as_ref().map(|s| self.operand(s));
+            return Rvalue::SliceRef { mutable, base: p, start, end };
+        }
+        if self.is_place(operand) {
+            let p = self.place(operand);
+            return Rvalue::Ref(mutable, p);
+        }
+        let t = self.new_local(self.ty(operand), LocalKind::Temp, None, None, false, operand.span);
+        let extend = std::mem::take(&mut self.extend_temps);
+        if self.needs_drop(&self.ty(operand)) {
+            if extend {
+                if let Some(s) = self.scopes.last_mut() {
+                    s.push(t);
+                }
+            } else if let Some(ts) = self.stmt_temps.last_mut() {
+                ts.push(t);
+            }
+        }
+        self.expr_into(operand, Place::local(t));
+        Rvalue::Ref(mutable, Place::local(t))
+    }
+
+    fn binary(&mut self, e: &Expr, op: ast::BinaryOp, lhs: &Expr, rhs: &Expr, dest: Place) {
+        use ast::BinaryOp as B;
+        let span = e.span;
+        if matches!(op, B::And | B::Or) {
+            // Short-circuit: `a && b` = if a { b } else { false }.
+            let l = self.operand(lhs);
+            let (eval_rhs, short, join) = (self.new_block(), self.new_block(), self.new_block());
+            let (on_false, on_true) = if op == B::And { (short, eval_rhs) } else { (eval_rhs, short) };
+            self.terminate(Terminator::Switch { discr: l, cases: vec![(0, on_false)], otherwise: on_true }, lhs.span);
+            self.switch_to(short);
+            self.assign(dest.clone(), Rvalue::Use(Operand::Const(Const::Bool(op == B::Or))), span);
+            self.goto(join, span);
+            self.switch_to(eval_rhs);
+            let r = self.operand(rhs);
+            self.assign(dest, Rvalue::Use(r), span);
+            self.goto(join, span);
+            self.switch_to(join);
+            return;
+        }
+        let bop = match op {
+            B::Add => BinOp::Add,
+            B::Sub => BinOp::Sub,
+            B::Mul => BinOp::Mul,
+            B::Div => BinOp::Div,
+            B::Rem => BinOp::Rem,
+            B::BitAnd => BinOp::BitAnd,
+            B::BitOr => BinOp::BitOr,
+            B::BitXor => BinOp::BitXor,
+            B::Shl => BinOp::Shl,
+            B::Shr => BinOp::Shr,
+            B::Eq => BinOp::Eq,
+            B::Ne => BinOp::Ne,
+            B::Lt => BinOp::Lt,
+            B::Le => BinOp::Le,
+            B::Gt => BinOp::Gt,
+            B::Ge => BinOp::Ge,
+            B::And | B::Or => unreachable!(),
+        };
+        let lt = self.ty(lhs);
+        if matches!(peel_ty(&lt), Ty::Str) {
+            // String operators borrow their operands: `string.add(&a, &b)`.
+            let a = self.str_ref(lhs);
+            let b = self.str_ref(rhs);
+            let next = self.new_block();
+            self.terminate(
+                Terminator::Call { callee: Callee::Intrinsic(format!("string.{}", binop_name(bop))), args: vec![a, b], dest, next: Some(next), spawn: false },
+                span,
+            );
+            self.switch_to(next);
+            return;
+        }
+        let a = self.operand(lhs);
+        let b = self.operand(rhs);
+        self.assign(dest, Rvalue::Binary(bop, a, b), span);
+    }
+
+    /// `&string` operand for a string-typed expression (borrowing places).
+    fn str_ref(&mut self, e: &Expr) -> Operand {
+        if matches!(self.ty(e), Ty::Ref(..)) {
+            return self.operand(e);
+        }
+        let p = self.place(e);
+        let t = self.new_local(Ty::Ref(false, Box::new(Ty::Str)), LocalKind::Temp, None, None, false, e.span);
+        self.assign(Place::local(t), Rvalue::Ref(false, p), e.span);
+        Operand::Copy(Place::local(t))
+    }
+
+    /// `try inner`: on `Err(e)`/`None` return early (with drops), else unwrap.
+    fn try_into(&mut self, e: &Expr, inner: &Expr, dest: Place) {
+        let span = e.span;
+        let it = self.ty(inner);
+        let Ty::Adt(family, args) = &it else {
+            let _ = self.operand(inner);
+            self.assign(dest, Rvalue::Use(Operand::Const(Const::Opaque)), span);
+            return;
+        };
+        let p = &self.lx.t.prelude;
+        let is_result = *family == p.result;
+        let (ok_name, err_name) = if is_result { ("Ok", "Err") } else { ("Some", "None") };
+        let def = &self.lx.t.decls.enums[family];
+        let idx = |n: &str| def.variants.iter().position(|v| v.name == n).unwrap_or(0) as u32;
+        let (ok, err) = (idx(ok_name), idx(err_name));
+        let val = self.place(inner);
+        let d = self.new_local(Ty::Int(tarn_types::IntTy::U32), LocalKind::Temp, None, None, false, span);
+        self.assign(Place::local(d), Rvalue::Discriminant(val.clone()), span);
+        let (ok_bb, err_bb) = (self.new_block(), self.new_block());
+        self.terminate(Terminator::Switch { discr: Operand::Copy(Place::local(d)), cases: vec![(ok as i128, ok_bb)], otherwise: err_bb }, span);
+        // Early return with the error (or None), converted to the function's
+        // own Result/Option type (same error type: ADR/E3017).
+        self.switch_to(err_bb);
+        let ret_args = match &self.f.ret {
+            Ty::Adt(_, a) => a.clone(),
+            _ => Vec::new(),
+        };
+        let payload = if is_result {
+            let et = args.get(1).cloned().unwrap_or(Ty::Error);
+            vec![self.read(val.project(Proj::Downcast(err)).project(Proj::Field(0)), &et)]
+        } else {
+            Vec::new()
+        };
+        self.assign(Place::local(RETURN), Rvalue::Aggregate(Aggregate::Variant(*family, err, ret_args), payload), span);
+        self.emit_return(span);
+        self.switch_to(ok_bb);
+        let t = args.first().cloned().unwrap_or(Ty::Error);
+        let op = self.read(val.project(Proj::Downcast(ok)).project(Proj::Field(0)), &t);
+        self.assign(dest, Rvalue::Use(op), span);
+    }
+
+    // ------------------------------------------------------------ calls
+
+    fn finish_call(&mut self, callee: Callee, args: Vec<Operand>, dest: Place, diverges: bool, spawn: bool, span: Span) {
+        let next = (!diverges).then(|| self.new_block());
+        self.terminate(Terminator::Call { callee, args, dest, next, spawn }, span);
+        if let Some(n) = next {
+            self.switch_to(n);
+        }
+    }
+
+    fn call(&mut self, e: &Expr, callee: &Expr, args: &[Expr], dest: Place, spawn: bool) {
+        let span = e.span;
+        let type_args = self.tables().type_args.get(&e.id).cloned().unwrap_or_default();
+        match self.res(callee.id) {
+            Some(Res::External { module, path }) => {
+                let ops = args.iter().map(|a| self.operand(a)).collect();
+                self.finish_call(Callee::Opaque(format!("{module}.{}", path.join("."))), ops, dest, false, spawn, span);
+            }
+            Some(Res::Symbol(s)) => {
+                let s = *s;
+                match self.lx.r.symbol(s).kind.clone() {
+                    SymbolKind::Builtin => {
+                        let name = self.lx.r.symbol(s).name.as_str();
+                        let (b, diverges) = match name {
+                            "print" => (Builtin::Print, false),
+                            "panic" => (Builtin::Panic, true),
+                            _ => (Builtin::Channel, false),
+                        };
+                        // `print` borrows its argument (printing never consumes a
+                        // value); copy values are passed directly.
+                        let ops = args
+                            .iter()
+                            .map(|a| {
+                                let t = self.ty(a);
+                                if b == Builtin::Print && !self.is_copy(&t) {
+                                    let p = self.place(a);
+                                    self.ref_temp(false, p, &t, a.span)
+                                } else {
+                                    self.operand(a)
+                                }
+                            })
+                            .collect();
+                        self.finish_call(Callee::Builtin(b), ops, dest, diverges, spawn, span);
+                    }
+                    SymbolKind::Primitive => {
+                        let o = args.first().map(|a| self.operand(a)).unwrap_or(Operand::Const(Const::Opaque));
+                        self.assign(dest, Rvalue::Cast(o, self.ty(e)), span);
+                    }
+                    SymbolKind::Variant { parent } => {
+                        let targs = match self.ty(e) {
+                            Ty::Adt(_, a) => a,
+                            _ => Vec::new(),
+                        };
+                        let ops = args.iter().map(|a| self.operand(a)).collect();
+                        let idx = self.variant_index(parent, s);
+                        self.assign(dest, Rvalue::Aggregate(Aggregate::Variant(parent, idx, targs), ops), span);
+                    }
+                    SymbolKind::Function | SymbolKind::Method { .. } | SymbolKind::ImplMethod { .. } => {
+                        let ops = args.iter().map(|a| self.arg(a)).collect();
+                        let c = self.fn_callee(s, type_args);
+                        self.finish_call(c, ops, dest, false, spawn, span);
+                    }
+                    _ => {
+                        // A local holding a function or closure.
+                        let f = self.operand(callee);
+                        let ops = args.iter().map(|a| self.arg(a)).collect();
+                        self.finish_call(Callee::Value(f), ops, dest, false, spawn, span);
+                    }
+                }
+            }
+            Some(Res::ScrutineeVariant(_)) => {}
+            None => match &callee.kind {
+                ExprKind::Field { base, name } => self.method_call(e, base, name, args, dest, spawn),
+                _ => {
+                    let f = self.operand(callee);
+                    let ops = args.iter().map(|a| self.operand(a)).collect();
+                    self.finish_call(Callee::Value(f), ops, dest, false, spawn, span);
+                }
+            },
+        }
+    }
+
+    fn fn_callee(&self, s: SymbolId, type_args: Vec<Ty>) -> Callee {
+        match self.lx.by_symbol.get(&s) {
+            Some(id) if self.lx.kinds.get(id) == Some(&FnKind::Intrinsic) => Callee::Intrinsic(self.qualified(s)),
+            Some(id) => Callee::Fn(*id, type_args),
+            None => Callee::Virtual { method: s, type_args },
+        }
+    }
+
+    fn qualified(&self, s: SymbolId) -> String {
+        let sym = self.lx.r.symbol(s);
+        match &sym.kind {
+            SymbolKind::Method { owner } => format!("{}.{}", self.lx.r.symbol(*owner).name, sym.name),
+            _ => sym.name.clone(),
+        }
+    }
+
+    fn method_call(&mut self, e: &Expr, base: &Expr, name: &ast::Ident, args: &[Expr], dest: Place, spawn: bool) {
+        let span = e.span;
+        let target = self.tables().method_calls.get(&e.id).cloned();
+        let recv = self.tables().receivers.get(&e.id).copied();
+        let type_args = self.tables().type_args.get(&e.id).cloned().unwrap_or_default();
+        // Receiver place after the recorded auto-derefs.
+        let mut place = self.place(base);
+        let mut bt = self.ty(base);
+        for _ in 0..recv.map_or(0, |r| r.derefs) {
+            place = place.project(Proj::Deref);
+            bt = match bt {
+                Ty::Ref(_, inner) => *inner,
+                t => t,
+            };
+        }
+        match target {
+            Some(MethodTarget::Intrinsic(n)) if n == "len" || n == "is_empty" => {
+                let len = if n == "len" { dest.clone() } else { Place::local(self.new_local(Ty::Int(tarn_types::IntTy::Usize), LocalKind::Temp, None, None, false, span)) };
+                self.assign(len.clone(), Rvalue::Len(place), span);
+                if n == "is_empty" {
+                    self.assign(dest, Rvalue::Binary(BinOp::Eq, Operand::Copy(len), Operand::Const(Const::Int(0, tarn_types::IntTy::Usize))), span);
+                }
+            }
+            Some(MethodTarget::Symbol(m)) => {
+                let recv_op = match recv.map(|r| r.kind) {
+                    Some(ReceiverKind::Ref) | None => self.ref_temp(false, place, &bt, span),
+                    Some(ReceiverKind::RefMut) => self.ref_temp(true, place, &bt, span),
+                    Some(ReceiverKind::Value) => self.read(place, &bt),
+                };
+                let mut ops = vec![recv_op];
+                ops.extend(args.iter().map(|a| self.arg(a)));
+                let c = self.fn_callee(m, type_args);
+                self.finish_call(c, ops, dest, false, spawn, span);
+            }
+            _ => {
+                let mut ops = vec![self.read(place, &bt)];
+                ops.extend(args.iter().map(|a| self.operand(a)));
+                self.finish_call(Callee::Opaque(format!("<std>.{}", name.name)), ops, dest, false, spawn, span);
+            }
+        }
+    }
+
+    fn ref_temp(&mut self, mutable: bool, place: Place, ty: &Ty, span: Span) -> Operand {
+        let rt = Ty::Ref(mutable, Box::new(ty.clone()));
+        let t = self.new_local(rt.clone(), LocalKind::Temp, None, None, false, span);
+        self.assign(Place::local(t), Rvalue::Ref(mutable, place), span);
+        self.read(Place::local(t), &rt)
+    }
+
+    // ------------------------------------------------------------ closures
+
+    /// A closure becomes its own function whose first parameters are
+    /// references to the captured locals (`&mut` when the body mutates them).
+    fn closure(&mut self, e: &Expr, params: &[ast::ClosureParam], body: &ast::Block, dest: Place) {
+        let captured: Vec<SymbolId> = self.lx.r.tables[self.m.0 as usize].captures.get(&e.id).map(|c| c.symbols.clone()).unwrap_or_default();
+        let mutated = mutated_symbols(body, &self.lx.r.tables[self.m.0 as usize].uses, self.tables());
+        let id = FunctionId(self.lx.next_id.get());
+        self.lx.next_id.set(id.0 + 1);
+        let name = format!("{}::closure#{}", self.f.name, self.closure_count);
+        self.closure_count += 1;
+        let mut cb = Builder::new(self.lx, self.m, id, name, e.span);
+        let (param_tys, ret) = match self.ty(e) {
+            Ty::Fn(ps, r) => (ps, *r),
+            _ => (vec![Ty::Error; params.len()], Ty::Error),
+        };
+        cb.f.kind = FnKind::Closure { parent: self.f.id, captures: captured.len() as u32 };
+        cb.f.ret = ret.clone();
+        cb.f.generics = self.f.generics.clone();
+        cb.new_local(ret, LocalKind::Return, None, None, false, e.span);
+        cb.scopes.push(Vec::new());
+        let mut cap_ops = Vec::new();
+        for &s in &captured {
+            let m = mutated.contains(&s);
+            let t = Ty::Ref(m, Box::new(self.sym_ty(s)));
+            let name = self.lx.r.symbol(s).name.clone();
+            let l = cb.new_local(t.clone(), LocalKind::Param, Some(name), None, false, e.span);
+            cb.captures.insert(s, l);
+            let p = self.symbol_place(s).unwrap_or(Place::local(RETURN));
+            cap_ops.push(self.ref_temp(m, p, &self.sym_ty(s), e.span));
+        }
+        for (p, t) in params.iter().zip(param_tys) {
+            if let Some(s) = self.def(p.id) {
+                let l = cb.new_local(t, LocalKind::Param, Some(p.name.name.clone()), Some(s), false, p.name.span);
+                cb.vars.insert(s, l);
+                cb.scopes[0].push(l);
+            }
+        }
+        cb.f.param_count = cb.f.locals.len() as u32 - 1;
+        cb.stmts(&body.stmts);
+        cb.fall_off_end(body.span);
+        self.diags.append(&mut cb.diags);
+        let f = cb.finish();
+        self.lx.extra.borrow_mut().push(f);
+        self.assign(dest, Rvalue::Aggregate(Aggregate::Closure(id), cap_ops), e.span);
+    }
+}
+
+fn peel_ty(t: &Ty) -> &Ty {
+    match t {
+        Ty::Ref(_, inner) => peel_ty(inner),
+        t => t,
+    }
+}
+
+fn int_const(v: i128, ty: &Ty) -> Const {
+    match ty {
+        Ty::Int(it) => Const::Int(v, *it),
+        _ => Const::Int(v, tarn_types::IntTy::I64),
+    }
+}
+
+pub(crate) fn binop_name(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "add",
+        BinOp::Sub => "sub",
+        BinOp::Mul => "mul",
+        BinOp::Div => "div",
+        BinOp::Rem => "rem",
+        BinOp::BitAnd => "bitand",
+        BinOp::BitOr => "bitor",
+        BinOp::BitXor => "bitxor",
+        BinOp::Shl => "shl",
+        BinOp::Shr => "shr",
+        BinOp::Eq => "eq",
+        BinOp::Ne => "ne",
+        BinOp::Lt => "lt",
+        BinOp::Le => "le",
+        BinOp::Gt => "gt",
+        BinOp::Ge => "ge",
+    }
+}
+
+/// Symbols a closure body writes or borrows mutably (assignment target root,
+/// `&mut` operand root, `&mut self` receiver root): captured by `&mut`.
+fn mutated_symbols(body: &ast::Block, uses: &HashMap<ast::NodeId, tarn_resolve::Use>, t: &tarn_types::TypeTables) -> HashSet<SymbolId> {
+    fn root(e: &Expr, uses: &HashMap<ast::NodeId, tarn_resolve::Use>) -> Option<SymbolId> {
+        match &e.kind {
+            ExprKind::Ident(_) => match uses.get(&e.id).map(|u| &u.res) {
+                Some(Res::Symbol(s)) => Some(*s),
+                _ => None,
+            },
+            ExprKind::Field { base, .. } | ExprKind::Index { base, .. } | ExprKind::Paren(base) => root(base, uses),
+            _ => None,
+        }
+    }
+    struct V<'x> {
+        uses: &'x HashMap<ast::NodeId, tarn_resolve::Use>,
+        t: &'x tarn_types::TypeTables,
+        out: HashSet<SymbolId>,
+    }
+    impl V<'_> {
+        fn stmts(&mut self, s: &[Stmt]) {
+            for x in s {
+                self.stmt(x);
+            }
+        }
+        fn stmt(&mut self, s: &Stmt) {
+            match &s.kind {
+                StmtKind::Let { value, .. } => self.expr(value),
+                StmtKind::Assign { target, value } => {
+                    if let Some(r) = root(target, self.uses) {
+                        self.out.insert(r);
+                    }
+                    self.expr(target);
+                    self.expr(value);
+                }
+                StmtKind::Expr(e) | StmtKind::Spawn(e) | StmtKind::Return(Some(e)) => self.expr(e),
+                StmtKind::If(i) => self.if_(i),
+                StmtKind::For(f) => {
+                    match &f.kind {
+                        ForKind::While(c) => self.expr(c),
+                        ForKind::In { iter, .. } => self.expr(iter),
+                        ForKind::Infinite => {}
+                    }
+                    self.stmts(&f.body.stmts);
+                }
+                StmtKind::Match(m) => {
+                    self.expr(&m.scrutinee);
+                    for a in &m.arms {
+                        if let Some(g) = &a.guard {
+                            self.expr(g);
+                        }
+                        self.stmt(&a.body);
+                    }
+                }
+                StmtKind::Block(b) | StmtKind::Unsafe(b) | StmtKind::Scope(b) => self.stmts(&b.stmts),
+                _ => {}
+            }
+        }
+        fn if_(&mut self, i: &ast::IfStmt) {
+            self.expr(&i.cond);
+            self.stmts(&i.then_block.stmts);
+            match i.else_branch.as_deref() {
+                Some(ElseBranch::If(e)) => self.if_(e),
+                Some(ElseBranch::Block(b)) => self.stmts(&b.stmts),
+                None => {}
+            }
+        }
+        fn expr(&mut self, e: &Expr) {
+            match &e.kind {
+                ExprKind::Unary { op: ast::UnaryOp::RefMut, operand } => {
+                    if let Some(r) = root(operand, self.uses) {
+                        self.out.insert(r);
+                    }
+                    self.expr(operand);
+                }
+                ExprKind::Call { callee, args } => {
+                    if let (Some(rcv), ExprKind::Field { base, .. }) = (self.t.receivers.get(&e.id), &callee.kind)
+                        && rcv.kind == ReceiverKind::RefMut
+                        && rcv.derefs == 0
+                        && let Some(r) = root(base, self.uses)
+                    {
+                        self.out.insert(r);
+                    }
+                    self.expr(callee);
+                    for a in args {
+                        self.expr(a);
+                    }
+                }
+                ExprKind::Field { base, .. } | ExprKind::Paren(base) | ExprKind::Try(base) | ExprKind::Unary { operand: base, .. } => self.expr(base),
+                ExprKind::Index { base, index } => {
+                    self.expr(base);
+                    self.expr(index);
+                }
+                ExprKind::Binary { lhs, rhs, .. } => {
+                    self.expr(lhs);
+                    self.expr(rhs);
+                }
+                ExprKind::StructLit { fields, .. } => {
+                    for f in fields {
+                        if let Some(v) = &f.value {
+                            self.expr(v);
+                        }
+                    }
+                }
+                ExprKind::ArrayLit { elems, .. } => {
+                    for x in elems {
+                        self.expr(x);
+                    }
+                }
+                ExprKind::Closure { body, .. } => self.stmts(&body.stmts),
+                ExprKind::Range { start, end, .. } => {
+                    for x in [start, end].into_iter().flatten() {
+                        self.expr(x);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut v = V { uses, t, out: HashSet::new() };
+    v.stmts(&body.stmts);
+    v.out
+}
+
+/// Remove blocks unreachable from the entry and renumber the rest.
+fn prune(f: &mut Function) {
+    if f.blocks.is_empty() {
+        return;
+    }
+    let mut reach = vec![false; f.blocks.len()];
+    let mut stack = vec![0usize];
+    while let Some(b) = stack.pop() {
+        if std::mem::replace(&mut reach[b], true) {
+            continue;
+        }
+        stack.extend(f.blocks[b].term.successors().into_iter().map(|s| s.0 as usize));
+    }
+    let mut map = vec![u32::MAX; f.blocks.len()];
+    let mut n = 0;
+    for (i, r) in reach.iter().enumerate() {
+        if *r {
+            map[i] = n;
+            n += 1;
+        }
+    }
+    let old = std::mem::take(&mut f.blocks);
+    for (i, mut b) in old.into_iter().enumerate() {
+        if !reach[i] {
+            continue;
+        }
+        let fix = |x: &mut BlockId| x.0 = map[x.0 as usize];
+        match &mut b.term {
+            Terminator::Goto(t) => fix(t),
+            Terminator::Switch { cases, otherwise, .. } => {
+                for (_, t) in cases.iter_mut() {
+                    fix(t);
+                }
+                fix(otherwise);
+            }
+            Terminator::Call { next: Some(t), .. } => fix(t),
+            _ => {}
+        }
+        f.blocks.push(b);
+    }
+}

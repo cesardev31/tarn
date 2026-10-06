@@ -1,0 +1,57 @@
+fn make() -> Big {
+    _0: Big    // return
+  bb0:
+    _0 = Big{"b"}
+    return
+}
+
+fn len_of(_1: &Big) -> usize {
+    _0: usize    // return
+    _1: &Big    // param b
+    _2: &string    // temp
+  bb0:
+    _2 = &(*_1).0
+    _0 = call intrinsic string.len(copy _2) -> bb1
+  bb1:
+    return
+}
+
+fn main() -> void {
+    _0: void    // return
+    _1: usize    // temp
+    _2: &Big    // temp
+    _3: Big    // temp
+    _4: usize    // let n
+    _5: &Big    // temp
+    _6: Big    // temp
+    _7: &Big    // let r
+    _8: Big    // temp
+    _9: void    // temp
+    _10: &string    // temp
+  bb0:
+    _3 = call make() -> bb1
+  bb1:
+    _2 = &_3
+    _1 = call len_of(copy _2) -> bb2
+  bb2:
+    live _4
+    _4 = copy _1
+    drop _3
+    _6 = call make() -> bb3
+  bb3:
+    _5 = &_6
+    live _7
+    _7 = copy _5
+    _8 = call make() -> bb4
+  bb4:
+    drop _8
+    _10 = &(*_7).0
+    _9 = call builtin print(copy _10) -> bb5
+  bb5:
+    _0 = ()
+    dead _7
+    drop _6
+    dead _4
+    return
+}
+

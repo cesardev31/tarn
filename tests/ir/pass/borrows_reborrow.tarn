@@ -1,0 +1,26 @@
+struct Counter {
+    value i64
+}
+
+fn Counter.bump(&mut self) {
+    self.value = self.value + 1
+}
+
+fn peek(c &Counter) i64 {
+    return c.value
+}
+
+fn twice(c &mut Counter) {
+    c.bump()
+    c.bump()
+    v := peek(c)
+}
+
+fn main() {
+    var c = Counter{value: 0}
+    r := &mut c
+    twice(r)
+    twice(r)
+    s := &c
+    print(s.value)
+}

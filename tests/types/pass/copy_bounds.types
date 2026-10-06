@@ -1,0 +1,7 @@
+== copy_bounds
+7:18 self: Point<T>
+11:23 value: T
+16:5 p: Point<i64>
+17:5 q: Point<i64>
+18:5 r: Point<i64>
+19:5 d: Point<f64>

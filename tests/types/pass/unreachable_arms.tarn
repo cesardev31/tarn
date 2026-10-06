@@ -1,0 +1,12 @@
+// W3001: arms that can never match are reported as warnings.
+fn f(o Option<i64>) {
+    match o {
+        Some(x) => print(x)
+        None => print(0)
+        Some(1) => print(1)
+    }
+    match o {
+        _ => print(0)
+        None => print(1)
+    }
+}

@@ -1,0 +1,42 @@
+// ADR 0019: nested patterns are analyzed precisely; no `_` needed.
+enum Dir {
+    North
+    South
+}
+
+struct Move {
+    dir Dir
+    fast bool
+}
+
+fn nested(value Option<Result<i64, string>>) i64 {
+    match value {
+        Some(Ok(x)) => return x
+        Some(Err(e)) => return 0
+        None => return -1
+    }
+}
+
+fn pairs(m Move) i64 {
+    match m {
+        Move{dir: North, fast: true} => return 1
+        Move{dir: North, fast: false} => return 2
+        Move{dir: South} => return 3
+    }
+}
+
+fn bools(a Option<bool>) i64 {
+    match a {
+        Some(true) => return 1
+        Some(false) => return 0
+        None => return -1
+    }
+}
+
+fn guarded(n Option<i64>) i64 {
+    match n {
+        Some(x) if x > 0 => return x
+        Some(x) => return 0
+        None => return -1
+    }
+}

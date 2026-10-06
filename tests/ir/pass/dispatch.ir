@@ -1,0 +1,74 @@
+fn Square.area(_1: &Square) -> f64 {
+    _0: f64    // return
+    _1: &Square    // param self
+  bb0:
+    _0 = mul(copy (*_1).0, copy (*_1).0)
+    return
+}
+
+fn generic(_1: &S) -> f64 {
+    _0: f64    // return
+    _1: &S    // param s
+    _2: &S    // temp
+  bb0:
+    _2 = &(*_1)
+    _0 = call virtual area(copy _2) -> bb1
+  bb1:
+    return
+}
+
+fn dynamic(_1: &any Shape) -> f64 {
+    _0: f64    // return
+    _1: &any Shape    // param s
+    _2: &any Shape    // temp
+  bb0:
+    _2 = &(*_1)
+    _0 = call virtual area(copy _2) -> bb1
+  bb1:
+    return
+}
+
+fn main() -> void {
+    _0: void    // return
+    _1: Square    // temp
+    _2: Square    // let sq
+    _3: f64    // temp
+    _4: &Square    // temp
+    _5: f64    // let a
+    _6: f64    // temp
+    _7: &Square    // temp
+    _8: f64    // let b
+    _9: f64    // temp
+    _10: &Square    // temp
+    _11: &any Shape    // temp
+    _12: f64    // let c
+  bb0:
+    _1 = Square{2.0}
+    live _2
+    _2 = move _1
+    drop _1
+    _4 = &_2
+    _3 = call Square.area(copy _4) -> bb1
+  bb1:
+    live _5
+    _5 = copy _3
+    _7 = &_2
+    _6 = call generic<Square>(copy _7) -> bb2
+  bb2:
+    live _8
+    _8 = copy _6
+    _10 = &_2
+    _11 = coerce.to_dyn(copy _10) as &any Shape
+    _9 = call dynamic(copy _11) -> bb3
+  bb3:
+    live _12
+    _12 = copy _9
+    _0 = ()
+    dead _12
+    dead _8
+    dead _5
+    drop _2
+    dead _2
+    return
+}
+

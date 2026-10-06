@@ -72,6 +72,9 @@ pub fn describe(r: &Resolved, sources: &SourceMap, res: &Res) -> String {
 pub fn dump_resolution(r: &Resolved, sources: &SourceMap) -> String {
     let mut out = String::new();
     for (i, info) in r.modules.iter().enumerate() {
+        if info.name == crate::prelude::CORE {
+            continue;
+        }
         out.push_str(&format!("== {}\n", info.name));
         let t = &r.tables[i];
         // One line per distinct (span, resolution): a type path and its

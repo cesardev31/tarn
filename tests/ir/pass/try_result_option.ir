@@ -1,0 +1,73 @@
+fn get(_1: i64) -> Result<i64, Fail> {
+    _0: Result<i64, Fail>    // return
+    _1: i64    // param n
+    _2: bool    // temp
+    _3: Fail    // temp
+  bb0:
+    _2 = lt(copy _1, 0_i64)
+    switch copy _2 [0 => bb2, _ => bb1]
+  bb1:
+    _3 = Fail.Bad()
+    _0 = Result<i64, Fail>.Err(move _3)
+    drop _3
+    return
+  bb2:
+    goto bb3
+  bb3:
+    _0 = Result<i64, Fail>.Ok(copy _1)
+    return
+}
+
+fn double(_1: i64) -> Result<i64, Fail> {
+    _0: Result<i64, Fail>    // return
+    _1: i64    // param n
+    _2: i64    // temp
+    _3: Result<i64, Fail>    // temp
+    _4: u32    // temp
+    _5: i64    // let x
+    _6: i64    // temp
+  bb0:
+    _3 = call get(copy _1) -> bb1
+  bb1:
+    _4 = discriminant(_3)
+    switch copy _4 [0 => bb2, _ => bb3]
+  bb2:
+    _2 = copy (_3 as #0).0
+    live _5
+    _5 = copy _2
+    drop _3
+    _6 = mul(copy _5, 2_i64)
+    _0 = Result<i64, Fail>.Ok(copy _6)
+    dead _5
+    return
+  bb3:
+    _0 = Result<i64, Fail>.Err(move (_3 as #1).0)
+    drop _3
+    return
+}
+
+fn first(_1: Option<i64>) -> Option<i64> {
+    _0: Option<i64>    // return
+    _1: Option<i64>    // param o
+    _2: i64    // temp
+    _3: u32    // temp
+    _4: i64    // let v
+    _5: i64    // temp
+  bb0:
+    _3 = discriminant(_1)
+    switch copy _3 [0 => bb1, _ => bb2]
+  bb1:
+    _2 = copy (_1 as #0).0
+    live _4
+    _4 = copy _2
+    _5 = add(copy _4, 1_i64)
+    _0 = Option<i64>.Some(copy _5)
+    dead _4
+    drop _1
+    return
+  bb2:
+    _0 = Option<i64>.None()
+    drop _1
+    return
+}
+

@@ -1,0 +1,27 @@
+fn work(_1: i64) -> void {
+    _0: void    // return
+    _1: i64    // param n
+    _2: void    // temp
+  bb0:
+    _2 = call builtin print(copy _1) -> bb1
+  bb1:
+    _0 = ()
+    return
+}
+
+fn main() -> void {
+    _0: void    // return
+    _1: void    // temp
+    _2: void    // temp
+    _3: void    // temp
+  bb0:
+    spawn _1 = call work(1_i64) -> bb1
+  bb1:
+    spawn _2 = call work(2_i64) -> bb2
+  bb2:
+    _3 = call builtin joinscope() -> bb3
+  bb3:
+    _0 = ()
+    return
+}
+

@@ -1,0 +1,23 @@
+enum Dir {
+    North
+    South
+}
+
+fn f(value Option<Result<i64, string>>, d Option<Dir>, n i64) {
+    match value {
+        Some(Ok(x)) => print(x)
+        None => print(0)
+    }
+    match d {
+        Some(North) => print(1)
+        None => print(0)
+    }
+    match d {
+        Some(x) if true => print(1)
+        None => print(0)
+    }
+    match n {
+        0 => print(0)
+        1..=9 => print(1)
+    }
+}

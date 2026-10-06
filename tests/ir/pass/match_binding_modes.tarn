@@ -1,0 +1,29 @@
+enum Shape {
+    Circle(f64)
+    Named(string, f64)
+}
+
+fn by_ref(s &Shape) f64 {
+    match s {
+        Circle(r) => return r
+        Named(label, size) => {
+            print(label)
+            return size
+        }
+    }
+}
+
+fn by_value(s Shape) {
+    match s {
+        Named(label, _) => print(label)
+        _ => print(0)
+    }
+}
+
+fn literals(n i64, b bool) i64 {
+    match n {
+        0 => return 0
+        1..=9 => return 1
+        _ => return 2
+    }
+}

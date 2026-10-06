@@ -1,0 +1,13 @@
+fn apply(f fn(i64) i64, x i64) i64 {
+    return f(x)
+}
+
+fn main() {
+    k := 3
+    var count = 0
+    r := apply(fn(x) i64 {
+        count = count + 1
+        return x * k
+    }, 2)
+    print(r)
+}

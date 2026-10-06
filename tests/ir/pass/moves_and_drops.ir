@@ -1,0 +1,39 @@
+fn consume(_1: Buffer) -> void {
+    _0: void    // return
+    _1: Buffer    // param b
+  bb0:
+    _0 = ()
+    drop _1
+    return
+}
+
+fn main() -> void {
+    _0: void    // return
+    _1: Buffer    // temp
+    _2: Buffer    // let a
+    _3: Buffer    // let b
+    _4: void    // temp
+    _5: string    // var s
+  bb0:
+    _1 = Buffer{"x"}
+    live _2
+    _2 = move _1
+    drop _1
+    live _3
+    _3 = move _2
+    _4 = call consume(move _3) -> bb1
+  bb1:
+    live _5
+    _5 = "one"
+    drop _5
+    _5 = "two"
+    _0 = ()
+    drop _5
+    dead _5
+    drop _3
+    dead _3
+    drop _2
+    dead _2
+    return
+}
+

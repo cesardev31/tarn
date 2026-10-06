@@ -82,9 +82,34 @@ impl<'a> Cx<'a> {
         for i in 0..self.inputs.len() {
             self.collect_module(ModuleId(i as u32));
         }
+        self.export_core();
         // Methods need every type declared first.
         for i in 0..self.inputs.len() {
             self.collect_methods(ModuleId(i as u32));
+        }
+    }
+
+    fn core_module(&self) -> Option<ModuleId> {
+        self.inputs.iter().position(|m| m.name == prelude::CORE).map(|i| ModuleId(i as u32))
+    }
+
+    /// `pub` items of `core` (and the variants of `Option`/`Result`) become
+    /// visible in every module through the prelude scope.
+    fn export_core(&mut self) {
+        let Some(core) = self.core_module() else { return };
+        let scope = self.r.modules[core.0 as usize].scope;
+        for id in self.r.scope(scope).symbols.clone() {
+            let s = self.sym(id);
+            if !s.is_pub || matches!(s.kind, SymbolKind::Module(_)) {
+                continue;
+            }
+            let is_prelude_enum = matches!(s.kind, SymbolKind::Enum) && prelude::PRELUDE_ENUMS.contains(&s.name.as_str());
+            self.r.alias(self.prelude, id);
+            if is_prelude_enum {
+                for v in self.r.members.get(&id).cloned().unwrap_or_default() {
+                    self.r.alias(self.prelude, v);
+                }
+            }
         }
     }
 
@@ -107,6 +132,13 @@ impl<'a> Cx<'a> {
                         body: None,
                     };
                     self.declare(scope, sym, m, "E2002");
+                }
+                ItemKind::Fn(f) if f.abi.as_deref() == Some("intrinsic") && Some(m) != self.core_module() => {
+                    self.diags.push(
+                        Diagnostic::error("E2027", "intrinsic_outside_core", "`extern \"intrinsic\"` functions can only be declared in `core`")
+                            .primary(f.name.span, "")
+                            .help("use `extern \"C\"` to call a C function"),
+                    );
                 }
                 ItemKind::Fn(f) if f.owner.is_none() => {
                     let sym = self.item_symbol(&f.name, SymbolKind::Function, m, f.id, scope, item.is_pub);
@@ -210,6 +242,20 @@ impl<'a> Cx<'a> {
 
     /// `T` in `fn T.name`: a struct or enum declared in this same module.
     fn method_owner(&mut self, owner: &tarn_ast::Ident, scope: ScopeId, f: &FnDecl) -> Option<SymbolId> {
+        // `core` declares the API of primitive types: `fn string.len(&self)`.
+        if let Some(p) = self.r.lookup(scope, &owner.name)
+            && matches!(self.sym(p).kind, SymbolKind::Primitive)
+        {
+            if self.sym_module_of_scope(scope) == self.core_module() {
+                return Some(p);
+            }
+            self.diags.push(
+                Diagnostic::error("E2011", "invalid_method_owner", format!("cannot declare method `{}` on primitive type `{}`", f.name.name, owner.name))
+                    .primary(owner.span, "")
+                    .note("the methods of primitive types are declared in `core`"),
+            );
+            return None;
+        }
         let found = self.r.scope(scope).get(&owner.name);
         match found.map(|id| (id, self.sym(id).kind.clone())) {
             Some((id, SymbolKind::Struct | SymbolKind::Enum)) => Some(id),
@@ -290,6 +336,13 @@ impl<'a> Cx<'a> {
             return gs.iter().map(|g| g.name.name.clone()).collect();
         }
         Vec::new()
+    }
+
+    fn sym_module_of_scope(&self, scope: ScopeId) -> Option<ModuleId> {
+        match self.r.scope(scope).kind {
+            ScopeKind::Module(m) => Some(m),
+            _ => None,
+        }
     }
 
     pub fn mark_used(&mut self, id: SymbolId) {

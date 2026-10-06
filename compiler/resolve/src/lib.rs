@@ -267,6 +267,13 @@ impl Resolved {
         (id, prev)
     }
 
+    /// Make an existing symbol visible under its name in another scope
+    /// (used to export `core` into the prelude). Existing names win.
+    fn alias(&mut self, scope: ScopeId, id: SymbolId) {
+        let name = self.symbol(id).name.clone();
+        self.scopes[scope.0 as usize].names.entry(name).or_insert(id);
+    }
+
     /// Lexical lookup from `scope` outwards.
     pub fn lookup(&self, mut scope: ScopeId, name: &str) -> Option<SymbolId> {
         loop {

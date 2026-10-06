@@ -1,0 +1,18 @@
+// `take(q)` unifies Pair<{integer}, {integer}> with Pair<i64, bool>: the first
+// argument binds to i64 before the second one fails. Unification is atomic,
+// so `q.first` is still an unconstrained integer literal afterwards and the
+// annotation `i8` is accepted: exactly one diagnostic.
+struct Pair<A, B> {
+    first A
+    second B
+}
+
+fn take(p Pair<i64, bool>) {
+}
+
+fn main() {
+    q := Pair{first: 1, second: 2}
+    take(q)
+    r: i8 := q.first
+    s: u16 := q.second
+}

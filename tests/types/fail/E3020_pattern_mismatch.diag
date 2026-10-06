@@ -10,6 +10,15 @@ error[E3020]: variant `Shape.Rect` has 2 fields, but the pattern has 0
 9 |         Rect => print(0)
   |         ^^^^
 
+warning[W3001]: this arm can never match
+  --> tests/types/fail/E3020_pattern_mismatch.tarn:10:9
+   |
+10 |         _ => print(1)
+   |         ^
+   |
+   = note: every value it matches is handled by an earlier arm
+   = help: remove it, or move it before the arm that covers it
+
 error[E3020]: a variant pattern cannot match a value of type `i64`
   --> tests/types/fail/E3020_pattern_mismatch.tarn:13:9
    |
@@ -17,4 +26,13 @@ error[E3020]: a variant pattern cannot match a value of type `i64`
    |         ^^^^^^^
    |
    = note: only enum values have variants
+
+warning[W3001]: this arm can never match
+  --> tests/types/fail/E3020_pattern_mismatch.tarn:14:9
+   |
+14 |         _ => print(0)
+   |         ^
+   |
+   = note: every value it matches is handled by an earlier arm
+   = help: remove it, or move it before the arm that covers it
 

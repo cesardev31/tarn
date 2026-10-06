@@ -1,0 +1,63 @@
+fn check(_1: bool, _2: bool) -> bool {
+    _0: bool    // return
+    _1: bool    // param a
+    _2: bool    // param b
+    _3: bool    // temp
+    _4: bool    // temp
+  bb0:
+    switch copy _1 [0 => bb2, _ => bb1]
+  bb1:
+    _3 = copy _2
+    goto bb3
+  bb2:
+    _3 = false
+    goto bb3
+  bb3:
+    switch copy _3 [0 => bb4, _ => bb5]
+  bb4:
+    _4 = not(copy _1)
+    _0 = copy _4
+    goto bb6
+  bb5:
+    _0 = true
+    goto bb6
+  bb6:
+    return
+}
+
+fn greet(_1: string) -> string {
+    _0: string    // return
+    _1: string    // param name
+    _2: bool    // temp
+    _3: &string    // temp
+    _4: string    // temp
+    _5: &string    // temp
+    _6: string    // temp
+    _7: &string    // temp
+    _8: &string    // temp
+  bb0:
+    _3 = &_1
+    _4 = ""
+    _5 = &_4
+    _2 = call intrinsic string.eq(copy _3, copy _5) -> bb1
+  bb1:
+    switch copy _2 [0 => bb3, _ => bb2]
+  bb2:
+    _0 = "nobody"
+    drop _4
+    drop _1
+    return
+  bb3:
+    goto bb4
+  bb4:
+    drop _4
+    _6 = "hi "
+    _7 = &_6
+    _8 = &_1
+    _0 = call intrinsic string.add(copy _7, copy _8) -> bb5
+  bb5:
+    drop _6
+    drop _1
+    return
+}
+

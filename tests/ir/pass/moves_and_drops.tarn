@@ -1,0 +1,16 @@
+// Non-copy values move; scope exits drop (drop-if-initialized);
+// assignment drops the old value first.
+struct Buffer {
+    data string
+}
+
+fn consume(b Buffer) {
+}
+
+fn main() {
+    a := Buffer{data: "x"}
+    b := a
+    consume(b)
+    var s = "one"
+    s = "two"
+}

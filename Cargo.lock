@@ -9,6 +9,7 @@ dependencies = [
  "tarn_ast",
  "tarn_diagnostics",
  "tarn_driver",
+ "tarn_ir",
  "tarn_lexer",
  "tarn_parser",
  "tarn_resolve",
@@ -32,7 +33,18 @@ version = "0.0.1"
 dependencies = [
  "tarn_ast",
  "tarn_diagnostics",
+ "tarn_ir",
  "tarn_parser",
+ "tarn_resolve",
+ "tarn_types",
+]
+
+[[package]]
+name = "tarn_ir"
+version = "0.0.1"
+dependencies = [
+ "tarn_ast",
+ "tarn_diagnostics",
  "tarn_resolve",
  "tarn_types",
 ]

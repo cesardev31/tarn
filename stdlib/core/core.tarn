@@ -1,0 +1,49 @@
+// core: the declarations every Tarn module sees (the prelude).
+//
+// Everything declared `pub` here is visible without an import. Functions
+// marked `extern "intrinsic"` have no Tarn body: the compiler implements them,
+// but their signatures are ordinary Tarn and are what the type checker,
+// documentation, the LSP and agents read (ADR 0020).
+
+/// An optional value: `Some(value)` or `None`. Tarn has no null.
+pub enum Option<T> {
+    Some(T)
+    None
+}
+
+/// The result of an operation that can fail. Propagate errors with `try`.
+pub enum Result<T, E> {
+    Ok(T)
+    Err(E)
+}
+
+/// Capability: values of this type are copied instead of moved.
+///
+/// Not implemented with `impl`: primitives are `Copy`, and a struct or enum is
+/// `Copy` when declared with the `copy` keyword (ADR 0021). Usable as a bound:
+/// `copy struct Point<T: Copy> { x T  y T }`.
+pub interface Copy {
+}
+
+// ---------------------------------------------------------------- string
+
+/// Length in bytes.
+pub extern "intrinsic" fn string.len(&self) usize
+pub extern "intrinsic" fn string.is_empty(&self) bool
+pub extern "intrinsic" fn string.clone(&self) string
+
+// ---------------------------------------------------------------- floats
+
+pub extern "intrinsic" fn f32.sqrt(self) f32
+pub extern "intrinsic" fn f32.abs(self) f32
+pub extern "intrinsic" fn f64.sqrt(self) f64
+pub extern "intrinsic" fn f64.abs(self) f64
+
+// ---------------------------------------------------------------- signed integers
+
+/// Absolute value; panics on the minimum value (it has no positive counterpart).
+pub extern "intrinsic" fn i8.abs(self) i8
+pub extern "intrinsic" fn i16.abs(self) i16
+pub extern "intrinsic" fn i32.abs(self) i32
+pub extern "intrinsic" fn i64.abs(self) i64
+pub extern "intrinsic" fn isize.abs(self) isize

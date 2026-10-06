@@ -1,0 +1,10 @@
+fn check(a bool, b bool) bool {
+    return a && b || !a
+}
+
+fn greet(name string) string {
+    if name == "" {
+        return "nobody"
+    }
+    return "hi " + name
+}

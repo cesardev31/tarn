@@ -1,0 +1,16 @@
+error[E3022]: `string` does not implement `Copy`
+  --> tests/types/fail/E3022_copy_bound.tarn:11:10
+   |
+11 |     p := Point{x: "a", y: "b"}
+   |          ^^^^^^^^^^^^^^^^^^^^^ required by a bound `Copy` here
+   |
+   = help: `string` is not a copy type; copy types are numbers, `bool`, `&T` and types declared with `copy`
+
+error[E3022]: `string` does not implement `Copy`
+  --> tests/types/fail/E3022_copy_bound.tarn:12:10
+   |
+12 |     d := duplicate("text")
+   |          ^^^^^^^^^^^^^^^^^ required by a bound `Copy` here
+   |
+   = help: `string` is not a copy type; copy types are numbers, `bool`, `&T` and types declared with `copy`
+

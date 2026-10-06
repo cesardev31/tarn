@@ -1,0 +1,20 @@
+enum Fail {
+    Bad
+}
+
+fn get(n i64) Result<i64, Fail> {
+    if n < 0 {
+        return Err(Fail.Bad)
+    }
+    return Ok(n)
+}
+
+fn double(n i64) Result<i64, Fail> {
+    x := try get(n)
+    return Ok(x * 2)
+}
+
+fn first(o Option<i64>) Option<i64> {
+    v := try o
+    return Some(v + 1)
+}

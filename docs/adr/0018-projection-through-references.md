@@ -51,5 +51,6 @@ fn area(s &Shape) f64 {
 - Calling a by-value (`self`) method through a reference is allowed only for
   copy types (E3030), by the same reasoning.
 
-Evidence to revisit: large structs marked `copy` for convenience causing
-silent expensive copies in loops (would argue for a size limit on `copy`).
+`copy` is semantic and has no size limit (ADR 0021): if large structs marked
+`copy` cause expensive copies in loops, the response is a performance lint,
+not a change to which types are `Copy`.

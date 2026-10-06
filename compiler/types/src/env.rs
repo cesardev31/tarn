@@ -41,99 +41,79 @@ pub struct FnSig {
     pub self_ty: Option<Ty>,
     pub params: Vec<Ty>,
     pub ret: Ty,
-    pub is_extern: bool,
+    /// `extern "C"` / `extern "intrinsic"`.
+    pub abi: Option<String>,
     pub module: ModuleId,
     pub span: Span,
 }
 
 /// Prelude symbols the checker needs by identity.
+/// The "lang items": the only names the type checker knows by identity.
+/// `Option`, `Result` and `Copy` are declared in `core` (ADR 0020).
 pub struct Prelude {
     pub option: SymbolId,
     pub result: SymbolId,
+    /// `Copy` capability; `None` only when compiling without `core`.
+    pub copy: Option<SymbolId>,
     pub channel: SymbolId,
     pub print: SymbolId,
     pub panic: SymbolId,
     pub channel_fn: SymbolId,
 }
 
-pub struct Env<'a> {
-    pub inputs: &'a [ModuleInput<'a>],
-    pub r: &'a Resolved,
+/// Declarations as types. Produced by the type checker and handed to later
+/// phases (IR lowering) so they never re-derive layouts or signatures.
+#[derive(Default)]
+pub struct Decls {
     pub structs: HashMap<SymbolId, StructDef>,
     pub enums: HashMap<SymbolId, EnumDef>,
     pub fns: HashMap<SymbolId, FnSig>,
     pub bounds: HashMap<ParamId, Vec<SymbolId>>,
     pub param_names: HashMap<ParamId, String>,
+    /// The `Copy` capability from `core`, if loaded.
+    pub copy: Option<SymbolId>,
+}
+
+impl Decls {
+    /// Is `t` a copy type? The single definition used by the type checker and
+    /// by IR lowering (ADR 0021). Inference variables are not handled here.
+    pub fn is_copy(&self, t: &Ty) -> bool {
+        match t {
+            Ty::Bool | Ty::Int(_) | Ty::Float(_) | Ty::Never | Ty::Void | Ty::Opaque | Ty::Error => true,
+            Ty::Ref(m, _) => !m,
+            Ty::Array(e, _) => self.is_copy(e),
+            Ty::Adt(s, _) => self.structs.get(s).is_some_and(|d| d.is_copy) || self.enums.get(s).is_some_and(|d| d.is_copy),
+            Ty::Param(p) => self.copy.is_some_and(|c| self.bounds.get(p).is_some_and(|b| b.contains(&c))),
+            _ => false,
+        }
+    }
+}
+
+pub struct Env<'a> {
+    pub inputs: &'a [ModuleInput<'a>],
+    pub r: &'a Resolved,
+    pub decls: Decls,
     pub prelude: Prelude,
     pub diags: Vec<Diagnostic>,
-    next_param: u32,
 }
 
 impl<'a> Env<'a> {
     pub fn new(inputs: &'a [ModuleInput<'a>], r: &'a Resolved) -> Env<'a> {
         let ps = r.scope(tarn_resolve::ScopeId(0));
-        let get = |n: &str| ps.get(n).unwrap();
+        let get = |n: &str| ps.get(n).expect("core must declare the lang items");
         let prelude = Prelude {
             option: get("Option"),
             result: get("Result"),
+            copy: ps.get("Copy"),
             channel: get("Channel"),
             print: get("print"),
             panic: get("panic"),
             channel_fn: get("channel"),
         };
-        let mut env = Env {
-            inputs,
-            r,
-            structs: HashMap::new(),
-            enums: HashMap::new(),
-            fns: HashMap::new(),
-            bounds: HashMap::new(),
-            param_names: HashMap::new(),
-            prelude,
-            diags: Vec::new(),
-            next_param: r.symbols.len() as u32,
-        };
-        env.prelude_enums();
+        let decls = Decls { copy: prelude.copy, ..Decls::default() };
+        let mut env = Env { inputs, r, decls, prelude, diags: Vec::new() };
         env.collect();
         env
-    }
-
-    fn synthetic_param(&mut self, name: &str) -> ParamId {
-        let id = ParamId(self.next_param);
-        self.next_param += 1;
-        self.param_names.insert(id, name.to_string());
-        id
-    }
-
-    fn prelude_enums(&mut self) {
-        let t = self.synthetic_param("T");
-        let some = self.r.member(self.prelude.option, "Some").unwrap();
-        let none = self.r.member(self.prelude.option, "None").unwrap();
-        self.enums.insert(
-            self.prelude.option,
-            EnumDef {
-                generics: vec![t],
-                variants: vec![
-                    VariantDef { sym: some, name: "Some".into(), fields: vec![Ty::Param(t)] },
-                    VariantDef { sym: none, name: "None".into(), fields: vec![] },
-                ],
-                is_copy: false,
-            },
-        );
-        let (t, e) = (self.synthetic_param("T"), self.synthetic_param("E"));
-        let ok = self.r.member(self.prelude.result, "Ok").unwrap();
-        let err = self.r.member(self.prelude.result, "Err").unwrap();
-        self.enums.insert(
-            self.prelude.result,
-            EnumDef {
-                generics: vec![t, e],
-                variants: vec![
-                    VariantDef { sym: ok, name: "Ok".into(), fields: vec![Ty::Param(t)] },
-                    VariantDef { sym: err, name: "Err".into(), fields: vec![Ty::Param(e)] },
-                ],
-                is_copy: false,
-            },
-        );
     }
 
     fn def(&self, m: ModuleId, node: tarn_ast::NodeId) -> Option<SymbolId> {
@@ -145,7 +125,7 @@ impl<'a> Env<'a> {
         for g in gs {
             let Some(s) = self.def(m, g.id) else { continue };
             let p = ParamId(s.0);
-            self.param_names.insert(p, g.name.name.clone());
+            self.decls.param_names.insert(p, g.name.name.clone());
             let bounds: Vec<SymbolId> = g
                 .bounds
                 .iter()
@@ -154,16 +134,27 @@ impl<'a> Env<'a> {
                     _ => None,
                 })
                 .collect();
-            self.bounds.insert(p, bounds);
+            self.decls.bounds.insert(p, bounds);
             out.push(p);
         }
         out
     }
 
     fn collect(&mut self) {
+        self.collect_pass(true);
+        self.collect_pass(false);
+    }
+
+    /// Pass 1 (`types`): structs and enums. Pass 2: functions, interfaces and
+    /// impls, which may need the types' declared bounds.
+    fn collect_pass(&mut self, types: bool) {
         for (mi, input) in self.inputs.iter().enumerate() {
             let m = ModuleId(mi as u32);
             for item in &input.ast.items {
+                let is_type = matches!(item.kind, ItemKind::Struct(_) | ItemKind::Enum(_));
+                if is_type != types {
+                    continue;
+                }
                 match &item.kind {
                     ItemKind::Struct(s) => {
                         let Some(sym) = self.def(m, item.id) else { continue };
@@ -173,7 +164,7 @@ impl<'a> Env<'a> {
                             .iter()
                             .map(|f| FieldDef { name: f.name.name.clone(), ty: self.lower(m, &f.ty), is_pub: f.is_pub })
                             .collect();
-                        self.structs.insert(sym, StructDef { module: m, generics, fields, is_copy: s.is_copy });
+                        self.decls.structs.insert(sym, StructDef { module: m, generics, fields, is_copy: s.is_copy });
                     }
                     ItemKind::Enum(e) => {
                         let Some(sym) = self.def(m, item.id) else { continue };
@@ -187,7 +178,7 @@ impl<'a> Env<'a> {
                                 Some(VariantDef { sym: vs, name: v.name.name.clone(), fields })
                             })
                             .collect();
-                        self.enums.insert(sym, EnumDef { generics, variants, is_copy: e.is_copy });
+                        self.decls.enums.insert(sym, EnumDef { generics, variants, is_copy: e.is_copy });
                     }
                     ItemKind::Fn(f) => {
                         // The resolver records `fn T.m`'s owner on the item node.
@@ -210,13 +201,16 @@ impl<'a> Env<'a> {
                                 let bs: Vec<ParamId> = p.args.iter().filter_map(|a| self.def(m, a.id)).map(|s| ParamId(s.0)).collect();
                                 for (a, b) in p.args.iter().zip(&bs) {
                                     if let TypeKind::Path(ap) = &a.kind {
-                                        self.param_names.insert(*b, ap.segments[0].name.clone());
+                                        self.decls.param_names.insert(*b, ap.segments[0].name.clone());
                                     }
                                 }
                                 (Some(*t), bs)
                             }
                             _ => (None, Vec::new()),
                         };
+                        if let Some(t) = target {
+                            self.inherit_bounds(t, &binders);
+                        }
                         let self_ty = target.map(|t| Ty::Adt(t, binders.iter().map(|b| Ty::Param(*b)).collect()));
                         for f in &i.methods {
                             self.fn_sig(m, f, &binders, self_ty.clone(), None);
@@ -236,6 +230,7 @@ impl<'a> Env<'a> {
             let binders = self.params_of(m, &o.params);
             if let Some(owner) = owner {
                 self_ty = Some(Ty::Adt(owner, binders.iter().map(|b| Ty::Param(*b)).collect()));
+                self.inherit_bounds(owner, &binders);
             }
             generics.extend(binders);
         }
@@ -248,11 +243,11 @@ impl<'a> Env<'a> {
             self_ty,
             params,
             ret,
-            is_extern: f.abi.is_some(),
+            abi: f.abi.clone(),
             module: m,
             span: f.name.span,
         };
-        self.fns.insert(sym, sig);
+        self.decls.fns.insert(sym, sig);
     }
 
     /// AST type → `Ty` for declarations; diagnostics go to `self.diags`.
@@ -322,6 +317,20 @@ impl<'a> Env<'a> {
                 _ => Ty::Error,
             },
             TypeKind::Error => Ty::Error,
+        }
+    }
+
+    /// Owner and impl binders carry the bounds declared on the type
+    /// (ADR 0021): inside `fn Point<T>.m`, `T: Copy` holds if `Point<T: Copy>`.
+    fn inherit_bounds(&mut self, ty: SymbolId, binders: &[ParamId]) {
+        let declared: Vec<ParamId> = match (self.decls.structs.get(&ty), self.decls.enums.get(&ty)) {
+            (Some(s), _) => s.generics.clone(),
+            (_, Some(e)) => e.generics.clone(),
+            _ => return,
+        };
+        for (b, d) in binders.iter().zip(declared) {
+            let inherited = self.decls.bounds.get(&d).cloned().unwrap_or_default();
+            self.decls.bounds.entry(*b).or_default().extend(inherited);
         }
     }
 

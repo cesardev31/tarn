@@ -1,0 +1,54 @@
+fn apply(_1: fn(i64) i64, _2: i64) -> i64 {
+    _0: i64    // return
+    _1: fn(i64) i64    // param f
+    _2: i64    // param x
+  bb0:
+    _0 = call (move _1)(copy _2) -> bb1
+  bb1:
+    return
+}
+
+fn main() -> void {
+    _0: void    // return
+    _1: i64    // let k
+    _2: i64    // var count
+    _3: i64    // temp
+    _4: fn(i64) i64    // temp
+    _5: &mut i64    // temp
+    _6: &i64    // temp
+    _7: i64    // let r
+    _8: void    // temp
+  bb0:
+    live _1
+    _1 = 3_i64
+    live _2
+    _2 = 0_i64
+    _5 = &mut _2
+    _6 = &_1
+    _4 = closure main::closure#0[move _5, copy _6]
+    _3 = call apply(move _4, 2_i64) -> bb1
+  bb1:
+    live _7
+    _7 = copy _3
+    _8 = call builtin print(copy _7) -> bb2
+  bb2:
+    _0 = ()
+    dead _7
+    dead _2
+    dead _1
+    return
+}
+
+fn main::closure#0(_1: &mut i64, _2: &i64, _3: i64) -> i64 {
+    _0: i64    // return
+    _1: &mut i64    // param count
+    _2: &i64    // param k
+    _3: i64    // param x
+    _4: i64    // temp
+  bb0:
+    _4 = add(copy (*_1), 1_i64)
+    (*_1) = copy _4
+    _0 = mul(copy _3, copy (*_2))
+    return
+}
+

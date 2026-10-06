@@ -102,10 +102,19 @@ pub enum VarKind {
     Float,
 }
 
+/// Unification table. Every binding is recorded in an undo log so that a
+/// failed `unify` restores exactly the previous state: a failure never leaves
+/// variables partially bound.
 #[derive(Default)]
 pub struct Infer {
     vars: Vec<(VarKind, Option<Ty>)>,
+    /// Variables bound since the oldest open checkpoint, in binding order.
+    undo: Vec<u32>,
+    open_checkpoints: u32,
 }
+
+/// Position in the undo log.
+pub struct Checkpoint(usize);
 
 impl Infer {
     pub fn fresh(&mut self, kind: VarKind) -> Ty {
@@ -162,13 +171,54 @@ impl Infer {
         };
         if ok && !self.occurs(v, &t) {
             self.vars[v as usize].1 = Some(t);
+            if self.open_checkpoints > 0 {
+                self.undo.push(v);
+            }
             true
         } else {
             false
         }
     }
 
+    pub fn checkpoint(&mut self) -> Checkpoint {
+        self.open_checkpoints += 1;
+        Checkpoint(self.undo.len())
+    }
+
+    /// Undo every binding made since `cp`.
+    pub fn rollback(&mut self, cp: Checkpoint) {
+        while self.undo.len() > cp.0 {
+            let v = self.undo.pop().unwrap();
+            self.vars[v as usize].1 = None;
+        }
+        self.close(cp.0);
+    }
+
+    /// Keep the bindings made since `cp`.
+    pub fn commit(&mut self, cp: Checkpoint) {
+        self.close(cp.0);
+    }
+
+    fn close(&mut self, _at: usize) {
+        self.open_checkpoints -= 1;
+        if self.open_checkpoints == 0 {
+            self.undo.clear();
+        }
+    }
+
+    /// Atomic unification: on failure the table is exactly as before.
     pub fn unify(&mut self, a: &Ty, b: &Ty) -> bool {
+        let cp = self.checkpoint();
+        let ok = self.unify_inner(a, b);
+        if ok {
+            self.commit(cp);
+        } else {
+            self.rollback(cp);
+        }
+        ok
+    }
+
+    fn unify_inner(&mut self, a: &Ty, b: &Ty) -> bool {
         let (a, b) = (self.shallow(a), self.shallow(b));
         match (&a, &b) {
             (Ty::Opaque | Ty::Error, _) | (_, Ty::Opaque | Ty::Error) => true,
@@ -187,13 +237,13 @@ impl Infer {
             (_, Ty::Var(y)) => self.bind(*y, a.clone()),
             (Ty::Never, _) | (_, Ty::Never) => true,
             (Ty::Adt(s1, a1), Ty::Adt(s2, a2)) => {
-                s1 == s2 && a1.len() == a2.len() && a1.iter().zip(a2).all(|(x, y)| self.unify(x, y))
+                s1 == s2 && a1.len() == a2.len() && a1.iter().zip(a2).all(|(x, y)| self.unify_inner(x, y))
             }
-            (Ty::Ref(m1, x), Ty::Ref(m2, y)) => m1 == m2 && self.unify(x, y),
-            (Ty::Array(x, n1), Ty::Array(y, n2)) => n1 == n2 && self.unify(x, y),
-            (Ty::Slice(x), Ty::Slice(y)) => self.unify(x, y),
+            (Ty::Ref(m1, x), Ty::Ref(m2, y)) => m1 == m2 && self.unify_inner(x, y),
+            (Ty::Array(x, n1), Ty::Array(y, n2)) => n1 == n2 && self.unify_inner(x, y),
+            (Ty::Slice(x), Ty::Slice(y)) => self.unify_inner(x, y),
             (Ty::Fn(p1, r1), Ty::Fn(p2, r2)) => {
-                p1.len() == p2.len() && p1.iter().zip(p2).all(|(x, y)| self.unify(x, y)) && self.unify(r1, r2)
+                p1.len() == p2.len() && p1.iter().zip(p2).all(|(x, y)| self.unify_inner(x, y)) && self.unify_inner(r1, r2)
             }
             _ => a == b,
         }
@@ -221,5 +271,58 @@ impl Infer {
             Ty::Fn(ps, r) => ps.iter().any(|p| self.has_unresolved(p)) || self.has_unresolved(&r),
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tarn_resolve::SymbolId;
+
+    fn pair(a: Ty, b: Ty) -> Ty {
+        Ty::Adt(SymbolId(1), vec![a, b])
+    }
+
+    /// `Pair<?a, ?b>` vs `Pair<i64, bool>` where `?b` is an integer literal:
+    /// `?a := i64` happens before `?b` fails; the failure must undo it.
+    #[test]
+    fn failed_unify_restores_partial_bindings() {
+        let mut inf = Infer::default();
+        let a = inf.fresh(VarKind::General);
+        let b = inf.fresh(VarKind::Int);
+        assert!(!inf.unify(&pair(a.clone(), b.clone()), &pair(Ty::Int(IntTy::I64), Ty::Bool)));
+        assert_eq!(inf.shallow(&a), a, "?a must be unbound again");
+        assert_eq!(inf.shallow(&b), b);
+        // A later, valid unification is unaffected by the failed one.
+        assert!(inf.unify(&a, &Ty::Str));
+        assert_eq!(inf.zonk(&a), Ty::Str);
+    }
+
+    #[test]
+    fn nested_failure_deep_in_the_structure() {
+        let mut inf = Infer::default();
+        let (x, y, z) = (inf.fresh(VarKind::General), inf.fresh(VarKind::General), inf.fresh(VarKind::Float));
+        let lhs = Ty::Fn(vec![x.clone(), pair(y.clone(), z.clone())], Box::new(Ty::Void));
+        let rhs = Ty::Fn(vec![Ty::Bool, pair(Ty::Str, Ty::Int(IntTy::U8))], Box::new(Ty::Void));
+        assert!(!inf.unify(&lhs, &rhs));
+        for v in [&x, &y, &z] {
+            assert!(matches!(inf.shallow(v), Ty::Var(_)));
+        }
+    }
+
+    #[test]
+    fn success_keeps_bindings_and_outer_checkpoint_rolls_back() {
+        let mut inf = Infer::default();
+        let a = inf.fresh(VarKind::General);
+        assert!(inf.unify(&pair(a.clone(), Ty::Bool), &pair(Ty::Str, Ty::Bool)));
+        assert_eq!(inf.zonk(&a), Ty::Str);
+        // An outer checkpoint spanning several unifications rolls back all of
+        // them, including the ones that succeeded.
+        let b = inf.fresh(VarKind::General);
+        let cp = inf.checkpoint();
+        assert!(inf.unify(&b, &Ty::Bool));
+        assert!(!inf.unify(&Ty::Str, &Ty::Bool));
+        inf.rollback(cp);
+        assert!(matches!(inf.shallow(&b), Ty::Var(_)), "the successful step is undone too");
     }
 }
