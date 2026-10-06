@@ -1,0 +1,12 @@
+error[E4101]: cannot borrow `bytes` as mutable because it is also borrowed as shared
+ --> tests/borrows/fail/E4101_vec_slice_then_push.tarn:5:5
+  |
+4 |     view := bytes.as_slice()
+  |             ----- shared borrow of `bytes` starts here
+5 |     bytes.push(u8(2))
+  |     ^^^^^ mutable borrow conflicts here
+6 |     print(view.len())
+  |           ---------- the borrow is still used here
+  |
+  = note: a borrow lasts until the last use of the reference that holds it
+

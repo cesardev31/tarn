@@ -853,6 +853,12 @@ abandoned through its verified frame destruction, an unjoined result is
 destroyed once. Runtime task records store bytes only; typed result handling is
 compiled code. Do not add a second scheduler or task model.
 
+Timeouts (14B, ADR 0039) race through the same readiness model and abandon the
+loser structurally; completion is checked first, so the result wins a tie.
+Buffered I/O (14C, ADR 0040) is Tarn policy over verified async primitives, not
+a new native I/O subsystem. Buffers are owned; delimiter reads take a limit;
+destruction never performs I/O, so flushing is always explicit.
+
 ---
 
 ## Drops

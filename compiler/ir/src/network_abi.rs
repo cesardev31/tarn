@@ -91,6 +91,8 @@ pub(crate) fn verify(t: &Typed) -> Vec<String> {
                 "DnsFailure",
                 "OtherOs",
                 "WriteZero",
+                "UnexpectedEof",
+                "LimitExceeded",
             ]
     {
         return invalid();

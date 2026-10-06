@@ -23,6 +23,8 @@ pub copy enum ErrorKind {
     DnsFailure
     OtherOs
     WriteZero
+    UnexpectedEof
+    LimitExceeded
 }
 pub copy struct Error {
     pub kind ErrorKind
@@ -959,5 +961,199 @@ pub async fn AsyncTask<R>.join_timeout(self, duration Duration) Result<Option<R>
             Progress.Pending => {}
         }
         _async_park()
+    }
+}
+
+// ------------------------------------------------ buffered I/O (Phase 14C, ADR 0040)
+
+// Buffers are owned `Vec<u8>` storage; the stream is passed to every call
+// because structs cannot hold references in v0, which also lets one stream
+// carry a reader and a writer at the same time. All I/O goes through
+// `read_async`/`write_async`; this layer only decides when a syscall happens.
+
+fn _zero_fill(buffer &mut Vec<u8>, size usize) {
+    for {
+        if buffer.len() >= size { return }
+        buffer.push(u8(0))
+    }
+}
+fn _copy_bytes(target &mut []u8, source &[]u8) {
+    var index = usize(0)
+    for {
+        if index == source.len() { return }
+        target[index] = source[index]
+        index = index + usize(1)
+    }
+}
+fn _fail(kind ErrorKind) Error { return Error{kind: kind, code: 0, domain: 0} }
+
+/// Owned read buffer. Buffered bytes are `buffer[start..end]`.
+pub struct BufferedReader {
+    buffer Vec<u8>
+    start usize
+    end usize
+}
+/// A zero capacity aborts.
+pub fn BufferedReader.new(capacity usize) BufferedReader {
+    if capacity == usize(0) { panic("buffer capacity must be positive") }
+    var buffer = Vec.new()
+    _zero_fill(&mut buffer, capacity)
+    return BufferedReader{buffer: buffer, start: usize(0), end: usize(0)}
+}
+pub fn BufferedReader.buffered(&self) usize { return self.end - self.start }
+pub fn BufferedReader.capacity(&self) usize { return self.buffer.len() }
+// Make room after `end`: reuse an empty buffer, move unread bytes to the
+// front, or grow geometrically when the buffer is full of unread bytes.
+fn BufferedReader._reserve(&mut self) {
+    if self.start == self.end {
+        self.start = usize(0)
+        self.end = usize(0)
+    }
+    if self.end != self.buffer.len() { return }
+    start := self.start
+    count := self.end - start
+    if start == usize(0) {
+        size := self.buffer.len() * usize(2)
+        _zero_fill(&mut self.buffer, size)
+        return
+    }
+    data := self.buffer.as_mut_slice()
+    var index = usize(0)
+    for {
+        if index == count { break }
+        data[index] = data[start + index]
+        index = index + usize(1)
+    }
+    self.start = usize(0)
+    self.end = count
+}
+// One read into free space; Ok(0) is end of stream.
+async fn BufferedReader._fill(&mut self, stream &mut TcpStream) Result<usize, Error> {
+    self._reserve()
+    end := self.end
+    count := try await stream.read_async(&mut self.buffer.as_mut_slice()[end..])
+    self.end = end + count
+    return Ok(count)
+}
+fn BufferedReader._take(&mut self, target &mut []u8) usize {
+    start := self.start
+    var count = self.end - start
+    if target.len() < count { count = target.len() }
+    _copy_bytes(target, &self.buffer.as_slice()[start..start + count])
+    self.start = start + count
+    return count
+}
+fn BufferedReader._split(&mut self, end usize) Vec<u8> {
+    var line = Vec.new()
+    var index = self.start
+    for {
+        if index == end { break }
+        line.push(self.buffer.at(index))
+        index = index + usize(1)
+    }
+    self.start = end
+    return line
+}
+/// Buffered bytes first; otherwise at most one read. A request at least as
+/// large as the buffer bypasses it. Ok(0) is end of stream.
+pub async fn BufferedReader.read(&mut self, stream &mut TcpStream, target &mut []u8) Result<usize, Error> {
+    if target.len() == usize(0) { return Ok(usize(0)) }
+    if self.start == self.end {
+        if target.len() >= self.buffer.len() { return await stream.read_async(target) }
+        count := try await self._fill(stream)
+        if count == usize(0) { return Ok(usize(0)) }
+    }
+    return Ok(self._take(target))
+}
+/// Fills `target` completely. End of stream first is UnexpectedEof; bytes
+/// already copied into `target` stay consumed.
+pub async fn BufferedReader.read_exact(&mut self, stream &mut TcpStream, target &mut []u8) Result<void, Error> {
+    var done = usize(0)
+    for {
+        if done == target.len() { return Ok(()) }
+        if self.start == self.end {
+            count := try await self._fill(stream)
+            if count == usize(0) { return Err(_fail(ErrorKind.UnexpectedEof)) }
+        }
+        done = done + self._take(&mut target[done..])
+    }
+}
+/// Bytes up to and including `delimiter`, as an owned vector of at most
+/// `max` bytes; a longer line is LimitExceeded and stays buffered. At end of
+/// stream the remaining bytes are returned without a delimiter; an empty
+/// vector means the stream had ended.
+pub async fn BufferedReader.read_until(&mut self, stream &mut TcpStream, delimiter u8, max usize) Result<Vec<u8>, Error> {
+    var scanned = usize(0)
+    for {
+        var index = self.start + scanned
+        for {
+            if index == self.end { break }
+            if self.buffer.at(index) == delimiter {
+                if index + usize(1) - self.start > max { return Err(_fail(ErrorKind.LimitExceeded)) }
+                return Ok(self._split(index + usize(1)))
+            }
+            index = index + usize(1)
+        }
+        scanned = self.end - self.start
+        if scanned >= max { return Err(_fail(ErrorKind.LimitExceeded)) }
+        count := try await self._fill(stream)
+        if count == usize(0) { return Ok(self._split(self.end)) }
+    }
+}
+
+/// Owned write buffer. Pending bytes are `buffer[start..end]`. Writes are
+/// copied in and reach the stream only when the buffer is full, a write is at
+/// least as large as the buffer, or `flush` is called. Destruction discards
+/// pending bytes without I/O: flushing is always explicit.
+pub struct BufferedWriter {
+    buffer Vec<u8>
+    start usize
+    end usize
+}
+/// A zero capacity aborts.
+pub fn BufferedWriter.new(capacity usize) BufferedWriter {
+    if capacity == usize(0) { panic("buffer capacity must be positive") }
+    var buffer = Vec.new()
+    _zero_fill(&mut buffer, capacity)
+    return BufferedWriter{buffer: buffer, start: usize(0), end: usize(0)}
+}
+pub fn BufferedWriter.pending(&self) usize { return self.end - self.start }
+pub fn BufferedWriter.capacity(&self) usize { return self.buffer.len() }
+/// Accepts at least one byte of a non-empty `data`. Flushes first only when
+/// the buffer is full; an empty buffer and a large `data` write directly.
+pub async fn BufferedWriter.write(&mut self, stream &mut TcpStream, data &[]u8) Result<usize, Error> {
+    if data.len() == usize(0) { return Ok(usize(0)) }
+    if self.end == self.buffer.len() { try await self.flush(stream) }
+    if self.start == self.end && data.len() >= self.buffer.len() { return await stream.write_async(data) }
+    end := self.end
+    var count = self.buffer.len() - end
+    if data.len() < count { count = data.len() }
+    _copy_bytes(&mut self.buffer.as_mut_slice()[end..end + count], &data[0..count])
+    self.end = end + count
+    return Ok(count)
+}
+pub async fn BufferedWriter.write_all(&mut self, stream &mut TcpStream, data &[]u8) Result<void, Error> {
+    var offset = usize(0)
+    for {
+        if offset == data.len() { return Ok(()) }
+        count := try await self.write(stream, &data[offset..])
+        if count == usize(0) { return Err(_fail(ErrorKind.WriteZero)) }
+        offset = offset + count
+    }
+}
+/// Writes every pending byte. Partial writes continue where they stopped; on
+/// an error exactly the unwritten bytes remain pending.
+pub async fn BufferedWriter.flush(&mut self, stream &mut TcpStream) Result<void, Error> {
+    for {
+        if self.start == self.end {
+            self.start = usize(0)
+            self.end = usize(0)
+            return Ok(())
+        }
+        start := self.start
+        end := self.end
+        count := try await stream.write_async(&self.buffer.as_slice()[start..end])
+        if count == usize(0) { return Err(_fail(ErrorKind.WriteZero)) }
+        self.start = start + count
     }
 }

@@ -1,0 +1,7 @@
+fn main() {
+    var bytes = Vec.new()
+    bytes.push(u8(1))
+    view := bytes.as_slice()
+    bytes.push(u8(2))
+    print(view.len())
+}

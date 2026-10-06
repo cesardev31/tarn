@@ -98,6 +98,10 @@ pub extern "intrinsic" fn Vec<T>.replace(&mut self, index usize, value T) T
 /// Moves the element at `index` out; the last element takes its place.
 pub extern "intrinsic" fn Vec<T>.swap_remove(&mut self, index usize) T
 pub extern "intrinsic" fn Vec<T>.is_empty(&self) bool
+/// Borrow every element as a slice; the slice borrows the vector, so the vector
+/// cannot grow, shrink or move while the slice is live.
+pub extern "intrinsic" fn Vec<T>.as_slice(&self) &[]T
+pub extern "intrinsic" fn Vec<T>.as_mut_slice(&mut self) &mut []T
 
 // ------------------------------------------------ synchronization (phase 11C)
 

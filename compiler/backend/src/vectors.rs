@@ -86,6 +86,11 @@ impl Cx<'_, '_> {
                 let at = self.vec_element(data, index, &elem)?;
                 Val { value: Some(at), ty: dest.clone() }
             }
+            ("as_slice", 1) | ("as_mut_slice", 1)
+                if *dest == Ty::Ref(operation == "as_mut_slice", Box::new(Ty::Slice(Box::new(elem.clone())))) && (operation == "as_slice" || *mutable) =>
+            {
+                Val { value: Some(self.pair(data, len)), ty: dest.clone() }
+            }
             ("at", 2) if *dest == elem && self.t.decls.is_copy(&elem) => {
                 let index = args[1].value.ok_or_else(|| Error::bug("vector index"))?;
                 self.vec_bounds(index, len);
