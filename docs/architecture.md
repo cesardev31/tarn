@@ -95,7 +95,7 @@ contracts and `borrows(...)` clauses expose invisible implementation promises
 (ADR 0031); the backend still receives no move/borrow results.
 
 
-## Native task boundary (phase 11A)
+## Native task boundary (phases 11A/11B)
 
 `Callee::TaskSpawn` records generated worker/result-destruction function IDs and
 specialization arguments. Both functions pass through ordinary IR verification,
@@ -109,5 +109,10 @@ its result is owned through runtime metadata, not an inline field. Native drop
 of this resource waits and dispatches its verified result destruction function.
 Explicit join moves result bytes to caller storage before releasing allocations.
 The linker includes `-pthread`. Representation and abort semantics:
-[ADR 0033](adr/0033-safe-native-tasks.md). Scoped loan retention, Transfer/Share and
-synchronization remain pending; no backend ownership queries are introduced.
+[ADR 0033](adr/0033-safe-native-tasks.md). Transfer/Share are bounded structural type-checker queries with explicit native
+capability evidence. Scoped spawn carries a TaskScopeWitness reference, whose
+ordinary loan flow prevents handle escape. Scope-owned handles and discarded
+Task temporaries retain worker loans until consuming join/destruction. Lowering
+completes task-containing resources before borrowed storage ends, including early
+exits. Synchronization remains pending; no backend ownership queries are introduced.
+See [the 11B report](scoped-tasks-report.md) for conservative restrictions.

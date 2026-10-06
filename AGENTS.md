@@ -744,8 +744,8 @@ when introducing task boundaries (proposed ADR 0033).
 
 Phase 11 follows ordinary Copy/Move, callable capture ownership, loans and
 provenance. Do not add a separate thread-safety checker or backend ownership
-queries. Phase 11A implements handle-owned native tasks; scoped loans and
-Transfer/Share (11B), then synchronization (11C), require separate approval.
+queries. Phase 11A implements handle-owned native tasks; phase 11B implements scoped loans
+and Transfer/Share. Synchronization (11C) requires separate approval.
 The full phase remains in progress; design and implementation status: [ADR 0033](docs/adr/0033-safe-native-tasks.md).
 
 Task handles must have deliberate ownership and completion semantics. The v0

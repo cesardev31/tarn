@@ -116,7 +116,11 @@ It requires no changes to 6A's indexed-move exception or to 6B's loans.
 ## Destruction order and panic
 
 Named scope bindings retain the lowering's reverse declaration order, including
-return, break and continue exits. Complete and partial structs destroy fields
+return, break and continue exits. Scoped concurrency adds an explicit completion
+boundary: task-containing resources (including potentially task-containing generic
+values) complete before other local storage ends. Their own relative destruction
+order remains reverse declaration order; other bindings retain theirs. This phase
+11B ordering is defined by [ADR 0033](0033-safe-native-tasks.md). Complete and partial structs destroy fields
 in **increasing declaration index**, recursively depth-first. Enums dispatch
 the active variant, then use the same payload declaration order. Arrays use
 increasing element index, skipping consumed elements. All these orders depend

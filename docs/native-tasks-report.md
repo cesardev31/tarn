@@ -1,5 +1,8 @@
 # Native tasks completion report (phase 11A)
 
+This report records the 11A boundary. Capabilities and scoped tasks subsequently
+implemented in 11B are documented in [the 11B report](scoped-tasks-report.md).
+
 Phase 11A implements the handle-owned native task boundary. Phase 11B
 Transfer/Share and scoped loans, then phase 11C Mutex/atomics, require separate
 approval. ADR 0033 remains proposed until the full phase is complete.

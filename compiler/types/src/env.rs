@@ -410,6 +410,12 @@ impl<'a> Env<'a> {
             TypeKind::Ref { mutable, inner } => {
                 let inner_ty = if matches!(inner.kind, TypeKind::Any(_)) {
                     match uses.get(&inner.id).map(|u| &u.res) {
+                        Some(Res::Symbol(i)) if Some(*i) == self.decls.transfer || Some(*i) == self.decls.share => {
+                            diags.push(Diagnostic::error("E3050", "semantic_capability_dynamic", "cross-thread capabilities are bounds, not dynamic interfaces")
+                                .primary(inner.span, "no runtime dispatch object exists for this capability")
+                                .help("use `T: Transfer` or `T: Share` on a generic parameter"));
+                            Ty::Error
+                        }
                         Some(Res::Symbol(i)) => Ty::Any(*i),
                         _ => Ty::Error,
                     }

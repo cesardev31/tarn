@@ -154,6 +154,7 @@ stream them:
 | E3047 | `task_capability_required` | a task capture or result lacks cross-thread capability evidence |
 | E3048 | `semantic_capability_impl` | Transfer/Share authority cannot be granted by an ordinary impl |
 | E3049 | `scoped_task_borrowed_result` | borrowed scoped task results remain unsupported |
+| E3050 | `semantic_capability_dynamic` | Transfer/Share cannot be used as dynamic interface objects |
 | E4001 | `use_after_move` | use of (possibly) moved value `x` |
 | E4002 | `use_of_partially_moved` | use of (possibly) partially moved value `p` |
 | E4003 | `move_out_of_reference` | cannot move a value out from behind a reference |

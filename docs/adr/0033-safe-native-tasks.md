@@ -121,7 +121,8 @@ Before implementation, the full phase-10 `cargo test` baseline passed, including
 JoinScope after local destruction and omitted it on early exits. Initial lowering
 work moves scope completion before local drops on normal, return, break, continue
 and nested exits; source/IR fixtures and a CFG traversal regression validate order.
-This does not establish loan retention or executable scoped concurrency.
+That initial ordering fix alone did not establish loan retention or executable
+scoped concurrency; the 11B implementation and report below provide that evidence.
 
 Completion requires real native tests for scalar/owned results, implicit join,
 multiple/nested workers, generic/dynamic captures, exactly-once capture/result
@@ -135,11 +136,11 @@ callable, dynamic, drop and native regression gates.
 
 No async/await, futures, reactor, green threads, work stealing, cancellation,
 detach, user destructors, unwinding, optimizer, LLVM, package manager or platform
-expansion. Scoped spawn spelling, capability declarations
-for trusted native/dynamic types, mutex shared ownership and exact atomic surface
-must be resolved and tested before this ADR can become accepted. Thread
-capability enforcement, scoped loan retention and synchronization remain
-unimplemented. 11A is the executable handle/result ownership boundary.
+expansion. Public join returns R directly and scoped spawn uses lexical scope.
+Native contract source spelling, mutex shared ownership and the exact atomic
+surface remain unresolved before this ADR can become accepted. Native tasks,
+capability enforcement and scoped loan retention are implemented by 11A/11B;
+synchronization remains unimplemented.
 
 ## 11A private runtime allocation (implementation contract)
 
@@ -167,10 +168,11 @@ bodyless generic declaration. Capturing move closures may have Shared, Mutable
 or Once invocation; the wrapper borrows reusable inputs and destroys them after
 calling, or moves a Once input. The runtime does not independently free captures.
 
-Current 11A limits: spawn accepts a direct zero-argument move-closure literal;
+At the 11A checkpoint, spawn accepted a direct zero-argument move-closure literal;
 references/borrowed stack environments remain rejected, including captured loans
-inside owned environments. General callable-value spawn and generic capability
-contracts await 11B. Sequential execution is never used as fallback. Private
+inside owned environments. 11B subsequently adds scoped borrowing and capability
+contracts; general callable-value spawn remains deferred. Sequential execution
+is never used as fallback. Private
 function-pointer lanes assume the existing Linux x86_64 System V ABI.
 
 11A validation covers real native scalar/string/generic-ADT/enum/array/zero-size
@@ -180,33 +182,43 @@ exact capture/result destruction traces, worker SIGABRT, corrupted metadata and
 both mutation corpora. Runtime tests assert distinct pthread identity, repeated
 joins and deterministic injected allocation/create/join/self-join faults.
 
-## 11B capability implementation checkpoint
+## 11B implementation decisions
 
-The initial semantic capability layer is implemented; 11B is not complete.
-`Transfer` and `Share` use core declaration identities and existing generic bound
-syntax. Queries substitute declaration fields and payloads, preserve declaration
-order, reject recursive cycles, and stop at depth 64 or 4096 visited nodes.
-Numbers, bool, string and zero-size primitive values qualify for both. Arrays
-and ADTs require every component; shared references require Share referents,
-mutable references require Transfer referents and are not Share. Neither
-capability implies Copy. Task<R> requires Transfer for R and is never Share.
-Unknown opaque types and erased callables default to neither. A declaration
-catalog entry can explicitly grant native or dynamic capability evidence; no
-source-level annotation or new native API is introduced at this checkpoint.
-Ordinary impl declarations cannot grant these semantic capabilities.
+Transfer and Share are semantic core declaration identities, not runtime dispatch
+interfaces. Both are structural for scalars, strings, arrays and substituted ADT
+fields/payloads. Neither implies Copy or the other capability. Shared references
+require Share referents, mutable references require Transfer referents and are not
+Share. Task<R> requires Transfer for R and is never Share. Recursive queries reject
+cycles and stop at depth 64 or 4096 nodes. Unknown resources default to neither;
+explicit NativeCapabilities entries in Decls grant trusted type/interface evidence.
+Dynamic method sets and concrete implementations alone grant no erased capability.
 
-Unscoped spawn checks owned captures and results after inference defaults.
-Known owned callable captures use their creation-site component evidence;
-reassignment discards that evidence conservatively. A signature alone never
-proves capture safety. Generic bounds are checked through the existing obligation
-mechanism. Existing unscoped loan and result-escape rejections remain in force.
-A generic Transfer bound is not proof of loan-free storage: unscoped spawn of an
-unknown reference-bearing parameter remains rejected. Capability evidence for
-known owned callable captures is available at spawn; erased callable generic
-bounds and reusable callable Share derivation remain conservative rejections.
+Generic bounds use the existing obligation mechanism. Known callable values derive
+capabilities from creation-site captures; Share additionally requires shared
+invocation. Reassignment discards evidence. Erased signatures never establish
+capture authority. Unscoped captures/results require Transfer and retain the
+existing rejection of unresolved loans. A generic Transfer bound does not prove
+loan-free storage.
 
-Scoped completion records, scoped loan retention and join-shortened worker loans
-remain unimplemented. In particular, lexical scope still does not authorize
-borrowed task captures. The next implementation step must connect explicit
-completion obligations to ordinary loan flow before accepting scoped borrowing.
-No 11C synchronization work is authorized by this checkpoint.
+Scoped spawn is explicit in typed metadata and carries an ordinary reference to
+TaskScopeWitness storage. Scope-owned Task values, including retained discarded
+expression temporaries, are the completion obligations. Unique handles cannot
+escape their witness; no second runtime owner is required. Lowering destroys live
+task-containing values before ending other scope storage on every normal exit,
+including try propagation. A completion marker follows executable child destruction.
+The same phase-11A pthread/runtime representation and verified worker/destruction
+functions execute these obligations.
+
+Scoped spawn transfers capture loans into Task holders. Joining/destruction is an
+ordinary liveness use; whole ownership moves transfer holdings, and consuming join
+or destruction releases them. Existing NLL overlap checks determine conflicts and
+permit access after explicit whole-handle join. No backend loan query or second
+borrow checker is involved. Borrowed scoped results remain rejected. Scoped handles
+cannot be passed into ordinary functions or captured by other callables; projected
+joins retain aggregate-level loans conservatively.
+
+The completion report and validation scope are in
+[phase 11B report](../scoped-tasks-report.md). This ADR remains proposed: shared
+mutex ownership/guards, atomic storage/API and trusted synchronization contracts
+remain phase 11C work requiring separate approval. No synchronization surface,
+scheduler or optimization was implemented in 11B.

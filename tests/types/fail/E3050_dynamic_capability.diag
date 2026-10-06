@@ -1,0 +1,16 @@
+error[E3050]: cross-thread capabilities are bounds, not dynamic interfaces
+ --> tests/types/fail/E3050_dynamic_capability.tarn:1:20
+  |
+1 | fn transfer(value &any Transfer) {
+  |                    ^^^^^^^^^^^^ no runtime dispatch object exists for this capability
+  |
+  = help: use `T: Transfer` or `T: Share` on a generic parameter
+
+error[E3050]: cross-thread capabilities are bounds, not dynamic interfaces
+ --> tests/types/fail/E3050_dynamic_capability.tarn:3:21
+  |
+3 | fn share(value &mut any Share) {
+  |                     ^^^^^^^^^ no runtime dispatch object exists for this capability
+  |
+  = help: use `T: Transfer` or `T: Share` on a generic parameter
+

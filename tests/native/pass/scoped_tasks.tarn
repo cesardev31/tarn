@@ -15,6 +15,14 @@ fn share_in_worker<T: Share>(value &T) {
 fn transfer_in_worker<T: Transfer>(value T) {
     scope { spawn move fn() { value } }
 }
+fn conditional(value &mut Counter, enabled bool) {
+    scope {
+        var task: Task<void>
+        if enabled {
+            task = spawn move fn() { bump(value) }
+        }
+    }
+}
 fn main() {
     var counter = Counter{value: 0}
     for i in 0..128 {
@@ -23,6 +31,13 @@ fn main() {
             task.join()
             counter.value = counter.value + 1
         }
+    }
+    print(counter.value)
+    conditional(&mut counter, false)
+    conditional(&mut counter, true)
+    scope {
+        var task = spawn fn() { counter.value = counter.value + 1 }
+        task = task
     }
     print(counter.value)
     share_in_worker(&counter)

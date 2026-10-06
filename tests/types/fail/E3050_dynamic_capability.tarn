@@ -1,0 +1,6 @@
+fn transfer(value &any Transfer) {
+}
+fn share(value &mut any Share) {
+}
+fn main() {
+}
