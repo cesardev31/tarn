@@ -1,0 +1,15 @@
+copy struct Pair {
+    small u8
+    large i64
+}
+fn sum(p Pair) i64 {
+    return i64(p.small) + p.large
+}
+fn make() Pair {
+    return Pair{small: 2, large: 40}
+}
+fn main() {
+    p := make()
+    print(sum(p))
+    print(p.large)
+}

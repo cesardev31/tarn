@@ -1,0 +1,8 @@
+fn main() {
+    var a: i64 = 2
+    var b: i64 = 3
+    a = a + b
+    b = a * b
+    print(a)
+    print(b)
+}

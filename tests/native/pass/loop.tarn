@@ -1,0 +1,10 @@
+fn main() {
+    var sum: i64 = 0
+    for i in 0..5 {
+        if i == 2 {
+            continue
+        }
+        sum = sum + i
+    }
+    print(sum)
+}

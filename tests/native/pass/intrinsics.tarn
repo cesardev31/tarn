@@ -1,0 +1,11 @@
+fn main() {
+    x: f64 := 9.0
+    print(x.sqrt())
+    a: i32 := -2
+    print(a.abs())
+    s := "abc"
+    print(s.len())
+    print(s.is_empty())
+    cloned := s.clone()
+    print(cloned)
+}

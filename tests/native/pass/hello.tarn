@@ -1,0 +1,5 @@
+fn main() {
+    print("hello")
+    print(true)
+    print(false)
+}

@@ -13,6 +13,8 @@ usage:
     tarn resolve <file.tarn>         print what every name resolves to
     tarn types <file.tarn>           print the type of every local and parameter
     tarn ir <file.tarn>              print typed IR; --drops prints executable drops
+    tarn build <file.tarn> [-o path] emit a Linux x86_64 executable
+    tarn run <file.tarn>              build temporarily and execute
     tarn version                     print the compiler version
 
 planned: build, run, test, check, fmt, clean, cache
@@ -27,6 +29,8 @@ fn main() -> ExitCode {
         Some("resolve") => cmd_check(&args[1..], true),
         Some("types") => cmd_types(&args[1..]),
         Some("ir") => cmd_ir(&args[1..]),
+        Some("build") => cmd_native(&args[1..], false),
+        Some("run") => cmd_native(&args[1..], true),
         Some("version" | "--version" | "-V") => {
             println!("tarn {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -35,7 +39,7 @@ fn main() -> ExitCode {
             print!("{USAGE}");
             ExitCode::SUCCESS
         }
-        Some(cmd @ ("build" | "run" | "test" | "fmt" | "clean" | "cache")) => {
+        Some(cmd @ ("test" | "fmt" | "clean" | "cache")) => {
             eprintln!("error: `tarn {cmd}` is not implemented yet (see docs/roadmap.md)");
             ExitCode::from(2)
         }
@@ -202,4 +206,33 @@ fn json_str(out: &mut String, s: &str) {
         }
     }
     out.push('"');
+}
+
+fn cmd_native(args: &[String], run: bool) -> ExitCode {
+    let Some(path) = args.first().filter(|p| !p.starts_with('-')) else {
+        eprintln!("error: usage: tarn {} file.tarn{}", if run { "run" } else { "build" }, if run { "" } else { " [-o path]" });
+        return ExitCode::from(2);
+    };
+    let explicit = if !run && args.len() == 3 && args[1] == "-o" { Some(std::path::PathBuf::from(&args[2])) }
+        else if args.len() == 1 { None }
+        else { eprintln!("error: invalid native command arguments"); return ExitCode::from(2); };
+    let res = match tarn_driver::check(std::path::Path::new(path)) {
+        Ok(r) => r, Err(e) => { eprintln!("error: {e}"); return ExitCode::from(1); }
+    };
+    for d in &res.diagnostics { eprint!("{}", d.render(&res.program.sources)); }
+    if res.has_errors() { return ExitCode::from(1); }
+    let (Some(p), Some(t)) = (&res.drops, &res.typed) else { eprintln!("error: compiler bug: missing post-drop IR"); return ExitCode::from(1); };
+    let output = if run { std::env::temp_dir().join(format!("tarn-run-{}", std::process::id())) }
+        else { explicit.unwrap_or_else(|| std::path::Path::new(path).with_extension("")) };
+    if std::path::Path::new(path).canonicalize().ok() == output.canonicalize().ok() && output.exists() {
+        eprintln!("error: output would overwrite the source file"); return ExitCode::from(1);
+    }
+    if let Err(e) = tarn_backend::build(p, t, &output) { eprintln!("error: {e}"); return ExitCode::from(1); }
+    if !run { return ExitCode::SUCCESS; }
+    let status = std::process::Command::new(&output).status();
+    let _ = std::fs::remove_file(&output);
+    match status {
+        Ok(s) => { use std::os::unix::process::ExitStatusExt; ExitCode::from(s.code().unwrap_or_else(|| 128 + s.signal().unwrap_or(1)).clamp(0,255) as u8) }
+        Err(e) => { eprintln!("error: cannot run executable: {e}"); ExitCode::from(1) }
+    }
 }

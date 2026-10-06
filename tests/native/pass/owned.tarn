@@ -1,0 +1,14 @@
+struct Box {
+    data string
+}
+fn take(b Box) {
+    print(b.data)
+}
+fn main() {
+    b := Box{data: "owned"}
+    take(b)
+    var s = "first"
+    s = "second"
+    print(s)
+    print(s)
+}

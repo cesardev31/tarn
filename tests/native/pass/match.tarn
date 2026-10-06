@@ -1,0 +1,14 @@
+enum Choice {
+    One(i64)
+    Two(i64, i64)
+}
+fn pick(e Choice) i64 {
+    match e {
+        One(x) => return x
+        Two(x, y) => return x + y
+    }
+}
+fn main() {
+    print(pick(Choice.One(7)))
+    print(pick(Choice.Two(20, 22)))
+}

@@ -1,0 +1,8 @@
+fn main() {
+    xs := [3]i64{10, 20, 12}
+    var sum: i64 = 0
+    for x in xs {
+        sum = sum + x
+    }
+    print(sum)
+}

@@ -1,0 +1,13 @@
+fn main() {
+    a: i32 := 20
+    b: i32 := 3
+    print(a + b)
+    print(a - b)
+    print(a * b)
+    print(a / b)
+    print(a % b)
+    x: u64 := 18446744073709551615
+    print(x)
+    n: i8 := -100
+    print(n)
+}

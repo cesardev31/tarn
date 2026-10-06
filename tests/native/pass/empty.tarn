@@ -1,0 +1,10 @@
+struct Empty {
+}
+fn identity(e Empty) Empty {
+    return e
+}
+fn main() {
+    e := Empty{}
+    x := identity(e)
+    print(42)
+}

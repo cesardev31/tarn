@@ -1,0 +1,11 @@
+fn choose(c bool) i64 {
+    if c {
+        return 7
+    }
+    return 9
+}
+fn main() {
+    print(choose(true))
+    print(choose(false))
+    print(1 < 2 && 2 != 3)
+}
