@@ -1,0 +1,256 @@
+// Blocking Linux networking. Opaque descriptors are owned, Transfer, not Share.
+pub struct TcpListener { fd i32 }
+pub struct TcpStream { fd i32 }
+pub struct UdpSocket { fd i32 }
+pub copy struct SocketAddr { data [24]u8 }
+pub copy enum IpAddr {
+    V4([4]u8)
+    V6([16]u8)
+}
+pub copy enum Shutdown {
+    Read
+    Write
+    Both
+}
+pub copy enum ErrorKind {
+    AddressInUse
+    ConnectionRefused
+    ConnectionReset
+    BrokenPipe
+    TimedOut
+    WouldBlock
+    InvalidAddress
+    DnsFailure
+    OtherOs
+    WriteZero
+}
+pub copy struct Error {
+    pub kind ErrorKind
+    code i32
+    domain i32
+}
+pub copy struct RecvFrom {
+    pub count usize
+    pub peer SocketAddr
+}
+copy struct _Raw {
+    domain i32
+    code i32
+    value i64
+    address SocketAddr
+}
+extern "intrinsic" fn _resolve(address &string) _Raw
+extern "intrinsic" fn _socket(address SocketAddr, udp bool) _Raw
+extern "intrinsic" fn _bind(fd i32, address SocketAddr) _Raw
+extern "intrinsic" fn _listen(fd i32) _Raw
+extern "intrinsic" fn _accept(fd i32) _Raw
+extern "intrinsic" fn _connect(fd i32, address SocketAddr) _Raw
+extern "intrinsic" fn _read(fd i32, buffer &mut []u8) _Raw
+extern "intrinsic" fn _write(fd i32, buffer &[]u8) _Raw
+extern "intrinsic" fn _recv(fd i32, buffer &mut []u8) _Raw
+extern "intrinsic" fn _send(fd i32, buffer &[]u8, address SocketAddr) _Raw
+extern "intrinsic" fn _addr(fd i32, peer bool) _Raw
+extern "intrinsic" fn _shutdown(fd i32, how i32) _Raw
+extern "intrinsic" fn _close_listener(value TcpListener) _Raw
+extern "intrinsic" fn _close_stream(value TcpStream) _Raw
+extern "intrinsic" fn _close_udp(value UdpSocket) _Raw
+
+fn _error(raw _Raw) Error {
+    if raw.domain == 1 { return Error{kind: ErrorKind.DnsFailure, code: raw.code, domain: raw.domain} }
+    if raw.domain == 2 { return Error{kind: ErrorKind.InvalidAddress, code: raw.code, domain: raw.domain} }
+    var kind = ErrorKind.OtherOs
+    if raw.code == 98 { kind = ErrorKind.AddressInUse }
+    if raw.code == 111 { kind = ErrorKind.ConnectionRefused }
+    if raw.code == 104 { kind = ErrorKind.ConnectionReset }
+    if raw.code == 32 { kind = ErrorKind.BrokenPipe }
+    if raw.code == 110 { kind = ErrorKind.TimedOut }
+    if raw.code == 11 { kind = ErrorKind.WouldBlock }
+    if raw.code == 22 || raw.code == 99 { kind = ErrorKind.InvalidAddress }
+    return Error{kind: kind, code: raw.code, domain: raw.domain}
+}
+fn _check(raw _Raw) Result<_Raw, Error> {
+    if raw.code != 0 || raw.domain != 0 { return Err(_error(raw)) }
+    return Ok(raw)
+}
+pub fn Error.native_code(&self) i32 { return self.code }
+pub fn Error.is_dns_code(&self) bool { return self.domain == 1 }
+pub fn SocketAddr.port(&self) u16 { return u16(self.data[16]) * u16(256) + u16(self.data[17]) }
+pub fn SocketAddr.is_ipv4(&self) bool { return self.data[18] == u8(4) }
+pub fn SocketAddr.is_ipv6(&self) bool { return self.data[18] == u8(6) }
+pub fn SocketAddr.with_port(self, port u16) SocketAddr {
+    var result = self
+    result.data[16] = u8(port / u16(256))
+    result.data[17] = u8(port % u16(256))
+    return result
+}
+pub fn SocketAddr.ip(&self) IpAddr {
+    if self.is_ipv4() { return IpAddr.V4([4]u8{self.data[0], self.data[1], self.data[2], self.data[3]}) }
+    return IpAddr.V6([16]u8{self.data[0], self.data[1], self.data[2], self.data[3], self.data[4], self.data[5], self.data[6], self.data[7], self.data[8], self.data[9], self.data[10], self.data[11], self.data[12], self.data[13], self.data[14], self.data[15]})
+}
+pub fn resolve(address &string) Result<SocketAddr, Error> {
+    for {
+        raw := _resolve(address)
+        if raw.domain == 0 && raw.code == 4 { continue }
+        checked := try _check(raw)
+        return Ok(checked.address)
+    }
+}
+pub fn listen_tcp(address &string) Result<TcpListener, Error> { return TcpListener.bind(address) }
+pub fn TcpListener.bind(address &string) Result<TcpListener, Error> { return TcpListener.bind_addr(try resolve(address)) }
+pub fn TcpListener.bind_addr(address SocketAddr) Result<TcpListener, Error> {
+    raw := try _open(address, false)
+    listener := TcpListener{fd: i32(raw.value)}
+    try _bound(listener.fd, address)
+    try _listening(listener.fd)
+    return Ok(listener)
+}
+pub fn TcpListener.accept(&mut self) Result<TcpStream, Error> {
+    for {
+        raw := _accept(self.fd)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        checked := try _check(raw)
+        return Ok(TcpStream{fd: i32(checked.value)})
+    }
+}
+pub fn TcpStream.connect(address &string) Result<TcpStream, Error> { return TcpStream.connect_addr(try resolve(address)) }
+pub fn TcpStream.connect_addr(address SocketAddr) Result<TcpStream, Error> {
+    for {
+        raw := try _open(address, false)
+        stream := TcpStream{fd: i32(raw.value)}
+        status := _connect(stream.fd, address)
+        if status.code == 4 && status.domain == 0 { continue }
+        try _check(status)
+        return Ok(stream)
+    }
+}
+pub fn TcpStream.write_all(&mut self, buffer &[]u8) Result<void, Error> {
+    var offset = usize(0)
+    for offset < buffer.len() {
+        count := try self.write(&buffer[offset..])
+        if count == usize(0) { return Err(Error{kind: ErrorKind.WriteZero, code: 0, domain: 0}) }
+        offset = offset + count
+    }
+    return Ok(())
+}
+pub fn TcpStream.shutdown(&mut self, how Shutdown) Result<void, Error> {
+    var direction = i32(2)
+    match how {
+        Shutdown.Read => { direction = i32(0) }
+        Shutdown.Write => { direction = i32(1) }
+        Shutdown.Both => {}
+    }
+    for {
+        raw := _shutdown(self.fd, direction)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        try _check(raw)
+        return Ok(())
+    }
+}
+pub fn UdpSocket.bind(address &string) Result<UdpSocket, Error> { return UdpSocket.bind_addr(try resolve(address)) }
+pub fn UdpSocket.bind_addr(address SocketAddr) Result<UdpSocket, Error> {
+    raw := try _open(address, true)
+    socket := UdpSocket{fd: i32(raw.value)}
+    try _bound(socket.fd, address)
+    return Ok(socket)
+}
+pub fn UdpSocket.recv_from(&mut self, buffer &mut []u8) Result<RecvFrom, Error> {
+    for {
+        raw := _recv(self.fd, buffer)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        checked := try _check(raw)
+        return Ok(RecvFrom{count: usize(checked.value), peer: checked.address})
+    }
+}
+pub fn UdpSocket.send_to(&mut self, buffer &[]u8, peer SocketAddr) Result<usize, Error> {
+    for {
+        raw := _send(self.fd, buffer, peer)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        checked := try _check(raw)
+        return Ok(usize(checked.value))
+    }
+}
+pub fn TcpListener.local_addr(&self) Result<SocketAddr, Error> {
+    for {
+        raw := _addr(self.fd, false)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        checked := try _check(raw)
+        return Ok(checked.address)
+    }
+}
+pub fn TcpListener.close(self) Result<void, Error> {
+    try _check(_close_listener(self))
+    return Ok(())
+}
+pub fn TcpStream.local_addr(&self) Result<SocketAddr, Error> {
+    for {
+        raw := _addr(self.fd, false)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        checked := try _check(raw)
+        return Ok(checked.address)
+    }
+}
+pub fn TcpStream.peer_addr(&self) Result<SocketAddr, Error> {
+    for {
+        raw := _addr(self.fd, true)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        checked := try _check(raw)
+        return Ok(checked.address)
+    }
+}
+pub fn TcpStream.close(self) Result<void, Error> {
+    try _check(_close_stream(self))
+    return Ok(())
+}
+pub fn UdpSocket.local_addr(&self) Result<SocketAddr, Error> {
+    for {
+        raw := _addr(self.fd, false)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        checked := try _check(raw)
+        return Ok(checked.address)
+    }
+}
+pub fn UdpSocket.close(self) Result<void, Error> {
+    try _check(_close_udp(self))
+    return Ok(())
+}
+pub fn TcpStream.read(&mut self, buffer &mut []u8) Result<usize, Error> {
+    for {
+        raw := _read(self.fd, buffer)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        checked := try _check(raw)
+        return Ok(usize(checked.value))
+    }
+}
+pub fn TcpStream.write(&mut self, buffer &[]u8) Result<usize, Error> {
+    for {
+        raw := _write(self.fd, buffer)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        checked := try _check(raw)
+        return Ok(usize(checked.value))
+    }
+}
+
+fn _open(address SocketAddr, udp bool) Result<_Raw, Error> {
+    for {
+        raw := _socket(address, udp)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        return _check(raw)
+    }
+}
+
+fn _bound(fd i32, address SocketAddr) Result<void, Error> {
+    for {
+        raw := _bind(fd, address)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        try _check(raw)
+        return Ok(())
+    }
+}
+fn _listening(fd i32) Result<void, Error> {
+    for {
+        raw := _listen(fd)
+        if raw.code == 4 && raw.domain == 0 { continue }
+        try _check(raw)
+        return Ok(())
+    }
+}

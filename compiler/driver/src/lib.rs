@@ -11,12 +11,16 @@ use tarn_resolve::{ModuleInput, Resolved};
 
 const STRING_SOURCE: &str = include_str!("../../../stdlib/string/string.tarn");
 
+const NET_SOURCE: &str = include_str!("../../../stdlib/net/net.tarn");
+
 const CORE_SOURCE: &str = include_str!("../../../stdlib/core/core.tarn");
 
 pub struct Program {
     pub sources: SourceMap,
     /// (module name, AST); the entry module is first.
     pub modules: Vec<(String, Module)>,
+    /// Embedded source provenance retained for semantic contracts.
+    pub trusted_modules: std::collections::HashSet<String>,
 }
 
 pub struct CheckResult {
@@ -52,20 +56,28 @@ pub fn load(entry: &Path) -> Result<(Program, Vec<Diagnostic>), String> {
 pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>) -> Result<(Program, Vec<Diagnostic>), String> {
     let root = entry.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     let stem = entry.file_stem().and_then(|s| s.to_str()).ok_or("invalid file name")?.to_string();
+    // Entry filenames do not confer reserved stdlib module identity.
+    let stem = if matches!(stem.as_str(), "core" | "net") { format!("entry/{stem}") } else { stem };
     let mut sources = SourceMap::new();
     let mut modules: Vec<(String, Module)> = Vec::new();
     let mut diags = Vec::new();
+    let mut trusted_modules = std::collections::HashSet::new();
     let mut queue = vec![(stem, entry.to_path_buf())];
     while let Some((name, path)) = queue.pop() {
         if modules.iter().any(|(n, _)| *n == name) {
             continue;
         }
-        let text = match overlays.get(&path) {
-            Some(text) => text.clone(),
-            None if name == "string" && !path.is_file() => STRING_SOURCE.to_string(),
-            None => std::fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?,
+        let text = if matches!(name.as_str(), "core" | "net") {
+            trusted_modules.insert(name.clone());
+            if name == "core" { CORE_SOURCE.to_string() } else { NET_SOURCE.to_string() }
+        } else {
+            match overlays.get(&path) {
+                Some(text) => text.clone(),
+                None if name == "string" && !path.is_file() => STRING_SOURCE.to_string(),
+                None => std::fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?,
+            }
         };
-        let display = path.strip_prefix(".").unwrap_or(&path).display().to_string();
+        let display = if trusted_modules.contains(&name) { format!("stdlib/{name}/{name}.tarn") } else { path.strip_prefix(".").unwrap_or(&path).display().to_string() };
         let id = sources.add(display, text);
         let res = tarn_parser::parse_file(id, sources.file(id));
         diags.extend(res.diagnostics);
@@ -73,7 +85,7 @@ pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pat
             if let ItemKind::Import(imp) = &item.kind {
                 let file = root.join(format!("{}.tarn", imp.path));
                 let valid = imp.path.split('/').all(|s| !s.is_empty() && s != "." && s != "..");
-                if valid && (file.is_file() || overlays.contains_key(&file) || imp.path == "string") {
+                if valid && (file.is_file() || overlays.contains_key(&file) || matches!(imp.path.as_str(), "string" | "net")) {
                     queue.push((imp.path.clone(), file));
                 }
             }
@@ -87,8 +99,9 @@ pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pat
         let res = tarn_parser::parse_file(id, sources.file(id));
         diags.extend(res.diagnostics);
         modules.push(("core".to_string(), res.module));
+        trusted_modules.insert("core".to_string());
     }
-    Ok((Program { sources, modules }, diags))
+    Ok((Program { sources, modules, trusted_modules }, diags))
 }
 
 /// Lex, parse and resolve. Resolution only runs on syntactically valid
@@ -108,7 +121,7 @@ pub fn check_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pa
     let mut drops = None;
     let errors = |ds: &[Diagnostic]| ds.iter().any(|d| d.severity == Severity::Error);
     if !errors(&diagnostics) {
-        let inputs: Vec<ModuleInput> = program.modules.iter().map(|(n, m)| ModuleInput { name: n.clone(), ast: m }).collect();
+        let inputs: Vec<ModuleInput> = program.modules.iter().map(|(n, m)| ModuleInput { name: n.clone(), ast: m, trusted_stdlib: program.trusted_modules.contains(n) }).collect();
         let (r, d) = tarn_resolve::resolve(&inputs);
         diagnostics.extend(d);
         // Types only on name-clean programs, for the same reason as above.

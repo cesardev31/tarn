@@ -39,6 +39,8 @@ pub struct ModuleInput<'a> {
     /// Module path as used in imports: `main`, `geometry`, `app/config`.
     pub name: String,
     pub ast: &'a Module,
+    /// Bundled source provenance, never inferred from a user module filename.
+    pub trusted_stdlib: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -305,7 +307,7 @@ mod tests {
         let mut map = SourceMap::new();
         let id = map.add("t.tarn", "struct S {\n}\n\nfn S.get(&self) {\n}\n");
         let parsed = tarn_parser::parse_file(id, map.file(id)).module;
-        let inputs = [crate::ModuleInput { name: "t".into(), ast: &parsed }];
+        let inputs = [crate::ModuleInput { name: "t".into(), ast: &parsed, trusted_stdlib: false }];
         let (r, d) = crate::resolve(&inputs);
         assert!(d.is_empty());
         let tarn_ast::ItemKind::Fn(f) = &parsed.items[1].kind else { panic!() };

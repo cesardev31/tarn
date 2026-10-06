@@ -89,6 +89,13 @@ pub struct Prelude {
 #[derive(Default)]
 pub struct Decls {
     pub task: Option<SymbolId>,
+    pub net_sockets: Vec<SymbolId>,
+    pub net_error: Option<SymbolId>,
+    pub result: Option<SymbolId>,
+    pub net_intrinsics: HashMap<String, SymbolId>,
+    pub mutex: Option<SymbolId>,
+    pub mutex_guard: Option<SymbolId>,
+    pub atomics: HashMap<SymbolId, Ty>,
     pub transfer: Option<SymbolId>,
     pub share: Option<SymbolId>,
     pub native_capabilities: HashMap<SymbolId, crate::NativeCapabilities>,
@@ -142,8 +149,33 @@ impl<'a> Env<'a> {
             channel_fn: get("channel"),
         };
         let decls = Decls { task: ps.get("Task"), transfer: ps.get("Transfer"), share: ps.get("Share"), copy: prelude.copy, ..Decls::default() };
+        let mut decls = decls;
+        decls.result = ps.get("Result");
+        decls.mutex = ps.get("Mutex");
+        decls.mutex_guard = ps.get("MutexGuard");
+        for (name, ty) in [("AtomicBool", "bool"), ("AtomicI32", "i32"), ("AtomicI64", "i64"), ("AtomicU32", "u32"), ("AtomicU64", "u64"), ("AtomicUsize", "usize")] {
+            if let Some(id) = ps.get(name) { decls.atomics.insert(id, primitive(ty)); }
+        }
         let mut env = Env { inputs, r, decls, prelude, diags: Vec::new() };
         env.collect();
+        for (index, input) in inputs.iter().enumerate() {
+            if input.name == "net" && input.trusted_stdlib {
+                let scope = r.scope(r.modules[index].scope);
+                env.decls.net_error = scope.get("Error");
+                for name in ["TcpListener", "TcpStream", "UdpSocket"] {
+                    if let Some(id) = scope.get(name) {
+                        env.decls.net_sockets.push(id);
+                        env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });
+                    }
+                }
+                for id in &scope.symbols {
+                    let symbol = r.symbol(*id);
+                    if symbol.name.starts_with("_") && env.decls.fns.get(id).is_some_and(|sig| sig.abi.as_deref() == Some("intrinsic")) {
+                        env.decls.net_intrinsics.insert(format!("net.{}", symbol.name), *id);
+                    }
+                }
+            }
+        }
         for imp in &r.impls {
             if let (Some(interface), Some(target)) = (imp.interface, imp.target) {
                 if let Some(order) = env.decls.interfaces.get(&interface) {
@@ -281,6 +313,14 @@ impl<'a> Env<'a> {
             generics.extend(binders);
         }
         generics.extend(self.params_of(m, &f.generics));
+        // Trusted bootstrap read copies its payload. Express its restriction
+        // through the existing generic obligation table, not a new conditional
+        // method syntax (ordinary owner bounds remain forbidden by ADR 0015).
+        if f.abi.as_deref() == Some("intrinsic") && f.name.name == "read"
+            && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.mutex_guard)
+            && let (Some(parameter), Some(copy)) = (generics.first(), self.decls.copy) {
+            self.decls.bounds.entry(*parameter).or_default().push(copy);
+        }
         let params: Vec<Ty> = f.params.iter().map(|p| self.lower(m, &p.ty)).collect();
         let ret = f.ret.as_ref().map(|t| self.lower(m, t)).unwrap_or(Ty::Void);
         let receiver = f.receiver.as_ref().map(|r| r.kind);
@@ -301,12 +341,14 @@ impl<'a> Env<'a> {
         parameter_modes.extend(params.iter().map(&passing));
         let offset = usize::from(receiver.is_some());
         let mut sources = Vec::new();
-        let holds = |ty: &Ty| ty_holds_references(ty);
+        let holds = |ty: &Ty| self.decls.may_contain_references(ty);
         // The private Task lang item transfers an owned stored result; it does
         // not manufacture a reference from a bodyless declaration.
         let task_join = f.abi.as_deref() == Some("intrinsic") && f.name.name == "join"
             && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.task);
-        let result = if task_join { ResultContract::Owned } else if !holds(&ret) {
+        let sync_constructor = f.abi.as_deref() == Some("intrinsic") && f.name.name == "new"
+            && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.mutex || self.decls.atomics.contains_key(id));
+        let result = if task_join || sync_constructor { ResultContract::Owned } else if !holds(&ret) {
             if self.decls.is_copy(&ret) { ResultContract::Copy } else { ResultContract::Owned }
         } else if f.body.is_some() {
             ResultContract::InferredBorrow
@@ -491,14 +533,5 @@ pub fn primitive(name: &str) -> Ty {
         "void" => Ty::Void,
         "never" => Ty::Never,
         _ => Ty::Error,
-    }
-}
-
-fn ty_holds_references(ty: &Ty) -> bool {
-    match ty {
-        Ty::Ref(..) | Ty::Fn(..) | Ty::Param(_) | Ty::Any(_) | Ty::Opaque => true,
-        Ty::Adt(_, args) => args.iter().any(ty_holds_references),
-        Ty::Array(elem, _) | Ty::Slice(elem) => ty_holds_references(elem),
-        _ => false,
     }
 }

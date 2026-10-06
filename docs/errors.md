@@ -143,7 +143,7 @@ stream them:
 | E3037 | `array_length_mismatch` | array of length 3 has 2 elements |
 | E3038 | `variant_needs_args` | variant `E.V` takes 1 value |
 | E2026 | `impl_copy` | `Copy` is not implemented with `impl` |
-| E2027 | `intrinsic_outside_core` | `extern "intrinsic"` functions can only be declared in `core` |
+| E2027 | `intrinsic_outside_core` | `extern "intrinsic"` functions require trusted embedded stdlib declarations |
 | W3001 | `unreachable_arm` | this arm can never match |
 | W3002 | `unreachable_code` | unreachable code |
 | E3039 | `slice_by_value` | a slice can only be used through a reference |

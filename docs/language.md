@@ -365,12 +365,15 @@ results whose storage would die in the worker are rejected. Panic in any worker
 aborts the process. Allocation, thread creation/join failure and self-join are
 runtime faults that abort, not recoverable Result values.
 
-Transfer/Share enforcement and scoped loan retention belong to 11B and are not
-implemented. Lexical `scope { ... }` still has a provisional completion marker;
-11A tasks inside it are ordinary handle-owned unscoped tasks. The legacy
+Phase 11B implements Transfer/Share enforcement and lexical scoped completion.
+Captured loans remain live until verified task completion; scopes join before
+borrowed storage is destroyed. Phase 11C implements owned Mutex/guard resources
+and six concrete sequentially consistent atomics. Mutex Transfer and Share both
+require a Transfer payload; guards have neither capability. The legacy
 `spawn call(...)` form remains frontend-provisional and rejected by native codegen.
-Mutex/atomics belong to 11C. Channels, async/await and networking are unavailable.
-See [ADR 0033](adr/0033-safe-native-tasks.md), still proposed for the full phase.
+Channels and async/await remain unavailable. Phase 12A adds blocking networking.
+See [ADR 0033](adr/0033-safe-native-tasks.md), accepted for Phase 11, and
+[ADR 0034](adr/0034-blocking-networking.md) for networking.
 
 ## 13b. Closures (provisional)
 
@@ -448,3 +451,11 @@ Only distinct reference inputs or a borrowed `self` may be listed. Bodies infer
 provenance and cannot override it with a clause. Missing ambiguous contracts still
 reject E4202; malformed clauses reject E3042. External C calls still need unsafe,
 and native C reference/aggregate ABI support remains deferred. See ADRs 0030–0031.
+
+## Blocking networking
+
+Phase 12A implements imported `net` TCP/UDP owners, borrowed byte-slice I/O,
+blocking address resolution and explicit Result errors. Socket moves transfer
+close responsibility; I/O uses mutable receivers and sockets have Transfer but
+not Share. Native destruction follows ordinary post-drop IR. See
+[networking](networking.md) and [ADR 0034](adr/0034-blocking-networking.md).

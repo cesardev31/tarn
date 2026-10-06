@@ -148,8 +148,9 @@ pub(crate) fn verify_dynamic(p: &post::Program, t: &Typed) -> Result<()> {
 }
 pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     let main = p.functions.iter().find(|f| f.decl.name == "main").ok_or_else(|| Error::unsupported("program requires fn main()"))?;
-    if main.decl.param_count != 0 || main.decl.ret != Ty::Void {
-        return Err(Error::unsupported("entry must be fn main() with no return value"));
+    let result_main = matches!(&main.decl.ret, Ty::Adt(id, args) if Some(*id) == t.decls.result && args.len() == 2 && args[0] == Ty::Void && matches!(&args[1], Ty::Adt(e, ts) if Some(*e) == t.decls.net_error && ts.is_empty()));
+    if main.decl.param_count != 0 || (main.decl.ret != Ty::Void && !result_main) {
+        return Err(Error::unsupported("entry must be fn main() or fn main() Result<void, net.Error>"));
     }
     // Only reachable functions are code-generated. Unsupported unused stdlib
     // declarations and generic helpers do not prevent scalar executables.
@@ -211,6 +212,26 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     let task_adapters = emit_task_adapters(&mut module, p, t, &ids)?;
     let mut runtime = HashMap::new();
     for (name, params, returns) in [
+        ("tarn_rt_net_main_error", vec![types::I32, types::I32], vec![]),
+        ("tarn_rt_net_drop", vec![types::I32], vec![]),
+        ("tarn_rt_net_resolve", vec![types::I64; 2], vec![]),
+        ("tarn_rt_net_socket", vec![types::I64, types::I64, types::I8], vec![]),
+        ("tarn_rt_net_bind", vec![types::I64, types::I32, types::I64], vec![]),
+        ("tarn_rt_net_connect", vec![types::I64, types::I32, types::I64], vec![]),
+        ("tarn_rt_net_listen", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_net_accept", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_net_close", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_net_addr", vec![types::I64, types::I32, types::I8], vec![]),
+        ("tarn_rt_net_shutdown", vec![types::I64, types::I32, types::I32], vec![]),
+        ("tarn_rt_net_read", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
+        ("tarn_rt_net_write", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
+        ("tarn_rt_net_recv", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
+        ("tarn_rt_net_send", vec![types::I64, types::I32, types::I64, types::I64, types::I64], vec![]),
+        ("tarn_rt_mutex_create", vec![], vec![types::I64]),
+        ("tarn_rt_mutex_lock", vec![types::I64], vec![]),
+        ("tarn_rt_mutex_unlock", vec![types::I64], vec![]),
+        ("tarn_rt_mutex_destroy", vec![types::I64], vec![]),
+        ("tarn_rt_atomic_destroy", vec![types::I64], vec![]),
         ("tarn_rt_task_spawn", vec![types::I64; 5], vec![types::I64]),
         ("tarn_rt_task_wait", vec![types::I64], vec![types::I64]),
         ("tarn_rt_task_release", vec![types::I64], vec![]),
@@ -234,7 +255,26 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         sig.params = params.into_iter().map(cl::AbiParam::new).collect();
         sig.returns = returns.into_iter().map(cl::AbiParam::new).collect();
         let id = module.declare_function(name, Linkage::Import, &sig).map_err(|e| Error::bug(e.to_string()))?;
-        runtime.insert(name, id);
+        runtime.insert(name.to_owned(), id);
+    }
+    for (name, width) in [("bool", types::I8), ("i32", types::I32), ("i64", types::I64), ("u32", types::I32), ("u64", types::I64), ("usize", types::I64)] {
+        for (op, params, returns) in [
+            ("new", vec![width], vec![types::I64]),
+            ("load", vec![types::I64], vec![width]),
+            ("store", vec![types::I64, width], vec![]),
+            ("swap", vec![types::I64, width], vec![width]),
+            ("compare_exchange", vec![types::I64, width, width], vec![types::I8]),
+            ("fetch_add", vec![types::I64, width], vec![width]),
+            ("fetch_sub", vec![types::I64, width], vec![width]),
+        ] {
+            if name == "bool" && op.starts_with("fetch_") { continue; }
+            let name = format!("tarn_rt_atomic_{name}_{op}");
+            let mut sig = module.make_signature();
+            sig.params.extend(params.into_iter().map(cl::AbiParam::new));
+            sig.returns.extend(returns.into_iter().map(cl::AbiParam::new));
+            let id = module.declare_function(&name, Linkage::Import, &sig).map_err(|e| Error::bug(e.to_string()))?;
+            runtime.insert(name, id);
+        }
     }
     for id in ordered {
         let f = &p.functions[id.0 as usize];
@@ -317,7 +357,7 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         cranelift_codegen::verify_function(&ctx.func, module.isa()).map_err(|e| Error::bug(e.to_string()))?;
         module.define_function(*thunk, &mut ctx).map_err(|e| Error::bug(e.to_string()))?;
     }
-    // libc startup calls the C main shim; internal Tarn main is a void function.
+    // libc startup calls the C main shim; internal Tarn main returns void or Result<void, net.Error>.
     let mut sig = module.make_signature();
     sig.returns.push(cl::AbiParam::new(types::I32));
     let entry = module.declare_function("main", Linkage::Export, &sig).map_err(|e| Error::bug(e.to_string()))?;
@@ -329,7 +369,29 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         let block = b.create_block();
         b.switch_to_block(block);
         let target = module.declare_func_in_func(ids[&main.decl.id], b.func);
-        b.ins().call(target, &[]);
+        if result_main {
+            let l = layout::layout(t, &main.decl.ret)?;
+            if l.variants.len() != 2 || !l.variants[0].iter().all(|(_, ty)| *ty == Ty::Void) || l.variants[1].len() != 1 { return Err(Error::bug("main result layout")); }
+            let slot = b.create_sized_stack_slot(cl::StackSlotData::new(cl::StackSlotKind::ExplicitSlot, l.size, l.align.trailing_zeros() as u8));
+            let addr = b.ins().stack_addr(types::I64, slot, 0);
+            b.ins().call(target, &[addr]);
+            let tag = b.ins().load(types::I32, cl::MemFlags::new(), addr, 0);
+            let success = b.create_block();
+            let failure = b.create_block();
+            let ok = b.ins().icmp_imm(IntCC::Equal, tag, 0);
+            b.ins().brif(ok, success, &[], failure, &[]);
+            b.switch_to_block(failure);
+            let (offset, error_ty) = &l.variants[1][0];
+            let error_layout = layout::layout(t, error_ty)?;
+            if error_layout.fields.len() != 3 { return Err(Error::bug("main error layout")); }
+            let kind = b.ins().load(types::I32, cl::MemFlags::new(), addr, (*offset + error_layout.fields[0].0) as i32);
+            let code = b.ins().load(types::I32, cl::MemFlags::new(), addr, (*offset + error_layout.fields[1].0) as i32);
+            let report = module.declare_func_in_func(runtime["tarn_rt_net_main_error"], b.func);
+            b.ins().call(report, &[kind, code]);
+            let one = b.ins().iconst(types::I32, 1);
+            b.ins().return_(&[one]);
+            b.switch_to_block(success);
+        } else { b.ins().call(target, &[]); }
         let zero = b.ins().iconst(types::I32, 0);
         b.ins().return_(&[zero]);
         b.seal_all_blocks();
@@ -424,7 +486,7 @@ struct Cx<'a, 'b> {
     f: &'b post::Function,
     ids: &'b HashMap<FunctionId, FuncId>,
     thunks: &'b HashMap<FunctionId, FuncId>,
-    runtime: &'b HashMap<&'static str, FuncId>,
+    runtime: &'b HashMap<String, FuncId>,
     task_adapters: &'b HashMap<FunctionId, (FuncId, FuncId)>,
     tables: &'b [(tarn_resolve::SymbolId, Ty, Vec<FunctionId>, DataId)],
     locals: Vec<Slot>,
@@ -517,7 +579,7 @@ impl Cx<'_, '_> {
             self.b.ins().iconst(ty, 0)
         }
     }
-    fn runtime(&mut self, name: &'static str, args: &[cl::Value]) -> Vec<cl::Value> {
+    fn runtime(&mut self, name: &str, args: &[cl::Value]) -> Vec<cl::Value> {
         let target = self.module.declare_func_in_func(self.runtime[name], self.b.func);
         let call = self.b.ins().call(target, args);
         self.b.inst_results(call).to_vec()
@@ -1357,6 +1419,8 @@ impl Cx<'_, '_> {
         Ok(())
     }
     fn intrinsic(&mut self, name: &str, args: &[Val], dest: &Ty) -> Result<Val> {
+        if let Some(result) = self.networking(name, args, dest)? { return Ok(result); }
+        if let Some(result) = self.synchronization(name, args, dest)? { return Ok(result); }
         if args.len() != 1 {
             return Err(Error::unsupported(format!("intrinsic {name}")));
         }
@@ -1470,6 +1534,11 @@ impl Cx<'_, '_> {
         self.drop_at(addr, &ty)
     }
     fn drop_at(&mut self, addr: cl::Value, ty: &Ty) -> Result<()> {
+        if matches!(ty, Ty::Adt(id, _) if self.t.decls.net_sockets.contains(id)) {
+            let fd = self.b.ins().load(types::I32, cl::MemFlags::new(), addr, 0);
+            self.runtime("tarn_rt_net_drop", &[fd]);
+            return Ok(());
+        }
         if self.t.decls.is_copy(ty) || matches!(ty, Ty::Ref(..)) {
             return Ok(());
         }
@@ -1488,6 +1557,22 @@ impl Cx<'_, '_> {
                     let ptr = self.b.ins().iadd_imm(addr, (i * u64::from(size)) as i64);
                     self.drop_at(ptr, elem)?;
                 }
+            }
+            Ty::Adt(id, args) if Some(*id) == self.t.decls.mutex => {
+                // Complete initialized value selected by verified post-drop.
+                let l = layout::layout(self.t, ty)?;
+                let payload = self.b.ins().iadd_imm(addr, i64::from(l.fields[1].0));
+                self.drop_at(payload, &args[0])?;
+                let native = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
+                self.runtime("tarn_rt_mutex_destroy", &[native]);
+            }
+            Ty::Adt(id, _) if Some(*id) == self.t.decls.mutex_guard => {
+                let native = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
+                self.runtime("tarn_rt_mutex_unlock", &[native]);
+            }
+            Ty::Adt(id, _) if self.t.decls.atomics.contains_key(id) => {
+                let native = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
+                self.runtime("tarn_rt_atomic_destroy", &[native]);
             }
             Ty::Adt(id, _) if Some(*id) == self.t.decls.task => {
                 let task = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
@@ -1561,3 +1646,9 @@ fn validate_table(p: &post::Program, t: &Typed, interface: tarn_resolve::SymbolI
     }
     Ok(())
 }
+
+#[path = "synchronization.rs"]
+mod synchronization;
+
+#[path = "networking.rs"]
+mod networking;

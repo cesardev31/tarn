@@ -1,0 +1,67 @@
+fn main() {
+    {
+        a := AtomicI32.new(5)
+        print(a.load())
+        a.store(10)
+        print(a.swap(12))
+        print(a.compare_exchange(12, 15))
+        print(a.compare_exchange(12, 20))
+        print(a.fetch_add(2))
+        print(a.fetch_sub(3))
+        print(a.load())
+        b := a
+        print(b.load())
+    }
+    {
+        a := AtomicI64.new(5)
+        print(a.load())
+        a.store(10)
+        print(a.swap(12))
+        print(a.compare_exchange(12, 15))
+        print(a.compare_exchange(12, 20))
+        print(a.fetch_add(2))
+        print(a.fetch_sub(3))
+        print(a.load())
+        b := a
+        print(b.load())
+    }
+    {
+        a := AtomicU32.new(5)
+        print(a.load())
+        a.store(10)
+        print(a.swap(12))
+        print(a.compare_exchange(12, 15))
+        print(a.compare_exchange(12, 20))
+        print(a.fetch_add(2))
+        print(a.fetch_sub(3))
+        print(a.load())
+        b := a
+        print(b.load())
+    }
+    {
+        a := AtomicU64.new(5)
+        print(a.load())
+        a.store(10)
+        print(a.swap(12))
+        print(a.compare_exchange(12, 15))
+        print(a.compare_exchange(12, 20))
+        print(a.fetch_add(2))
+        print(a.fetch_sub(3))
+        print(a.load())
+        b := a
+        print(b.load())
+    }
+    {
+        a := AtomicUsize.new(5)
+        print(a.load())
+        a.store(10)
+        print(a.swap(12))
+        print(a.compare_exchange(12, 15))
+        print(a.compare_exchange(12, 20))
+        print(a.fetch_add(2))
+        print(a.fetch_sub(3))
+        print(a.load())
+        b := a
+        print(b.load())
+    }
+}

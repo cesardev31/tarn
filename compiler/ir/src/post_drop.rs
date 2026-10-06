@@ -129,6 +129,7 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
         mirror.functions.push(decl);
     }
     let mut errors = crate::verify(&mirror);
+    errors.extend(crate::network_abi::verify(t));
     for f in &p.functions {
         let mut err = |msg: String| errors.push(format!("{}: {msg}", f.decl.name));
         if !f.decl.blocks.is_empty() {
@@ -183,6 +184,22 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
             }
         }
         for b in &f.blocks {
+            if let Terminator::Call { callee: Callee::Intrinsic(name), args, dest, .. } = &b.term {
+                if name.starts_with("net._") {
+                    let valid = t.decls.net_intrinsics.get(name).and_then(|id| t.decls.fns.get(id)).is_some_and(|sig| {
+                        sig.abi.as_deref() == Some("intrinsic") && sig.generics.is_empty() && sig.receiver.is_none()
+                        && sig.params.len() == args.len() && place_ty(&f.decl, t, dest) == Some(sig.ret.clone())
+                        && args.iter().zip(&sig.params).all(|(arg, ty)| match arg {
+                            Operand::Copy(place) => t.decls.is_copy(ty) && place_ty(&f.decl, t, place).as_ref() == Some(ty),
+                            Operand::Move(place) => place_ty(&f.decl, t, place).as_ref() == Some(ty),
+                            Operand::Const(crate::Const::Int(_, i)) => *ty == Ty::Int(*i),
+                            Operand::Const(crate::Const::Bool(_)) => *ty == Ty::Bool,
+                            Operand::Const(_) => false,
+                        })
+                    });
+                    if !valid { err("invalid network intrinsic metadata".into()); }
+                }
+            }
             if let Terminator::Call { callee: Callee::TaskSpawn { worker, drop_result, scoped, .. }, args, dest, spawn, .. } = &b.term {
                 let valid = p.functions.get(worker.0 as usize).zip(p.functions.get(drop_result.0 as usize)).is_some_and(|(wf, df)| {
                     wf.decl.param_count == 1 && df.decl.param_count == 1 && df.decl.ret == Ty::Void

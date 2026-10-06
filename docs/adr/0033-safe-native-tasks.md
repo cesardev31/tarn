@@ -1,8 +1,7 @@
 # ADR 0033: safe native tasks and structured completion
 
-Status: proposed for phase 11. Sub-stage 11A implements native handle-owned
-tasks; 11B capabilities/scoped loans and 11C synchronization are pending approval.
-Do not mark this ADR accepted before all three sub-stages are validated.
+Status: accepted. Phases 11A, 11B and 11C implement and validate the native v0
+model below. Async I/O/networking (Phase 12) is not authorized by this ADR.
 
 ## Ownership boundary
 
@@ -21,8 +20,9 @@ not extend its provenance. Unscoped result types may not contain loans whose
 storage could die before task completion/result transfer.
 
 The legacy `spawn call(...)` stays frontend-provisional and native-unsupported.
-`scope { ... }` retains a provisional completion marker; in 11A that marker has no
-child records and native tasks inside remain handle-owned unscoped tasks.
+`scope { ... }` initially retained a provisional completion marker in 11A.
+Phase 11B implements scoped completion using owned handles and scope witness
+loans as specified below.
 Compatibility or migration must be explicit;
 ordinary calls must never accidentally execute synchronously as spawn recovery.
 
@@ -66,7 +66,7 @@ mutation requires exclusive loans or declared synchronization.
 
 ## Cross-thread capabilities
 
-Proposed Tarn capabilities are `Transfer` (owned move between tasks) and `Share`
+Tarn capabilities are `Transfer` (owned move between tasks) and `Share`
 (concurrent shared access). Neither implies Copy, and neither is size-based.
 Primitive values and strings qualify. Arrays and normal ADTs qualify structurally
 only when every substituted field/payload qualifies. Recursive queries need a
@@ -97,8 +97,7 @@ T. All v0 operations use documented sequential consistency. Relaxed/acquire/rele
 selection and a richer memory model remain deferred. Atomic storage cannot be
 accessed through ordinary unsynchronized mutable projections. Sharing an owner
 needs deliberate storage ownership (for example a narrowly modeled shared owner),
-not accidental Copy of a unique allocation pointer. Exact public constructors and
-shared-owner API remain implementation design questions.
+not accidental Copy of a unique allocation pointer. The exact constructors and shared-use API are resolved by the 11C contract below.
 
 ## Runtime and post-drop
 
@@ -137,10 +136,11 @@ callable, dynamic, drop and native regression gates.
 No async/await, futures, reactor, green threads, work stealing, cancellation,
 detach, user destructors, unwinding, optimizer, LLVM, package manager or platform
 expansion. Public join returns R directly and scoped spawn uses lexical scope.
-Native contract source spelling, mutex shared ownership and the exact atomic
-surface remain unresolved before this ADR can become accepted. Native tasks,
-capability enforcement and scoped loan retention are implemented by 11A/11B;
-synchronization remains unimplemented.
+Native authority is granted only by the trusted declaration catalog; a public
+contract annotation language is deferred, not required by the implemented v0 API.
+Shared synchronization uses ordinary borrowed owners and scoped completion; no
+reference-counted owner is needed. Mutex and atomic decisions are resolved below.
+Conservative callable and scoped-result restrictions are deliberate v0 limits.
 
 ## 11A private runtime allocation (implementation contract)
 
@@ -218,7 +218,115 @@ cannot be passed into ordinary functions or captured by other callables; project
 joins retain aggregate-level loans conservatively.
 
 The completion report and validation scope are in
-[phase 11B report](../scoped-tasks-report.md). This ADR remains proposed: shared
-mutex ownership/guards, atomic storage/API and trusted synchronization contracts
-remain phase 11C work requiring separate approval. No synchronization surface,
-scheduler or optimization was implemented in 11B.
+[phase 11B report](../scoped-tasks-report.md). Synchronization was subsequently
+approved and implemented in 11C. The earlier stage reports remain historical
+checkpoints; the complete current model is in [the Phase 11 report](../phase-11-report.md).
+
+
+## 11C synchronization contract
+
+### Mutex owner and capabilities
+
+Mutex<T> owns its native mutex allocation and an inline, canonically aligned T.
+Mutex.new(value) moves the payload in; its old binding cannot be reused. Ordinary
+owner moves transport the initialized payload and unique private native lane;
+they do not initialize another pthread mutex. Every initialized owner is destroyed
+once. Neither the owner nor its private native pointer is exposed as a Copy value.
+
+Both Transfer and Share for Mutex<T> require T: Transfer. Share for T is not
+required: the mutex serializes payload access. This differs deliberately from
+ordinary structural shared observation and is an explicit trusted synchronization
+contract. It does not contradict the existing reference rules: &Mutex<T> transfers
+when Mutex<T> is Share, while its ordinary loan must still cover completion.
+Tests include shared Mutex<&mut Counter>, whose payload is Transfer and not Share.
+Unknown/generic payloads without Transfer evidence remain rejected across tasks.
+
+### Guard ownership, provenance and access
+
+lock(&self) returns unique owned MutexGuard<T>, carrying a shared loan of the
+mutex through ordinary result provenance. The guard is never Copy, Transfer or
+Share. A whole guard move transfers both the held loan and unlock responsibility.
+Guard-containing aggregates and returned guards retain that provenance. Its
+verified destruction is a liveness use of the borrowed mutex, even if source code
+never subsequently reads the guard. An owner cannot move, overwrite or die while
+that destruction remains outstanding.
+
+The minimal method API is:
+
+```tarn
+var guard = mutex.lock()
+old := guard.read()           // T must be Copy
+guard.replace(old + 1)       // returns the old T, moves the new T in
+```
+
+For an owned/aggregate payload use guard.value(), which returns &mut T borrowing
+&mut guard. For example guard.value().count = guard.value().count + 1. Payload
+references cannot outlive, move past or overlap incompatible use of that guard.
+replace(&mut self, value T) T exchanges ownership; it does not clone or discard
+an owned resource. The returned old value follows ordinary destruction. read's
+Copy restriction is supplied by the trusted intrinsic catalog using existing
+generic obligations; conditional method-owner bounds remain unsupported by
+ADR 0015. No dereference syntax, public raw storage or separate lifetime checker
+was added. Generic reference-bearing replace results retain conservative inflow
+from receiver and arguments; they may keep loans longer than strictly necessary.
+
+### Verified destruction and native mechanics
+
+Existing post-drop Value and conditional Guard plans authorize destruction.
+Complete Mutex destruction uses canonical T destruction glue, then native mutex
+destruction/free. Guard destruction calls unlock, with no additional logical
+ownership boolean in C. Dead/moved storage never executes a destruction plan.
+Conditional initialization, moves, overwrite, self-assignment and all normal early
+exits use existing initialization flags and drop elaboration. No user-defined Drop
+or unwinding is introduced. The backend executes the selected plans and validates
+ABI shapes; it never queries ownership, loans or provenance.
+
+Private helpers tarn_rt_mutex_create/lock/unlock/destroy allocate and operate
+pthread_mutex_t only. They never interpret generic T or run a T destructor.
+Guard payload address lanes point into the borrowed owner; ordinary borrowing
+keeps that address stable. Native failures abort. There is no poisoning because
+panic aborts the process. Locks are not recursive/reentrant. Locking the same
+mutex while retaining its guard, including waiting for a child that needs that
+lock, may deadlock. No owner-thread tracking or deadlock detector is promised.
+
+### Atomics
+
+Only AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicU64 and AtomicUsize exist.
+Each is a unique non-Copy owner of private heap-backed C11 atomic scalar storage.
+Each explicitly has Transfer and Share, independently of Copy and the ordinary
+scalar capability derivation. The scalar cannot be projected or mutated through
+ordinary references. Owner moves and destruction use ordinary resource semantics.
+
+All Tarn v0 atomic operations are sequentially consistent, including unsuccessful
+compare_exchange. There are no memory-order arguments. new initializes storage;
+load observes, store replaces, swap returns the old value. Strong
+compare_exchange(expected, replacement) returns bool: true exactly when comparison
+succeeds and replacement occurs; false leaves storage unchanged. Returning success
+alone avoids inventing an error type or changing Result/Option semantics. AtomicBool
+supports those operations only. Integer atomics additionally offer fetch_add and
+fetch_sub, each returning the previous scalar.
+
+Fetch arithmetic is checked, matching ordinary Tarn integer arithmetic. Overflow
+or underflow aborts before a write; neither signed nor unsigned values wrap.
+Sequentially consistent CAS loops check each observed value and retry failed
+exchanges. Signed bound tests avoid evaluating overflowing C expressions or
+negating the minimum integer. An observed overflowing attempt may abort even if
+another worker subsequently changes the scalar; the process has abort-only faults.
+Private concrete runtime helpers use matching scalar ABI widths; free releases
+storage. No generic atomics, public barriers, relaxed orders or synchronization
+bypass exist.
+
+### Acceptance evidence
+
+The complete existing regression suite and added native synchronization gates pass.
+Eight Tarn workers deterministically perform 40,000 mutex increments and 40,000
+atomic increments. A private barrier-coordinated runtime gate performs 160,000 of
+each with eight simultaneous workers under undefined-behavior instrumentation.
+All six atomic APIs, success/failure comparisons and each integer boundary are
+covered. Exact destruction traces cover guard/owner moves, early exits, conditional
+initialization, overwrite, self-assignment, nested locks, and owned payload cleanup.
+Canonical safety rejections and both mutation corpora cover synchronization;
+ABI corruption rejects and trace oracles detect removed/duplicated unlocks.
+No Phase 11 decision required by this v0 model remains unresolved. General native
+annotation syntax, richer callable evidence and borrowed scoped results remain
+future extensions, not promises made by acceptance.

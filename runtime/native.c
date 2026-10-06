@@ -118,3 +118,222 @@ void tarn_rt_task_drop(TarnTask *task) {
     task->drop_result(result);
     tarn_rt_task_release(task);
 }
+
+
+/* Private 11C ABI: native mechanics only. Payloads and destruction belong to
+ * verified Tarn values. No recursive locking, poisoning or ownership bit. */
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <limits.h>
+typedef struct { pthread_mutex_t mutex; } TarnMutex;
+static void tarn_sync_trace(const char *event) {
+    if (getenv("TARN_TRACE_SYNC")) {
+        flockfile(stderr); fprintf(stderr, "sync:%s\n", event); funlockfile(stderr);
+    }
+}
+TarnMutex *tarn_rt_mutex_create(void) {
+    TarnMutex *m = malloc(sizeof(*m));
+    if (!m || pthread_mutex_init(&m->mutex, NULL)) abort();
+    tarn_sync_trace("create");
+    return m;
+}
+void tarn_rt_mutex_lock(TarnMutex *m) {
+    if (pthread_mutex_lock(&m->mutex)) abort();
+    tarn_sync_trace("lock");
+}
+void tarn_rt_mutex_unlock(TarnMutex *m) {
+    tarn_sync_trace("unlock");
+    if (pthread_mutex_unlock(&m->mutex)) abort();
+}
+void tarn_rt_mutex_destroy(TarnMutex *m) {
+    if (pthread_mutex_destroy(&m->mutex)) abort();
+    tarn_sync_trace("destroy");
+    free(m);
+}
+
+/* Each scalar is real C11 atomic storage. All operations, including failure
+ * of compare/exchange, are sequentially consistent. Never expose its address. */
+#define TARN_ATOMIC(NAME, TYPE) \
+typedef struct { _Atomic(TYPE) value; } TarnAtomic##NAME; \
+TarnAtomic##NAME *tarn_rt_atomic_##NAME##_new(TYPE value) { \
+    TarnAtomic##NAME *a = malloc(sizeof(*a)); if (!a) abort(); \
+    atomic_init(&a->value, value); return a; \
+} \
+TYPE tarn_rt_atomic_##NAME##_load(TarnAtomic##NAME *a) { \
+    return atomic_load_explicit(&a->value, memory_order_seq_cst); \
+} \
+void tarn_rt_atomic_##NAME##_store(TarnAtomic##NAME *a, TYPE value) { \
+    atomic_store_explicit(&a->value, value, memory_order_seq_cst); \
+} \
+TYPE tarn_rt_atomic_##NAME##_swap(TarnAtomic##NAME *a, TYPE value) { \
+    return atomic_exchange_explicit(&a->value, value, memory_order_seq_cst); \
+} \
+uint8_t tarn_rt_atomic_##NAME##_compare_exchange(TarnAtomic##NAME *a, TYPE expected, TYPE value) { \
+    return atomic_compare_exchange_strong_explicit(&a->value, &expected, value, memory_order_seq_cst, memory_order_seq_cst); \
+}
+TARN_ATOMIC(bool, uint8_t)
+TARN_ATOMIC(i32, int32_t)
+TARN_ATOMIC(i64, int64_t)
+TARN_ATOMIC(u32, uint32_t)
+TARN_ATOMIC(u64, uint64_t)
+TARN_ATOMIC(usize, uintptr_t)
+
+/* Checked CAS loops: failed exchanges retry from the new observed value.
+ * Overflow aborts without writing; no signed C overflow is ever evaluated. */
+#define TARN_ATOMIC_SIGNED(NAME, TYPE, MINIMUM, MAXIMUM) \
+TYPE tarn_rt_atomic_##NAME##_fetch_add(TarnAtomic##NAME *a, TYPE value) { \
+    TYPE old = atomic_load_explicit(&a->value, memory_order_seq_cst); \
+    for (;;) { \
+        if ((value > 0 && old > MAXIMUM - value) || (value < 0 && old < MINIMUM - value)) tarn_rt_fault(); \
+        TYPE next = old + value; \
+        if (atomic_compare_exchange_strong_explicit(&a->value, &old, next, memory_order_seq_cst, memory_order_seq_cst)) return old; \
+    } \
+} \
+TYPE tarn_rt_atomic_##NAME##_fetch_sub(TarnAtomic##NAME *a, TYPE value) { \
+    TYPE old = atomic_load_explicit(&a->value, memory_order_seq_cst); \
+    for (;;) { \
+        if ((value > 0 && old < MINIMUM + value) || (value < 0 && old > MAXIMUM + value)) tarn_rt_fault(); \
+        TYPE next = old - value; \
+        if (atomic_compare_exchange_strong_explicit(&a->value, &old, next, memory_order_seq_cst, memory_order_seq_cst)) return old; \
+    } \
+}
+#define TARN_ATOMIC_UNSIGNED(NAME, TYPE, MAXIMUM) \
+TYPE tarn_rt_atomic_##NAME##_fetch_add(TarnAtomic##NAME *a, TYPE value) { \
+    TYPE old = atomic_load_explicit(&a->value, memory_order_seq_cst); \
+    for (;;) { \
+        if (old > MAXIMUM - value) tarn_rt_fault(); \
+        TYPE next = old + value; \
+        if (atomic_compare_exchange_strong_explicit(&a->value, &old, next, memory_order_seq_cst, memory_order_seq_cst)) return old; \
+    } \
+} \
+TYPE tarn_rt_atomic_##NAME##_fetch_sub(TarnAtomic##NAME *a, TYPE value) { \
+    TYPE old = atomic_load_explicit(&a->value, memory_order_seq_cst); \
+    for (;;) { \
+        if (old < value) tarn_rt_fault(); \
+        TYPE next = old - value; \
+        if (atomic_compare_exchange_strong_explicit(&a->value, &old, next, memory_order_seq_cst, memory_order_seq_cst)) return old; \
+    } \
+}
+TARN_ATOMIC_SIGNED(i32, int32_t, INT32_MIN, INT32_MAX)
+TARN_ATOMIC_SIGNED(i64, int64_t, INT64_MIN, INT64_MAX)
+TARN_ATOMIC_UNSIGNED(u32, uint32_t, UINT32_MAX)
+TARN_ATOMIC_UNSIGNED(u64, uint64_t, UINT64_MAX)
+TARN_ATOMIC_UNSIGNED(usize, uintptr_t, UINTPTR_MAX)
+void tarn_rt_atomic_destroy(void *a) { free(a); }
+
+/* Private blocking networking bridge. No ownership inference or public errno API. */
+#include <errno.h>
+#include <stddef.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+typedef struct { uint8_t bytes[24]; } TarnNetAddr;
+typedef struct { int32_t domain, code; int64_t value; TarnNetAddr address; } TarnNetRaw;
+_Static_assert(sizeof(TarnNetRaw) == 40 && offsetof(TarnNetRaw, address) == 16, "network ABI");
+static void net_init(TarnNetRaw *out) { memset(out, 0, sizeof(*out)); }
+static void net_status(TarnNetRaw *out, int64_t value) { out->value = value; if (value < 0) out->code = errno; }
+static void net_trace(const char *event, int fd) {
+    if (getenv("TARN_TRACE_NET")) { flockfile(stderr); fprintf(stderr, "net:%s:%d\n", event, fd); funlockfile(stderr); }
+}
+static int net_native(const TarnNetAddr *address, struct sockaddr_storage *storage, socklen_t *len) {
+    memset(storage, 0, sizeof(*storage));
+    if (address->bytes[18] == 4) {
+        struct sockaddr_in *a = (struct sockaddr_in *)storage;
+        a->sin_family = AF_INET; memcpy(&a->sin_addr, address->bytes, 4); memcpy(&a->sin_port, address->bytes + 16, 2);
+        *len = sizeof(*a); return AF_INET;
+    }
+    if (address->bytes[18] == 6) {
+        struct sockaddr_in6 *a = (struct sockaddr_in6 *)storage;
+        a->sin6_family = AF_INET6; memcpy(&a->sin6_addr, address->bytes, 16); memcpy(&a->sin6_port, address->bytes + 16, 2);
+        uint32_t scope; memcpy(&scope, address->bytes + 20, 4); a->sin6_scope_id = ntohl(scope);
+        *len = sizeof(*a); return AF_INET6;
+    }
+    errno = EINVAL; return -1;
+}
+static void net_address(TarnNetAddr *address, const struct sockaddr *sa) {
+    memset(address, 0, sizeof(*address));
+    if (sa->sa_family == AF_INET) {
+        const struct sockaddr_in *a = (const struct sockaddr_in *)sa;
+        memcpy(address->bytes, &a->sin_addr, 4); memcpy(address->bytes + 16, &a->sin_port, 2); address->bytes[18] = 4;
+    } else if (sa->sa_family == AF_INET6) {
+        const struct sockaddr_in6 *a = (const struct sockaddr_in6 *)sa;
+        memcpy(address->bytes, &a->sin6_addr, 16); memcpy(address->bytes + 16, &a->sin6_port, 2); address->bytes[18] = 6;
+        uint32_t scope = htonl(a->sin6_scope_id); memcpy(address->bytes + 20, &scope, 4);
+    } else abort(); /* bridge only creates IPv4/IPv6 sockets */
+}
+void tarn_rt_net_resolve(TarnNetRaw *out, const TarnString *endpoint) {
+    net_init(out);
+    if (!endpoint->len || endpoint->len > 4096 || memchr(endpoint->bytes, 0, endpoint->len)) { out->domain = 2; out->code = EINVAL; return; }
+    char *text = malloc(endpoint->len + 1); if (!text) abort();
+    memcpy(text, endpoint->bytes, endpoint->len); text[endpoint->len] = 0;
+    char *host = text, *port = NULL;
+    if (*text == '[') { char *end = strchr(text, ']'); if (end && end[1] == ':') { *end = 0; host++; port = end + 2; } }
+    else { char *colon = strrchr(text, ':'); if (colon && !memchr(text, ':', (size_t)(colon - text))) { *colon = 0; port = colon + 1; } }
+    unsigned number = 0; int valid = port && *port;
+    if (valid) for (const char *c = port; *c; c++) { if (*c < '0' || *c > '9' || number > 65535 / 10) { valid = 0; break; } number = number * 10 + (unsigned)(*c - '0'); if (number > 65535) { valid = 0; break; } }
+    if (!valid) { free(text); out->domain = 2; out->code = EINVAL; return; }
+    struct addrinfo hints = {0}, *list = NULL;
+    hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_STREAM; hints.ai_flags = AI_NUMERICSERV | (!*host ? AI_PASSIVE : 0);
+    int error = getaddrinfo(*host ? host : NULL, port, &hints, &list);
+    if (error) { out->domain = error == EAI_SYSTEM ? 0 : 1; out->code = error == EAI_SYSTEM ? errno : error; free(text); return; }
+    struct addrinfo *choice = NULL;
+    for (struct addrinfo *a = list; a; a = a->ai_next) { if (a->ai_family == AF_INET) { choice = a; break; } if (!choice && a->ai_family == AF_INET6) choice = a; }
+    if (choice) net_address(&out->address, choice->ai_addr); else { out->domain = 1; out->code = EAI_FAMILY; }
+    freeaddrinfo(list); free(text);
+}
+void tarn_rt_net_socket(TarnNetRaw *out, const TarnNetAddr *address, uint8_t udp) {
+    net_init(out); struct sockaddr_storage sa; socklen_t len;
+    int family = net_native(address, &sa, &len);
+    if (family < 0) { out->code = errno; return; }
+    net_status(out, socket(family, udp ? SOCK_DGRAM : SOCK_STREAM, 0));
+    if (!out->code) net_trace("open", (int)out->value);
+}
+void tarn_rt_net_bind(TarnNetRaw *out, int32_t fd, const TarnNetAddr *address) {
+    net_init(out); struct sockaddr_storage sa; socklen_t len;
+    if (net_native(address, &sa, &len) < 0) { out->code = errno; return; }
+    net_status(out, bind(fd, (struct sockaddr *)&sa, len));
+}
+void tarn_rt_net_listen(TarnNetRaw *out, int32_t fd) { net_init(out); net_status(out, listen(fd, SOMAXCONN)); }
+void tarn_rt_net_accept(TarnNetRaw *out, int32_t fd) { net_init(out); net_status(out, accept(fd, NULL, NULL)); if (!out->code) net_trace("open", (int)out->value); }
+void tarn_rt_net_connect(TarnNetRaw *out, int32_t fd, const TarnNetAddr *address) {
+    net_init(out); struct sockaddr_storage sa; socklen_t len;
+    if (net_native(address, &sa, &len) < 0) { out->code = errno; return; }
+    net_status(out, connect(fd, (struct sockaddr *)&sa, len));
+}
+void tarn_rt_net_read(TarnNetRaw *out, int32_t fd, uint8_t *bytes, uint64_t len) {
+    net_init(out); if (len) net_status(out, recv(fd, bytes, len, 0));
+}
+void tarn_rt_net_write(TarnNetRaw *out, int32_t fd, const uint8_t *bytes, uint64_t len) { net_init(out); net_status(out, send(fd, bytes, len, MSG_NOSIGNAL)); }
+void tarn_rt_net_recv(TarnNetRaw *out, int32_t fd, uint8_t *bytes, uint64_t len) {
+    net_init(out); struct sockaddr_storage sa; socklen_t size = sizeof(sa);
+    net_status(out, recvfrom(fd, bytes, len, 0, (struct sockaddr *)&sa, &size));
+    if (!out->code) net_address(&out->address, (struct sockaddr *)&sa);
+}
+void tarn_rt_net_send(TarnNetRaw *out, int32_t fd, const uint8_t *bytes, uint64_t len, const TarnNetAddr *address) {
+    net_init(out); struct sockaddr_storage sa; socklen_t size;
+    if (net_native(address, &sa, &size) < 0) { out->code = errno; return; }
+    net_status(out, sendto(fd, bytes, len, MSG_NOSIGNAL, (struct sockaddr *)&sa, size));
+}
+void tarn_rt_net_addr(TarnNetRaw *out, int32_t fd, uint8_t peer) {
+    net_init(out); struct sockaddr_storage sa; socklen_t size = sizeof(sa);
+    net_status(out, peer ? getpeername(fd, (struct sockaddr *)&sa, &size) : getsockname(fd, (struct sockaddr *)&sa, &size));
+    if (!out->code) net_address(&out->address, (struct sockaddr *)&sa);
+}
+void tarn_rt_net_shutdown(TarnNetRaw *out, int32_t fd, int32_t how) { net_init(out); net_status(out, shutdown(fd, how)); }
+void tarn_rt_net_close(TarnNetRaw *out, int32_t fd) {
+    /* Observe the release attempt before close makes fd reusable by another
+     * task. Logging after close can misorder reuse and falsely report two owners.
+     * This is only test observation; the syscall remains the actual release. */
+    net_trace("close", fd);
+    net_init(out); net_status(out, close(fd));
+    if (out->code == EBADF) abort(); /* impossible with a verified live owner */
+    /* Linux consumes fd even when close reports EINTR: never retry. */
+}
+void tarn_rt_net_drop(int32_t fd) { TarnNetRaw out; tarn_rt_net_close(&out, fd); }
+
+void tarn_rt_net_main_error(uint32_t kind, int32_t code) {
+    static const char *names[] = {"address in use", "connection refused", "connection reset", "broken pipe", "timed out", "would block", "invalid address", "DNS failure", "other OS error", "write made no progress"};
+    if (kind >= sizeof(names) / sizeof(names[0])) abort();
+    fprintf(stderr, "network error: %s (native code %" PRId32 ")\n", names[kind], code);
+}

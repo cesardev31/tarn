@@ -1451,7 +1451,8 @@ impl<'a, 'l> Builder<'a, 'l> {
                         let op = self.arg(a);
                         match op {
                             Operand::Copy(_) | Operand::Move(_) => {
-                                let ty = self.ty(a);
+                                let place = match &op { Operand::Copy(p) | Operand::Move(p) => p, _ => unreachable!() };
+                                let ty = crate::post_drop::place_ty(&self.f, self.lx.t, place).expect("checked argument place");
                                 let t = self.new_local(ty.clone(), LocalKind::Temp, None, None, false, a.span);
                                 self.assign(Place::local(t), Rvalue::Use(op), a.span);
                                 self.read(Place::local(t), &ty)

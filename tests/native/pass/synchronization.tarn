@@ -1,0 +1,64 @@
+struct Counter { value i64 }
+fn mutex_worker(mutex &Mutex<i64>) {
+    for i in 0..5000 {
+        var guard = mutex.lock()
+        value := guard.read()
+        guard.replace(value + 1)
+    }
+}
+fn atomic_worker(counter &AtomicI64) {
+    for i in 0..5000 { counter.fetch_add(1) }
+}
+fn read_worker(mutex &Mutex<i64>) i64 {
+    guard := mutex.lock()
+    return guard.read()
+}
+fn main() {
+    mutex := Mutex.new(i64(0))
+    scope {
+        spawn fn() { mutex_worker(&mutex) }
+        spawn fn() { mutex_worker(&mutex) }
+        spawn fn() { mutex_worker(&mutex) }
+        spawn fn() { mutex_worker(&mutex) }
+        spawn fn() { mutex_worker(&mutex) }
+        spawn fn() { mutex_worker(&mutex) }
+        spawn fn() { mutex_worker(&mutex) }
+        spawn fn() { mutex_worker(&mutex) }
+    }
+    { guard := mutex.lock()
+      print(guard.read()) }
+    scope {
+        a := spawn fn() i64 { return read_worker(&mutex) }
+        b := spawn fn() i64 { return read_worker(&mutex) }
+        c := spawn fn() i64 { return read_worker(&mutex) }
+        d := spawn fn() i64 { return read_worker(&mutex) }
+        print(a.join() + b.join() + c.join() + d.join())
+    }
+    counter := AtomicI64.new(0)
+    scope {
+        spawn fn() { atomic_worker(&counter) }
+        spawn fn() { atomic_worker(&counter) }
+        spawn fn() { atomic_worker(&counter) }
+        spawn fn() { atomic_worker(&counter) }
+        spawn fn() { atomic_worker(&counter) }
+        spawn fn() { atomic_worker(&counter) }
+        spawn fn() { atomic_worker(&counter) }
+        spawn fn() { atomic_worker(&counter) }
+    }
+    print(counter.load())
+    print(counter.compare_exchange(40000, 42))
+    print(counter.compare_exchange(40000, 99))
+    print(counter.swap(7))
+    print(counter.fetch_add(10))
+    print(counter.fetch_sub(2))
+    print(counter.load())
+    owner := AtomicBool.new(false)
+    scope {
+        spawn fn() { owner.store(true) }
+        spawn fn() { owner.load() }
+    }
+    print(owner.load())
+    print(owner.compare_exchange(true, false))
+    print(owner.swap(true))
+    print(owner.load())
+}

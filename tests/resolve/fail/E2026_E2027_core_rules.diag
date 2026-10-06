@@ -6,7 +6,7 @@ error[E2026]: `Copy` is not implemented with `impl`
   |
   = help: declare the type with the `copy` keyword: `copy struct T { ... }` (ADR 0021)
 
-error[E2027]: `extern "intrinsic"` functions can only be declared in `core`
+error[E2027]: `extern "intrinsic"` functions require trusted embedded stdlib declarations
  --> tests/resolve/fail/E2026_E2027_core_rules.tarn:7:23
   |
 7 | extern "intrinsic" fn magic() i32

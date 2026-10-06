@@ -133,9 +133,9 @@ impl<'a> Cx<'a> {
                     };
                     self.declare(scope, sym, m, "E2002");
                 }
-                ItemKind::Fn(f) if f.abi.as_deref() == Some("intrinsic") && Some(m) != self.core_module() => {
+                ItemKind::Fn(f) if f.abi.as_deref() == Some("intrinsic") && !(self.inputs[m.0 as usize].trusted_stdlib && matches!(self.inputs[m.0 as usize].name.as_str(), "core" | "net")) => {
                     self.diags.push(
-                        Diagnostic::error("E2027", "intrinsic_outside_core", "`extern \"intrinsic\"` functions can only be declared in `core`")
+                        Diagnostic::error("E2027", "intrinsic_outside_core", "`extern \"intrinsic\"` functions require trusted embedded stdlib declarations")
                             .primary(f.name.span, "")
                             .help("use `extern \"C\"` to call a C function"),
                     );

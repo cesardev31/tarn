@@ -135,7 +135,7 @@ impl<'a> Fx<'a> {
             Fx { f, t, prov, loans: Vec::new(), loan_at: HashMap::new(), nl: f.locals.len(), live: Vec::new(), live_out: Vec::new(), diags: Vec::new(), reported: HashSet::new() };
         // Placeholder loans: one per reference-holding parameter.
         for (i, l) in f.params().enumerate() {
-            if may_hold_refs(&f.local(l).ty) || t.decls.contains_task(&f.local(l).ty) {
+            if t.decls.may_contain_references(&f.local(l).ty) || t.decls.contains_task(&f.local(l).ty) {
                 let kind = if matches!(f.local(l).ty, Ty::Ref(true, _)) { LoanKind::Mutable } else { LoanKind::Shared };
                 fx.loans.push(Loan { kind, place: Place::local(l).project(Proj::Deref), block: BlockId(0), stmt: 0, span: f.local(l).span, holder: l, param: Some(i) });
             }
@@ -213,10 +213,11 @@ impl<'a> Fx<'a> {
                 Self::rvalue_uses(rv, live);
             }
             StatementKind::StorageLive(l) | StatementKind::StorageDead(l) => live.remove(l.0 as usize),
-            // Dropping releases ownership; it does not read references.
+            // Resource destruction can use retained loans: joining a task or
+            // unlocking a guard keeps its borrowed storage live until this use.
             StatementKind::Drop(p) => {
                 Self::place_uses(p, live);
-                if self.t.decls.contains_task(&self.f.local(p.local).ty) { Self::read_uses(p, live); }
+                if self.t.decls.contains_task(&self.f.local(p.local).ty) || self.t.decls.contains_guard(&self.f.local(p.local).ty) { Self::read_uses(p, live); }
             },
         }
     }
@@ -340,7 +341,7 @@ impl<'a> Fx<'a> {
     fn write_holds(&self, h: &mut Holds, dest: &Place, inflow: BitSet) {
         let d = dest.local.0 as usize;
         if dest.proj.is_empty() {
-            h[d] = if may_hold_refs(&self.f.local(dest.local).ty) || self.t.decls.contains_task(&self.f.local(dest.local).ty) { inflow } else { BitSet::new(self.loans.len()) };
+            h[d] = if self.t.decls.may_contain_references(&self.f.local(dest.local).ty) || self.t.decls.contains_task(&self.f.local(dest.local).ty) { inflow } else { BitSet::new(self.loans.len()) };
         } else if !dest.proj.contains(&Proj::Deref) {
             h[d].union(&inflow);
         }
@@ -351,7 +352,7 @@ impl<'a> Fx<'a> {
     fn call_inflow(&self, h: &Holds, callee: &Callee, args: &[Operand], dest: &Place) -> BitSet {
         let mut inflow = BitSet::new(self.loans.len());
         let dty = &self.f.local(dest.local).ty;
-        if dest.proj.is_empty() && !may_hold_refs(dty) && !self.t.decls.contains_task(dty) {
+        if dest.proj.is_empty() && !self.t.decls.may_contain_references(dty) && !self.t.decls.contains_task(dty) {
             return inflow;
         }
         let positions: Option<Provenance> = match callee {
@@ -377,9 +378,9 @@ impl<'a> Fx<'a> {
         inflow
     }
 
-    fn consume_task_operand(&self, h: &mut Holds, operand: &Operand) {
+    fn consume_resource_operand(&self, h: &mut Holds, operand: &Operand) {
         if let Operand::Move(place) = operand
-            && place.proj.is_empty() && self.t.decls.contains_task(&self.f.local(place.local).ty) {
+            && place.proj.is_empty() && (self.t.decls.contains_task(&self.f.local(place.local).ty) || self.t.decls.contains_guard(&self.f.local(place.local).ty)) {
             h[place.local.0 as usize] = BitSet::new(self.loans.len());
         }
     }
@@ -394,15 +395,15 @@ impl<'a> Fx<'a> {
                 StatementKind::Assign(dest, rv) => {
                     let inflow = self.rvalue_inflow(h, b, si, rv);
                     match rv {
-                        Rvalue::Use(o) | Rvalue::Cast(o, _) | Rvalue::Coerce(_, o, _) => self.consume_task_operand(h, o),
-                        Rvalue::Aggregate(_, operands) => for o in operands { self.consume_task_operand(h, o); },
+                        Rvalue::Use(o) | Rvalue::Cast(o, _) | Rvalue::Coerce(_, o, _) => self.consume_resource_operand(h, o),
+                        Rvalue::Aggregate(_, operands) => for o in operands { self.consume_resource_operand(h, o); },
                         _ => {},
                     }
                     self.write_holds(h, dest, inflow);
                 }
                 StatementKind::StorageLive(l) | StatementKind::StorageDead(l) => h[l.0 as usize] = BitSet::new(self.loans.len()),
                 StatementKind::Drop(place) => {
-                    if place.proj.is_empty() && self.t.decls.contains_task(&self.f.local(place.local).ty) {
+                    if place.proj.is_empty() && (self.t.decls.contains_task(&self.f.local(place.local).ty) || self.t.decls.contains_guard(&self.f.local(place.local).ty)) {
                         h[place.local.0 as usize] = BitSet::new(self.loans.len());
                     }
                 }
@@ -413,7 +414,7 @@ impl<'a> Fx<'a> {
         }
         if let Terminator::Call { callee, args, dest, .. } = &blk.term {
             let inflow = self.call_inflow(h, callee, args, dest);
-            for operand in args { self.consume_task_operand(h, operand); }
+            for operand in args { self.consume_resource_operand(h, operand); }
             self.write_holds(h, dest, inflow);
         }
     }

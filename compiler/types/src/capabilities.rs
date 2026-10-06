@@ -22,6 +22,7 @@ impl Decls {
             path.push(ty.clone());
             let answer = match ty {
                 Ty::Ref(..) | Ty::Fn(..) | Ty::Param(_) | Ty::Any(_) | Ty::Opaque | Ty::Var(_) => true,
+                Ty::Adt(s, _) if Some(*s) == d.mutex_guard => true,
                 Ty::Array(t, _) | Ty::Slice(t) => visit(d, t, path, budget),
                 Ty::Adt(s, args) if Some(*s) == d.task => args.iter().any(|t| visit(d, t, path, budget)),
                 Ty::Adt(s, args) => {
@@ -41,30 +42,38 @@ impl Decls {
         visit(self, ty, &mut Vec::new(), &mut 4096)
     }
 
+    pub fn contains_guard(&self, ty: &Ty) -> bool {
+        self.contains_resource(ty, self.mutex_guard)
+    }
+
     pub fn contains_task(&self, ty: &Ty) -> bool {
-        fn visit(d: &Decls, ty: &Ty, path: &mut Vec<Ty>, budget: &mut usize) -> bool {
+        self.contains_resource(ty, self.task)
+    }
+
+    fn contains_resource(&self, ty: &Ty, target: Option<tarn_resolve::SymbolId>) -> bool {
+        fn visit(d: &Decls, ty: &Ty, path: &mut Vec<Ty>, budget: &mut usize, target: Option<tarn_resolve::SymbolId>) -> bool {
             if *budget == 0 || path.len() >= 64 || path.contains(ty) { return true; }
             *budget -= 1;
             path.push(ty.clone());
             let answer = match ty {
-                Ty::Adt(s, _) if Some(*s) == d.task => true,
+                Ty::Adt(s, _) if Some(*s) == target => true,
                 Ty::Adt(s, args) => {
                     if let Some(def) = d.structs.get(s) {
                         let map = def.generics.iter().copied().zip(args.iter().cloned()).collect();
-                        def.fields.iter().any(|f| visit(d, &subst(&f.ty, &map), path, budget))
+                        def.fields.iter().any(|f| visit(d, &subst(&f.ty, &map), path, budget, target))
                     } else if let Some(def) = d.enums.get(s) {
                         let map = def.generics.iter().copied().zip(args.iter().cloned()).collect();
-                        def.variants.iter().any(|v| v.fields.iter().any(|f| visit(d, &subst(f, &map), path, budget)))
+                        def.variants.iter().any(|v| v.fields.iter().any(|f| visit(d, &subst(f, &map), path, budget, target)))
                     } else { false }
                 }
-                Ty::Array(t, _) | Ty::Slice(t) | Ty::Ref(_, t) => visit(d, t, path, budget),
+                Ty::Array(t, _) | Ty::Slice(t) | Ty::Ref(_, t) => visit(d, t, path, budget, target),
                 Ty::Param(_) | Ty::Opaque => true,
                 _ => false,
             };
             path.pop();
             answer
         }
-        visit(self, ty, &mut Vec::new(), &mut 4096)
+        visit(self, ty, &mut Vec::new(), &mut 4096, target)
     }
 
     pub fn capability(&self, ty: &Ty, capability: Capability) -> bool {
@@ -84,6 +93,9 @@ impl Decls {
             Ty::Ref(false, t) => self.capability_inner(t, Capability::Share, path, budget),
             Ty::Ref(true, t) => cap == Capability::Transfer && self.capability_inner(t, Capability::Transfer, path, budget),
             Ty::Array(t, _) | Ty::Slice(t) => self.capability_inner(t, cap, path, budget),
+            Ty::Adt(s, _) if Some(*s) == self.mutex_guard => false,
+            Ty::Adt(s, args) if Some(*s) == self.mutex => args.len() == 1 && self.capability_inner(&args[0], Capability::Transfer, path, budget),
+            Ty::Adt(s, _) if self.atomics.contains_key(s) => true,
             Ty::Adt(s, args) if Some(*s) == self.task => cap == Capability::Transfer && args.len() == 1 && self.capability_inner(&args[0], cap, path, budget),
             Ty::Adt(s, args) => {
                 if let Some(contract) = self.native_capabilities.get(s) {
@@ -148,6 +160,40 @@ mod tests {
         assert!(!d.capability(&Ty::Ref(false, Box::new(Ty::Any(symbol))), Capability::Transfer));
         d.native_capabilities.get_mut(&symbol).unwrap().share = true;
         assert!(d.capability(&Ty::Ref(false, Box::new(Ty::Any(symbol))), Capability::Transfer));
+    }
+
+    #[test]
+    fn synchronization_authority_is_distinct_from_copy_and_payload_share() {
+        use tarn_resolve::SymbolId;
+        let (mutex, guard, atomic, payload) = (SymbolId(100), SymbolId(101), SymbolId(102), SymbolId(103));
+        let mut d = Decls { mutex: Some(mutex), mutex_guard: Some(guard), ..Decls::default() };
+        d.atomics.insert(atomic, Ty::Bool);
+        d.native_capabilities.insert(payload, NativeCapabilities { transfer: true, share: false });
+        let payload = Ty::Adt(payload, vec![]);
+        assert!(!d.capability(&payload, Capability::Share));
+        let synchronized = Ty::Adt(mutex, vec![payload.clone()]);
+        assert!(d.capability(&synchronized, Capability::Transfer));
+        assert!(d.capability(&synchronized, Capability::Share));
+        assert!(!d.is_copy(&synchronized));
+        let guard = Ty::Adt(guard, vec![payload]);
+        assert!(!d.capability(&guard, Capability::Transfer));
+        assert!(!d.capability(&guard, Capability::Share));
+        assert!(!d.is_copy(&guard));
+        assert!(d.may_contain_references(&guard));
+        assert!(d.contains_guard(&Ty::Array(Box::new(guard), 2)));
+        let atomic = Ty::Adt(atomic, vec![]);
+        assert!(d.capability(&atomic, Capability::Transfer));
+        assert!(d.capability(&atomic, Capability::Share));
+        assert!(!d.is_copy(&atomic));
+        assert!(!d.capability(&Ty::Adt(mutex, vec![Ty::Opaque]), Capability::Share));
+        let parameter = crate::ParamId(104);
+        d.transfer = Some(SymbolId(105));
+        d.share = Some(SymbolId(106));
+        d.bounds.insert(parameter, vec![d.share.unwrap()]);
+        let generic = Ty::Adt(mutex, vec![Ty::Param(parameter)]);
+        assert!(!d.capability(&generic, Capability::Share));
+        d.bounds.insert(parameter, vec![d.transfer.unwrap()]);
+        assert!(d.capability(&generic, Capability::Share));
     }
 
 }

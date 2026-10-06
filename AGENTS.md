@@ -736,7 +736,7 @@ ordinary loans, capture/result provenance and post-drop destruction functions.
 Owned closures may escape only while all captured loans remain valid. Borrowed
 stack environments must retain their storage loan and cannot escape their frame.
 Native concurrency implementation is phase 11 work; preserve this callable model
-when introducing task boundaries (proposed ADR 0033).
+when introducing task boundaries (ADR 0033).
 
 ---
 
@@ -745,8 +745,8 @@ when introducing task boundaries (proposed ADR 0033).
 Phase 11 follows ordinary Copy/Move, callable capture ownership, loans and
 provenance. Do not add a separate thread-safety checker or backend ownership
 queries. Phase 11A implements handle-owned native tasks; phase 11B implements scoped loans
-and Transfer/Share. Synchronization (11C) requires separate approval.
-The full phase remains in progress; design and implementation status: [ADR 0033](docs/adr/0033-safe-native-tasks.md).
+and Transfer/Share. Phase 11C adds Mutex guards and concrete sequentially consistent atomics.
+The Phase 11 native model is complete within its documented v0 limits; design and implementation status: [ADR 0033](docs/adr/0033-safe-native-tasks.md).
 
 Task handles must have deliberate ownership and completion semantics. The v0
 policy is unique handles with join on destruction, no detach or cancellation.
@@ -762,9 +762,42 @@ Distinguish cross-thread value transfer from concurrent shared access using sema
 capabilities, not Copy or size guesses. Native handles require explicit trusted
 contracts. Synchronization guards must expose ordinary loans and verified
 resource destruction; do not add user-defined destructors to implement locks.
+Synchronization does not bypass Tarn ownership. Mutex<T> is a non-Copy owner;
+Transfer and Share both require T: Transfer, without requiring T: Share. Guards
+are non-Copy, non-Transfer and non-Share ownership-bearing resources whose verified
+destruction releases synchronization authority. Payload loans must not outlive
+the guard; use ordinary provenance and loan tracking, never a separate guard
+lifetime checker or backend ownership inference.
+
+Atomics are explicit synchronized storage, not ordinary mutable scalars. The v0
+concrete atomic set has only sequentially consistent operations; integer fetch
+arithmetic checks overflow and aborts. Concurrency safety remains a compile-time
+semantic property wherever possible. Mutexes do not poison or promise reentrancy.
+
 Panic in any task remains whole-process abort. No async, futures, reactor, green
 threads, scheduler optimization or concurrency platform expansion in this phase.
 Do not design concurrency during unrelated phases.
+
+---
+
+## Blocking Networking
+
+Phase 12A sockets are ordinary non-Copy owned resources in `stdlib/net`.
+TcpListener, TcpStream and UdpSocket explicitly have Transfer and not Share;
+I/O uses mutable receivers, and address queries use shared receivers. Moving
+an owner transfers exactly-once close responsibility. Consuming close leaves
+no live owner, including on an OS error. Shutdown preserves ownership.
+
+Native socket destruction must follow verified post-drop IR, never a runtime
+ownership registry or backend move/loan inference. Buffers use borrowed byte
+slices; native storage must not escape. Public networking returns Result and
+normal network errors must not abort. Linux sends suppress SIGPIPE; close must
+never retry EINTR. Safe syscall retries and high-level behavior belong in Tarn.
+Trusted private bridge declarations must be structurally verified and cannot
+be authorized merely by a user module name. See [ADR 0034](docs/adr/0034-blocking-networking.md).
+
+Networking blocks the current native task, including DNS. Do not introduce
+nonblocking I/O, async, reactors, schedulers, pools or HTTP during 12A.
 
 ---
 

@@ -11,11 +11,10 @@ fn echo(conn net.TcpStream) Result<void, net.Error> {
     }
 }
 
-// One native task per accepted connection. Join is explicit; no detach.
 fn main() Result<void, net.Error> {
     var listener = try net.listen_tcp(&"127.0.0.1:8080")
+    print("Listening on 127.0.0.1:8080")
     conn := try listener.accept()
-    task := spawn move fn() Result<void, net.Error> { return echo(conn) }
-    try task.join()
+    try echo(conn)
     return Ok(())
 }

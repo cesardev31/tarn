@@ -43,7 +43,7 @@ cargo run -p tarn -- build tests/native/pass/milestone.tarn -o /tmp/tarn-milesto
 `tarn build file.tarn` writes `file` beside the source; `tarn run` uses a temporary
 executable and removes it. Scalars, concrete structs/enums/arrays, thin references,
 direct calls and executable drops are supported. Reachable generic instances, borrowed
-slices, borrowed nonescaping closures and escaping owned `move fn` closures also execute. Stored callables support shared, mutable and consuming invocation (ADR 0032). Borrowed dynamic interface calls also execute. Owned `spawn move fn` tasks execute on pthreads with consuming join and join on handle destruction (phase 11A). Transfer/Share bounds and scoped borrowing execute through the same ownership and loan pipeline (phase 11B). Synchronization remains pending. Unmodeled external ABI
+slices, borrowed nonescaping closures and escaping owned `move fn` closures also execute. Stored callables support shared, mutable and consuming invocation (ADR 0032). Borrowed dynamic interface calls also execute. Owned `spawn move fn` tasks execute on pthreads with consuming join and join on handle destruction (phase 11A). Transfer/Share bounds and scoped borrowing execute through the same ownership and loan pipeline (phase 11B). Mutex owners/guards and six concrete sequentially consistent atomics provide synchronization (phase 11C; ADR 0033). See [the complete Phase 11 report](docs/phase-11-report.md). Unmodeled external ABI
 execution remains unsupported; unknown std APIs reject semantically with E3040.
 See [ADR 0027](docs/adr/0027-native-backend.md) for exact ABI, layout and restrictions.
 
@@ -56,3 +56,7 @@ Borrowed dynamic interfaces and declaration-derived semantic contracts are cover
 by [ADR 0030](docs/adr/0030-borrowed-dynamic-interfaces.md),
 [ADR 0031](docs/adr/0031-declaration-semantic-contracts.md) and the
 [phase report](docs/dynamic-interface-report.md).
+
+Blocking Linux TCP/UDP networking is available through `import "net"`, with owned
+sockets, safe borrowed slices and Result errors. See [the API](docs/networking.md)
+and [the echo example](examples/tcp_echo.tarn). Nonblocking and async I/O are deferred.

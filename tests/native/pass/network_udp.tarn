@@ -1,0 +1,21 @@
+import "net"
+fn main() Result<void, net.Error> {
+    var receiver = try net.UdpSocket.bind(&"127.0.0.1:0")
+    var sender = try net.UdpSocket.bind(&"127.0.0.1:0")
+    peer := try receiver.local_addr()
+    source := try sender.local_addr()
+    print(try sender.send_to(&[3]u8{7, 8, 9}, peer))
+    var buffer = [8]u8{0, 0, 0, 0, 0, 0, 0, 0}
+    received := try receiver.recv_from(&mut buffer)
+    print(received.count)
+    print(received.peer.port() == source.port())
+    print(buffer[2])
+    print(try sender.send_to(&buffer[0..0], peer))
+    empty := try receiver.recv_from(&mut buffer)
+    print(empty.count)
+    print(empty.peer.is_ipv4())
+    print((try net.resolve(&"localhost:4321")).port())
+    print((try net.resolve(&"[::1]:4321")).is_ipv6())
+    try sender.close()
+    return Ok(())
+}

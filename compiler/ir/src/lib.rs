@@ -59,7 +59,7 @@ pub enum FnKind {
     Body,
     /// `extern "C"`: declared, implemented elsewhere.
     Extern,
-    /// `extern "intrinsic"` in `core`: implemented by the compiler/backend.
+    /// `extern "intrinsic"` in trusted embedded stdlib: implemented by the compiler/backend.
     Intrinsic,
     /// A closure; its captures are its first `captures.len()` parameters.
     Closure {
@@ -304,7 +304,7 @@ pub enum Callee {
         method: SymbolId,
         type_args: Vec<Ty>,
     },
-    /// `extern "intrinsic"` from `core`, or a compiler-known array/slice method.
+    /// `extern "intrinsic"` from trusted stdlib, or a compiler-known array/slice method.
     Intrinsic(String),
     Builtin(Builtin),
     /// Call through a function/closure value.
@@ -349,3 +349,5 @@ impl Terminator {
         }
     }
 }
+
+mod network_abi;

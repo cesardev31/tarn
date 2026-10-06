@@ -70,3 +70,103 @@ pub struct Task<R> {
     handle usize
 }
 pub extern "intrinsic" fn Task<R>.join(self) R
+
+// ------------------------------------------------ synchronization (phase 11C)
+
+/// Unique synchronized owner. Share and Transfer both require T: Transfer.
+/// The payload is private: only a live lock guard can access it.
+pub struct Mutex<T> {
+    native usize
+    payload T
+}
+pub extern "intrinsic" fn Mutex<T>.new(value T) Mutex<T>
+/// Nonrecursive locking. Panic aborts; there is no poisoning.
+pub extern "intrinsic" fn Mutex<T>.lock(&self) MutexGuard<T>
+
+/// Unique, non-Copy, non-Transfer, non-Share synchronization authority.
+/// Its loan borrows the mutex until verified destruction unlocks it.
+pub struct MutexGuard<T> {
+    native usize
+    payload usize
+}
+/// Borrow exclusive payload access, bounded by this guard's lifetime.
+pub extern "intrinsic" fn MutexGuard<T>.value(&mut self) &mut T
+/// Copy a Copy payload while locked.
+pub extern "intrinsic" fn MutexGuard<T>.read(&self) T
+/// Transfer the new payload in and the old payload out, without duplication.
+pub extern "intrinsic" fn MutexGuard<T>.replace(&mut self, value T) T
+
+/// Unique synchronized storage: Transfer and Share, never Copy.
+/// All operations are sequentially consistent. No ordinary scalar projection.
+pub struct AtomicBool { native usize }
+pub extern "intrinsic" fn AtomicBool.new(value bool) AtomicBool
+pub extern "intrinsic" fn AtomicBool.load(&self) bool
+pub extern "intrinsic" fn AtomicBool.store(&self, value bool)
+pub extern "intrinsic" fn AtomicBool.swap(&self, value bool) bool
+/// Strong comparison: true exactly when expected matched and replacement occurred.
+pub extern "intrinsic" fn AtomicBool.compare_exchange(&self, expected bool, value bool) bool
+
+/// Unique synchronized storage: Transfer and Share, never Copy.
+/// All operations are sequentially consistent. No ordinary scalar projection.
+pub struct AtomicI32 { native usize }
+pub extern "intrinsic" fn AtomicI32.new(value i32) AtomicI32
+pub extern "intrinsic" fn AtomicI32.load(&self) i32
+pub extern "intrinsic" fn AtomicI32.store(&self, value i32)
+pub extern "intrinsic" fn AtomicI32.swap(&self, value i32) i32
+/// Strong comparison: true exactly when expected matched and replacement occurred.
+pub extern "intrinsic" fn AtomicI32.compare_exchange(&self, expected i32, value i32) bool
+/// Return the old value. Overflow aborts before modification.
+pub extern "intrinsic" fn AtomicI32.fetch_add(&self, value i32) i32
+pub extern "intrinsic" fn AtomicI32.fetch_sub(&self, value i32) i32
+
+/// Unique synchronized storage: Transfer and Share, never Copy.
+/// All operations are sequentially consistent. No ordinary scalar projection.
+pub struct AtomicI64 { native usize }
+pub extern "intrinsic" fn AtomicI64.new(value i64) AtomicI64
+pub extern "intrinsic" fn AtomicI64.load(&self) i64
+pub extern "intrinsic" fn AtomicI64.store(&self, value i64)
+pub extern "intrinsic" fn AtomicI64.swap(&self, value i64) i64
+/// Strong comparison: true exactly when expected matched and replacement occurred.
+pub extern "intrinsic" fn AtomicI64.compare_exchange(&self, expected i64, value i64) bool
+/// Return the old value. Overflow aborts before modification.
+pub extern "intrinsic" fn AtomicI64.fetch_add(&self, value i64) i64
+pub extern "intrinsic" fn AtomicI64.fetch_sub(&self, value i64) i64
+
+/// Unique synchronized storage: Transfer and Share, never Copy.
+/// All operations are sequentially consistent. No ordinary scalar projection.
+pub struct AtomicU32 { native usize }
+pub extern "intrinsic" fn AtomicU32.new(value u32) AtomicU32
+pub extern "intrinsic" fn AtomicU32.load(&self) u32
+pub extern "intrinsic" fn AtomicU32.store(&self, value u32)
+pub extern "intrinsic" fn AtomicU32.swap(&self, value u32) u32
+/// Strong comparison: true exactly when expected matched and replacement occurred.
+pub extern "intrinsic" fn AtomicU32.compare_exchange(&self, expected u32, value u32) bool
+/// Return the old value. Overflow aborts before modification.
+pub extern "intrinsic" fn AtomicU32.fetch_add(&self, value u32) u32
+pub extern "intrinsic" fn AtomicU32.fetch_sub(&self, value u32) u32
+
+/// Unique synchronized storage: Transfer and Share, never Copy.
+/// All operations are sequentially consistent. No ordinary scalar projection.
+pub struct AtomicU64 { native usize }
+pub extern "intrinsic" fn AtomicU64.new(value u64) AtomicU64
+pub extern "intrinsic" fn AtomicU64.load(&self) u64
+pub extern "intrinsic" fn AtomicU64.store(&self, value u64)
+pub extern "intrinsic" fn AtomicU64.swap(&self, value u64) u64
+/// Strong comparison: true exactly when expected matched and replacement occurred.
+pub extern "intrinsic" fn AtomicU64.compare_exchange(&self, expected u64, value u64) bool
+/// Return the old value. Overflow aborts before modification.
+pub extern "intrinsic" fn AtomicU64.fetch_add(&self, value u64) u64
+pub extern "intrinsic" fn AtomicU64.fetch_sub(&self, value u64) u64
+
+/// Unique synchronized storage: Transfer and Share, never Copy.
+/// All operations are sequentially consistent. No ordinary scalar projection.
+pub struct AtomicUsize { native usize }
+pub extern "intrinsic" fn AtomicUsize.new(value usize) AtomicUsize
+pub extern "intrinsic" fn AtomicUsize.load(&self) usize
+pub extern "intrinsic" fn AtomicUsize.store(&self, value usize)
+pub extern "intrinsic" fn AtomicUsize.swap(&self, value usize) usize
+/// Strong comparison: true exactly when expected matched and replacement occurred.
+pub extern "intrinsic" fn AtomicUsize.compare_exchange(&self, expected usize, value usize) bool
+/// Return the old value. Overflow aborts before modification.
+pub extern "intrinsic" fn AtomicUsize.fetch_add(&self, value usize) usize
+pub extern "intrinsic" fn AtomicUsize.fetch_sub(&self, value usize) usize

@@ -6,6 +6,49 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("socket use after move", Some("E4001"), "import \"net\"\nfn take(value net.TcpStream) {}\nfn bad(conn net.TcpStream) { other := conn\n conn.local_addr() }"),
+    ("socket double close", Some("E4001"), "import \"net\"\nfn bad(conn net.TcpStream) { conn.close()\n conn.close() }"),
+    ("socket original after spawn", Some("E4001"), "import \"net\"\nfn bad(conn net.TcpStream) { task := spawn move fn() { conn.close() }\n conn.local_addr()\n task.join() }"),
+    ("socket move while borrowed", Some("E4103"), "import \"net\"\nfn bad(conn net.TcpStream) { loan := &conn\n other := conn\n loan.local_addr() }"),
+    ("socket overwrite while borrowed", Some("E4102"), "import \"net\"\nfn bad(conn net.TcpStream, other net.TcpStream) { var socket = conn\n loan := &socket\n socket = other\n loan.local_addr() }"),
+    ("read buffer conflicting alias", Some("E4101"), "import \"net\"\nfn bad(conn &mut net.TcpStream) { var buffer = [2]u8{0, 0}\n loan := &buffer\n conn.read(&mut buffer)\n print(loan[0]) }"),
+    ("network buffer reference escape", Some("E4201"), "import \"net\"\nfn bad(conn &mut net.TcpStream) &[]u8 { var buffer = [2]u8{0, 0}\n conn.read(&mut buffer)\n return &buffer[..] }"),
+    ("socket raw descriptor inaccessible", Some("E3014"), "import \"net\"\nfn bad(conn &net.TcpStream) { print(conn.fd) }"),
+    ("socket cannot be fabricated", Some("E3014"), "import \"net\"\nfn main() { stream := net.TcpStream{fd: 3} }"),
+    ("network intrinsic private", Some("E2006"), "import \"net\"\nfn main() { net._accept(3) }"),
+    ("socket shared across tasks rejected", Some("E3047"), "import \"net\"\nfn bad(conn &net.TcpStream) { scope { spawn move fn() { conn.local_addr() } } }"),
+    ("socket task transfer and return", None, "import \"net\"\nfn bad(conn net.TcpStream) { task := spawn move fn() net.TcpStream { return conn }\n result := task.join()\n result.close() }"),
+    ("socket mutable scoped transfer", None, "import \"net\"\nfn bad(conn &mut net.TcpStream) { scope { task := spawn move fn() { conn.shutdown(net.Shutdown.Both) }\n task.join() } }"),
+    ("socket serialized with mutex", None, "import \"net\"\nfn bad(conn net.TcpStream) { mutex := Mutex.new(conn)\n scope { spawn fn() { var guard = mutex.lock()\n guard.value().local_addr() } } }"),
+    ("network slice call coercions", None, "import \"net\"\nfn bad(conn &mut net.TcpStream) { var buffer = [2]u8{0, 0}\n conn.read(&mut buffer)\n conn.write_all(&buffer) }"),
+    ("unused guard destruction retains mutex loan", Some("E4103"), "fn main() { m := Mutex.new(i64(0))\n g := m.lock()\n moved := m }"),
+    ("returned guard lifetime follows borrowed owner", Some("E4105"), "fn lock(m &Mutex<i64>) MutexGuard<i64> { return m.lock() }\nfn main() { var g: MutexGuard<i64>\n { m := Mutex.new(i64(0))\n g = lock(&m) }\n print(g.read()) }"),
+    ("guard aggregate retains mutex loan", Some("E4103"), "struct Box<T> { value T }\nfn main() { m := Mutex.new(i64(0))\n b := Box{value: m.lock()}\n moved := m }"),
+    ("mutex Share requires Transfer, not Share", None, "struct Counter { value i64 }\nfn main() { var c = Counter{value: 0}\n { m := Mutex.new(&mut c)\n scope { spawn fn() { var g = m.lock()\n g.value().value = 1 }\n spawn fn() { var g = m.lock()\n g.value().value = 2 } } } }"),
+
+    ("mutex input is moved", Some("E4001"), "fn main() { value := Buffer.new()\n mutex := Mutex.new(value)\n read(&value) }"),
+    ("guard outlives mutex", Some("E4105"), "fn main() { var guard: MutexGuard<i64>\n { mutex := Mutex.new(i64(0))\n guard = mutex.lock() }\n print(guard.read()) }"),
+    ("mutex move while guard live", Some("E4103"), "fn main() { mutex := Mutex.new(i64(0))\n guard := mutex.lock()\n moved := mutex\n print(guard.read()) }"),
+    ("mutex overwrite while guard live", Some("E4102"), "fn main() { var mutex = Mutex.new(i64(0))\n guard := mutex.lock()\n mutex = Mutex.new(i64(1))\n print(guard.read()) }"),
+    ("payload reference after guard drop", Some("E4105"), "fn main() { mutex := Mutex.new(Buffer.new())\n var ref: &mut Buffer\n { var guard = mutex.lock()\n ref = guard.value() }\n write(ref) }"),
+    ("payload reference escapes guard", Some("E4201"), "fn escape(mutex &Mutex<Buffer>) &mut Buffer { var guard = mutex.lock()\n return guard.value() }\nfn main() {}"),
+    ("guard cannot transfer", Some("E3047"), "fn main() { mutex := Mutex.new(i64(0))\n guard := mutex.lock()\n scope { spawn move fn() { guard.read() } } }"),
+    ("guard cannot share", Some("E3047"), "fn main() { mutex := Mutex.new(i64(0))\n guard := mutex.lock()\n scope { spawn fn() { guard.read() } } }"),
+    ("guard payload mutable aliases", Some("E4101"), "fn main() { mutex := Mutex.new(Buffer.new())\n var guard = mutex.lock()\n a := guard.value()\n b := guard.value()\n write(a)\n write(b) }"),
+    ("payload reference forbids guard move", Some("E4103"), "fn main() { mutex := Mutex.new(Buffer.new())\n var guard = mutex.lock()\n a := guard.value()\n moved := guard\n write(a) }"),
+    ("non Transfer mutex payload across workers", Some("E3047"), "fn worker<T>(value T) { mutex := Mutex.new(value)\n scope { spawn fn() { mutex.lock() } } }\nfn main() {}"),
+    ("Copy read rejects owned payload", Some("E3022"), "fn main() { mutex := Mutex.new(Buffer.new())\n guard := mutex.lock()\n guard.read() }"),
+    ("atomic bool arithmetic rejected", Some("E3005"), "fn main() { a := AtomicBool.new(false)\n a.fetch_add(1) }"),
+    ("atomic private mutation rejected", Some("E3014"), "fn main() { var a = AtomicI32.new(0)\n a.native = 42 }"),
+    ("mutex private payload rejected", Some("E3014"), "fn main() { var m = Mutex.new(i64(0))\n g := m.lock()\n m.payload = 42 }"),
+    ("guard private native storage rejected", Some("E3014"), "fn main() { m := Mutex.new(i64(0))\n var g = m.lock()\n g.native = 0 }"),
+    ("shared mutex workers", None, "fn main() { mutex := Mutex.new(i64(0))\n scope { spawn fn() { var g = mutex.lock()\n g.replace(1) }\n spawn fn() { var g = mutex.lock()\n g.replace(2) } } }"),
+    ("guard exclusive payload mutation", None, "fn main() { mutex := Mutex.new(Buffer.new())\n var guard = mutex.lock()\n write(guard.value()) }"),
+    ("shared atomic counter", None, "fn main() { a := AtomicI64.new(0)\n scope { spawn fn() { a.fetch_add(1) }\n spawn fn() { a.fetch_add(1) } }\n print(a.load()) }"),
+    ("guard moved locally", None, "fn main() { m := Mutex.new(i64(0))\n g := m.lock()\n moved := g\n print(moved.read()) }"),
+    ("guard returned from borrowed mutex", None, "fn lock(m &Mutex<i64>) MutexGuard<i64> { return m.lock() }\nfn main() { m := Mutex.new(i64(0))\n g := lock(&m)\n print(g.read()) }"),
+    ("guard retained in generic aggregate", None, "struct Box<T> { value T }\nfn main() { m := Mutex.new(i64(0))\n b := Box{value: m.lock()}\n print(b.value.read()) }"),
+
     ("scoped mutable parent access before completion", Some("E4104"), "fn main() { scope { var value: i64 = 0\n spawn fn() { value = value + 1 }\n print(value) } }"),
     ("scoped concurrent mutable aliases", Some("E4101"), "fn main() { scope { var value: i64 = 0\n spawn fn() { value = value + 1 }\n spawn fn() { value = value + 1 } } }"),
     ("scoped parent assignment while worker active", Some("E4102"), "fn main() { scope { var value: i64 = 0\n spawn fn() { value = value + 1 }\n value = 42 } }"),
@@ -95,5 +138,11 @@ fn semantic_contracts_expose_passing_and_result_modes() {
     assert_eq!(consume.contract.result, R::Owned);
     let sqrt = t.decls.fns.values().find(|f| f.self_ty == Some(tarn_types::Ty::Float(tarn_types::FloatTy::F32))).unwrap();
     assert_eq!(sqrt.contract.parameters, [P::Copy]);
+    let lock = t.decls.fns.values().find(|f| f.self_ty.as_ref().is_some_and(|ty| matches!(ty, tarn_types::Ty::Adt(s, _) if Some(*s) == t.decls.mutex)) && f.receiver.is_some()).unwrap();
+    assert_eq!(lock.contract.parameters, [P::SharedBorrow]);
+    assert_eq!(lock.contract.result, R::Borrowed(vec![0]));
+    let value = t.decls.fns.values().find(|f| f.self_ty.as_ref().is_some_and(|ty| matches!(ty, tarn_types::Ty::Adt(s, _) if Some(*s) == t.decls.mutex_guard)) && matches!(&f.ret, tarn_types::Ty::Ref(true, _))).unwrap();
+    assert_eq!(value.contract.parameters, [P::MutableBorrow]);
+    assert_eq!(value.contract.result, R::Borrowed(vec![0]));
     std::fs::remove_dir_all(dir).unwrap();
 }

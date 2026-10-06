@@ -1,0 +1,45 @@
+struct Counter { value i64 }
+struct Box<T> { value T }
+enum Choice<T> { Some(T)
+    None }
+fn main() {
+    text := "original"
+    mutex := Mutex.new(text)
+    { var guard = mutex.lock()
+      print(guard.value().len())
+      old := guard.replace("replacement")
+      print(old) }
+    { var guard = mutex.lock()
+      print(guard.value().len()) }
+    box := Mutex.new(Box{value: "generic"})
+    { var guard = box.lock()
+      print(guard.value().value.len())
+      old := guard.replace(Box{value: "changed"})
+      print(old.value) }
+    choice := Mutex.new(Choice.Some("enum"))
+    { var guard = choice.lock()
+      match guard.value() {
+          Choice.Some(value) => { print(value.len()) }
+          Choice.None => { print(0) }
+      } }
+    array := Mutex.new([2]string{"first", "second"})
+    { var guard = array.lock()
+      print(guard.value()[0].len())
+      guard.value()[1] = "third" }
+    captured := "closure"
+    callable := Mutex.new(move fn() usize { return captured.len() })
+    { var guard = callable.lock()
+      f := guard.value()
+      print(f()) }
+    var counter = Counter{value: 0}
+    {
+        m := Mutex.new(&mut counter)
+        scope {
+            spawn fn() { var g = m.lock()
+                g.value().value = g.value().value + 1 }
+            spawn fn() { var g = m.lock()
+                g.value().value = g.value().value + 1 }
+        }
+    }
+    print(counter.value)
+}

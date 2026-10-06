@@ -24,7 +24,7 @@ fn native_scalar_and_aggregate_suite() {
     for path in paths {
         let tag = path.file_stem().unwrap().to_str().unwrap();
         let (exe, _) = compile(&std::fs::read_to_string(&path).unwrap(), tag);
-        let output = Command::new(&exe).env_remove("TARN_TRACE_DROPS").output().unwrap();
+        let output = Command::new("timeout").arg("30s").arg(&exe).env_remove("TARN_TRACE_DROPS").env_remove("TARN_TRACE_SYNC").output().unwrap();
         assert!(output.status.success(), "{}: {}", path.display(), String::from_utf8_lossy(&output.stderr));
         assert_eq!(String::from_utf8(output.stdout).unwrap(), std::fs::read_to_string(path.with_extension("stdout")).unwrap(), "{}", path.display());
         assert!(output.stderr.is_empty());
@@ -448,6 +448,118 @@ fn scoped_completion_destroys_results_before_borrowed_storage_and_verifies_witne
         }
         assert!(!tarn_ir::post_drop::verify(&corrupted, typed).is_empty());
         assert!(tarn_backend::emit_object(&corrupted, typed).is_err());
+    }
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn synchronization_destruction_traces_cover_every_normal_exit() {
+    let cases = [
+        ("normal", "g := m.lock()", "sync:create,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+        ("owner_move", "owner := m\n g := owner.lock()", "sync:create,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+        ("owner_self", "var owner = m\n owner = owner\n g := owner.lock()", "sync:create,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+        ("return", "g := m.lock()\n return", "sync:create,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+        ("break", "for i in 0..3 { g := m.lock()\n break }", "sync:create,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+        ("continue", "for i in 0..2 { g := m.lock()\n continue }", "sync:create,sync:lock,sync:unlock,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+        ("move", "g := m.lock()\n moved := g", "sync:create,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+        ("self", "var g = m.lock()\n g = g", "sync:create,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+        ("conditional_true", "var g: MutexGuard<string>\n if true { g = m.lock() }", "sync:create,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+        ("conditional_false", "var g: MutexGuard<string>\n if false { g = m.lock() }", "sync:create,drop:payload,sync:destroy"),
+        ("nested", "g := m.lock()\n { other := Mutex.new(\"other\")\n h := other.lock() }", "sync:create,sync:lock,sync:create,sync:lock,sync:unlock,drop:other,sync:destroy,sync:unlock,drop:payload,sync:destroy"),
+        ("overwrite", "other := Mutex.new(\"other\")\n var g = m.lock()\n g = other.lock()", "sync:create,sync:create,sync:lock,sync:lock,sync:unlock,sync:unlock,drop:other,sync:destroy,drop:payload,sync:destroy"),
+        ("aggregate_move", "g := m.lock()\n wrapped := Box{value: g}\n moved := wrapped", "sync:create,sync:lock,sync:unlock,drop:payload,sync:destroy"),
+    ];
+    for (tag, body, expected) in cases {
+        let source = format!("struct Box<T> {{ value T }}\nfn main() {{\n m := Mutex.new(\"payload\")\n {body}\n}}\n");
+        let (exe, _) = compile(&source, &format!("sync-drops-{tag}"));
+        let out = Command::new("timeout").arg("15s").arg(&exe).env("TARN_TRACE_DROPS", "1").env("TARN_TRACE_SYNC", "1").output().unwrap();
+        assert!(out.status.success(), "{tag}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(out.stdout.is_empty(), "{tag}");
+        assert_eq!(String::from_utf8(out.stderr).unwrap().lines().collect::<Vec<_>>(), expected.split(',').collect::<Vec<_>>(), "{tag}");
+        std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn synchronized_owned_payloads_destroy_exactly_once() {
+    let (exe, _) = compile(include_str!("../../../tests/native/pass/synchronization_owned.tarn"), "sync-owned-drops");
+    let out = Command::new("timeout").arg("15s").arg(&exe).env("TARN_TRACE_DROPS", "1").env("TARN_TRACE_SYNC", "1").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let trace = String::from_utf8(out.stderr).unwrap();
+    assert_eq!(trace, "sync:create\nsync:lock\ndrop:original\nsync:unlock\nsync:lock\nsync:unlock\nsync:create\nsync:lock\ndrop:generic\nsync:unlock\nsync:create\nsync:lock\nsync:unlock\nsync:create\nsync:lock\ndrop:second\nsync:unlock\nsync:create\nsync:lock\nsync:unlock\nsync:create\nsync:lock\nsync:unlock\nsync:lock\nsync:unlock\nsync:destroy\ndrop:closure\nsync:destroy\ndrop:first\ndrop:third\nsync:destroy\ndrop:enum\nsync:destroy\ndrop:changed\nsync:destroy\ndrop:replacement\nsync:destroy\n");
+    let mut payloads = trace.lines().filter_map(|l| l.strip_prefix("drop:")).collect::<Vec<_>>();
+    payloads.sort();
+    assert_eq!(payloads, vec!["changed", "closure", "enum", "first", "generic", "original", "replacement", "second", "third"]);
+    assert_eq!(trace.lines().filter(|l| *l == "sync:create").count(), 6);
+    assert_eq!(trace.lines().filter(|l| *l == "sync:destroy").count(), 6);
+    assert_eq!(trace.lines().filter(|l| *l == "sync:lock").count(), trace.lines().filter(|l| *l == "sync:unlock").count());
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}
+
+#[test]
+fn atomic_checked_arithmetic_aborts_at_each_integer_boundary() {
+    use std::os::unix::process::ExitStatusExt;
+    for (ty, max, min) in [
+        ("AtomicI32", "2147483647", "-2147483648"),
+        ("AtomicI64", "9223372036854775807", "-9223372036854775808"),
+        ("AtomicU32", "4294967295", "0"),
+        ("AtomicU64", "18446744073709551615", "0"),
+        ("AtomicUsize", "18446744073709551615", "0"),
+    ] {
+        for (op, boundary) in [("fetch_add", max), ("fetch_sub", min)] {
+            let source = format!("fn main() {{ a := {ty}.new({boundary})\n a.{op}(1) }}\n");
+            let (exe, _) = compile(&source, &format!("atomic-overflow-{ty}-{op}"));
+            let out = Command::new("timeout").arg("15s").arg(&exe).env_remove("TARN_TRACE_DROPS").env_remove("TARN_TRACE_SYNC").output().unwrap();
+            assert_eq!(out.status.signal(), Some(6), "{ty} {op}: {:?}", out.status);
+            assert!(String::from_utf8_lossy(&out.stderr).contains("panic: checked arithmetic"));
+            std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn synchronization_abi_corruption_is_rejected_without_panics() {
+    let (_, res) = compile("fn main() { m := Mutex.new(i64(0))\n var g = m.lock()\n g.replace(1)\n a := AtomicI64.new(0)\n a.fetch_add(1) }", "sync-metadata");
+    let source = res.drops.as_ref().unwrap();
+    let typed = res.typed.as_ref().unwrap();
+    for mutation in 0..4 {
+        let mut program = tarn_ir::post_drop::Program { functions: source.functions.clone(), by_symbol: source.by_symbol.clone() };
+        let call = program.functions.iter_mut().flat_map(|f| &mut f.blocks).find_map(|b| match &mut b.term {
+            tarn_ir::Terminator::Call { callee: tarn_ir::Callee::Intrinsic(name), args, .. } if name == "AtomicI64.fetch_add" => Some(args),
+            _ => None,
+        }).unwrap();
+        match mutation {
+            0 => { call.pop(); },
+            1 => call[1] = tarn_ir::Operand::Const(tarn_ir::Const::Bool(true)),
+            2 => call[0] = tarn_ir::Operand::Const(tarn_ir::Const::Int(0, tarn_types::IntTy::I64)),
+            3 => { call.push(tarn_ir::Operand::Const(tarn_ir::Const::Bool(false))); },
+            _ => unreachable!(),
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tarn_backend::emit_object(&program, typed)));
+        assert!(result.is_ok(), "mutation {mutation} panicked");
+        assert!(result.unwrap().is_err(), "mutation {mutation} emitted an invalid synchronization ABI");
+    }
+}
+
+#[test]
+fn destruction_trace_oracle_detects_missing_and_duplicate_unlocks() {
+    let (exe, result) = compile("fn main() { m := Mutex.new(\"payload\")\n g := m.lock() }", "sync-drop-mutations");
+    let source = result.drops.as_ref().unwrap();
+    let typed = result.typed.as_ref().unwrap();
+    for duplicate in [false, true] {
+        let mut program = tarn_ir::post_drop::Program { functions: source.functions.clone(), by_symbol: source.by_symbol.clone() };
+        let main = program.functions.iter_mut().find(|f| f.decl.name == "main").unwrap();
+        let guard = main.decl.locals.iter().position(|l| l.name.as_deref() == Some("g")).unwrap();
+        let block = main.blocks.iter_mut().find(|b| b.stmts.iter().any(|s| matches!(&s.op,
+            tarn_ir::post_drop::Op::Destroy(tarn_ir::post_drop::Drop::Value(p)) if p.local.0 as usize == guard))).unwrap();
+        let index = block.stmts.iter().position(|s| matches!(&s.op,
+            tarn_ir::post_drop::Op::Destroy(tarn_ir::post_drop::Drop::Value(p)) if p.local.0 as usize == guard)).unwrap();
+        if duplicate { block.stmts.insert(index, block.stmts[index].clone()); }
+        else { block.stmts.remove(index); }
+        tarn_backend::build(&program, typed, &exe).unwrap();
+        let out = Command::new("timeout").arg("10s").arg(&exe).env("TARN_TRACE_DROPS", "1").env("TARN_TRACE_SYNC", "1").output().unwrap();
+        let expected = "sync:create\nsync:lock\nsync:unlock\ndrop:payload\nsync:destroy\n";
+        assert!(!out.status.success() || out.stderr != expected.as_bytes(), "destruction mutant escaped the exact trace oracle");
     }
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
 }

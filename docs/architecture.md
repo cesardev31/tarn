@@ -20,6 +20,7 @@ Source → Lexer → Parser → AST → Resolve → Types → Typed IR
 | `compiler/ir` | `tarn_ir` | typed CFG IR, lowering, verifier, printer (ADR 0023) | done (v0) |
 | `compiler/ownership` | `tarn_ownership` | 6A move/init + drop decisions (ADR 0024), 6B borrows + provenance (ADR 0025), 6C executable drop elaboration (ADR 0026) | done (v0) |
 | `compiler/backend` | `tarn_backend` | post-drop IR → Cranelift → ELF object/link | initial Linux x86_64 subset (ADR 0027) |
+| `stdlib/net` | — | blocking TCP/UDP, owned sockets, resolution and explicit errors (ADR 0034) | done (12A v0) |
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | — | embedded C runtime: primitive print, strings, panic/abort; libc startup | initial (ADR 0027) |
 | `tools/cli` | `tarn` | the single CLI | started |
@@ -95,7 +96,7 @@ contracts and `borrows(...)` clauses expose invisible implementation promises
 (ADR 0031); the backend still receives no move/borrow results.
 
 
-## Native task boundary (phases 11A/11B)
+## Native task boundary (phases 11A/11B/11C)
 
 `Callee::TaskSpawn` records generated worker/result-destruction function IDs and
 specialization arguments. Both functions pass through ordinary IR verification,
@@ -114,5 +115,44 @@ capability evidence. Scoped spawn carries a TaskScopeWitness reference, whose
 ordinary loan flow prevents handle escape. Scope-owned handles and discarded
 Task temporaries retain worker loans until consuming join/destruction. Lowering
 completes task-containing resources before borrowed storage ends, including early
-exits. Synchronization remains pending; no backend ownership queries are introduced.
+exits. Synchronization uses owned Mutex containers, ordinary guard loans and concrete atomic storage; no backend ownership queries are introduced.
 See [the 11B report](scoped-tasks-report.md) for conservative restrictions.
+
+
+## Synchronization boundary (phase 11C)
+
+Core declares Mutex<T>, MutexGuard<T> and AtomicBool/I32/I64/U32/U64/Usize.
+Resolved declaration identities supply trusted resource and capability contracts.
+Mutex owns a private native pointer and an inline T payload. A guard stores private
+native/payload address lanes but semantically carries its mutex loan. Declaration-
+aware loan containment propagates guards through functions and aggregates. Guard
+destruction is a liveness use, and a whole move transfers its held loans. Ordinary
+NLL prohibits moving/destroying the owner or escaping a guard-derived reference.
+
+Existing move/init classification and executable Value/Guard destruction plans
+select exactly which complete resources are destroyed. Native type glue unlocks
+a live guard; complete Mutex glue recursively destroys its T using the existing
+canonical destruction path, then destroys/frees the native mutex. No alternate
+runtime owner bit or backend move/loan query is involved. Private pthread helpers
+never inspect or destroy T. Guard read has an explicit Copy obligation in the
+trusted intrinsic catalog, reusing normal generic checking without conditional
+method-owner syntax. value() borrows payload access and replace() moves values.
+
+Concrete atomic owners hold private heap-backed C11 atomic scalar storage. All
+operations are sequentially consistent, and checked fetch arithmetic uses CAS
+loops without signed C overflow. Public compare_exchange returns a strong success
+boolean; failed comparison leaves storage unchanged. No unsynchronized projection
+of the scalar exists. See [ADR 0033](adr/0033-safe-native-tasks.md) and
+[the Phase 11 report](phase-11-report.md) for the API, tests and v0 limits.
+
+## Blocking native networking
+
+Phase 12A loads the embedded `stdlib/net` module with explicit trusted-source
+metadata. Public socket/error/address types remain outside core. Ordinary Tarn
+implements the application API, retries, error mapping and write_all; private
+C helpers bridge Linux socket/getaddrinfo ABI and capture native status.
+Transfer/not-Share contracts belong to resolved native declarations. Socket
+destruction executes verified post-drop plans; the backend does not infer owner
+liveness. The IR verifier validates private signature, owner and outcome shapes.
+Slice pointers/lengths are explicit ABI lanes, never escaping runtime storage.
+See [ADR 0034](adr/0034-blocking-networking.md) and [networking](networking.md).
