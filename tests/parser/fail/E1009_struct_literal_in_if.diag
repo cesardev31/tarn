@@ -1,0 +1,8 @@
+error[E1009]: struct literal not allowed here
+ --> tests/parser/fail/E1009_struct_literal_in_if.tarn:2:13
+  |
+2 |     if p == Point{x: 1, y: 2} {
+  |             ^^^^^^^^^^^^^^^^^
+  |
+  = help: wrap the struct literal in parentheses: `(Point{x: 1})`
+

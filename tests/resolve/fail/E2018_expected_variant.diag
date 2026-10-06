@@ -1,0 +1,20 @@
+error[E2018]: expected a variant, found `foo`
+  --> tests/resolve/fail/E2018_expected_variant.tarn:10:9
+   |
+10 |         foo(x) => print(x)
+   |         ^^^
+   |
+   = note: variant names start with an uppercase letter
+
+error[E2018]: expected a variant, found method `S.new`
+  --> tests/resolve/fail/E2018_expected_variant.tarn:11:9
+   |
+11 |         S.new(y) => print(y)
+   |         ^^^^^
+
+error[E2005]: struct `S` has no member `Nope`
+  --> tests/resolve/fail/E2018_expected_variant.tarn:12:11
+   |
+12 |         S.Nope(z) => print(z)
+   |           ^^^^ not found
+

@@ -1,0 +1,10 @@
+fn main() {
+    x := 1
+    y: u64 := 2
+    var z = 3
+    var w: i64 = 4
+    nested: Option<Result<i32, string>> := None
+    z = z + 1
+    arr[0] = 1
+    user.age = 2
+}

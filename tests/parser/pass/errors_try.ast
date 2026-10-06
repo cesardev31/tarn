@@ -1,0 +1,8 @@
+(import "fs")
+(fn load ((path &string)) -> Result<string, fs.Error>
+  (block
+    (let text (try (call (. fs read_text) path)))
+    (for entry in (try (call (. fs read_dir) path))
+      (block
+        (call print (call (. entry name)))))
+    (return (call Ok text))))

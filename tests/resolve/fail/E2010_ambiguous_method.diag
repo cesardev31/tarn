@@ -1,0 +1,12 @@
+error[E2010]: `go` is implemented by more than one interface for this type
+  --> tests/resolve/fail/E2010_ambiguous_method.tarn:24:7
+   |
+13 |     fn go(&self) {
+   |        -- candidate
+18 |     fn go(&self) {
+   |        -- candidate
+24 |     T.go(&t)
+   |       ^^ ambiguous
+   |
+   = help: call it through a value constrained to one interface
+

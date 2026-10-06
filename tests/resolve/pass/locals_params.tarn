@@ -1,0 +1,15 @@
+fn add(a i32, b i32) i32 {
+    sum := a + b
+    var total: i32 = sum
+    total = total + 1
+    return total
+}
+
+fn main() {
+    x := add(1, 2)
+    {
+        y := x + 1
+        print(y)
+    }
+    print(x)
+}

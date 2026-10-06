@@ -1,0 +1,18 @@
+error[E2001]: cannot find `inner` in this scope
+ --> tests/resolve/fail/E2001_scopes.tarn:5:11
+  |
+5 |     print(inner)
+  |           ^^^^^ not found
+
+error[E2001]: cannot find `x` in this scope
+ --> tests/resolve/fail/E2001_scopes.tarn:9:11
+  |
+9 |     print(x)
+  |           ^ not found
+
+error[E2001]: cannot find `i` in this scope
+  --> tests/resolve/fail/E2001_scopes.tarn:12:11
+   |
+12 |     print(i)
+   |           ^ not found
+

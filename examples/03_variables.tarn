@@ -1,0 +1,13 @@
+fn main() {
+    count := 10
+    name := "tarn"
+    limit: u64 := 100
+    var total: i64 = 0
+    var index = 0
+
+    total = total + count
+    index = index + 1
+    print(name)
+    print(total)
+    print(limit)
+}

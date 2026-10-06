@@ -1,0 +1,40 @@
+error[E2002]: `run` is defined more than once
+ --> tests/resolve/fail/E2002_duplicates.tarn:4:8
+  |
+1 | fn run() {
+  |    --- first declared here
+4 | struct run {
+  |        ^^^ redeclared here
+
+error[E2002]: `A` is defined more than once
+ --> tests/resolve/fail/E2002_duplicates.tarn:9:5
+  |
+8 |     A
+  |     - first declared here
+9 |     A
+  |     ^ redeclared here
+
+error[E2002]: `A` is defined more than once
+  --> tests/resolve/fail/E2002_duplicates.tarn:12:6
+   |
+ 8 |     A
+   |     - first declared here
+12 | fn E.A() {
+   |      ^ redeclared here
+
+error[E2002]: field `x` is defined more than once
+  --> tests/resolve/fail/E2002_duplicates.tarn:17:5
+   |
+16 |     x i32
+   |     - first declared here
+17 |     x i64
+   |     ^ redeclared here
+
+error[E2002]: `m` is defined more than once
+  --> tests/resolve/fail/E2002_duplicates.tarn:22:8
+   |
+21 |     fn m(&self)
+   |        - first declared here
+22 |     fn m(&self)
+   |        ^ redeclared here
+

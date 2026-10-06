@@ -1,0 +1,18 @@
+import "util"
+
+pub struct Circle {
+    pub radius f64
+}
+
+pub enum Kind {
+    Big
+    Small
+}
+
+pub fn area(c &Circle) f64 {
+    return c.radius * c.radius * 3.0
+}
+
+fn unused_private() i64 {
+    return util.double(1)
+}

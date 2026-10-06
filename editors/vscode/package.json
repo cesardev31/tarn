@@ -1,0 +1,41 @@
+{
+  "name": "tarn",
+  "displayName": "Tarn",
+  "description": "Official Tarn language support",
+  "publisher": "tarn-lang",
+  "version": "0.0.1",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "tarn",
+        "aliases": [
+          "Tarn",
+          "tarn"
+        ],
+        "extensions": [
+          ".tarn"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/tarn.svg",
+          "dark": "./icons/tarn.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "tarn",
+        "scopeName": "source.tarn",
+        "path": "./syntaxes/tarn.tmLanguage.json"
+      }
+    ]
+  },
+  "icon": "icons/tarn.png"
+}

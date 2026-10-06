@@ -1,0 +1,4 @@
+fn main() {
+    total := first
+        + second
+}

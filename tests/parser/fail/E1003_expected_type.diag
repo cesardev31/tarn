@@ -1,0 +1,6 @@
+error[E1003]: expected type, found `,`
+ --> tests/parser/fail/E1003_expected_type.tarn:1:9
+  |
+1 | fn add(a, b i32) i32 {
+  |         ^ expected a type such as `i32`, `&T` or `[]u8`
+

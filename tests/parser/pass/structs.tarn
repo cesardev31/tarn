@@ -1,0 +1,26 @@
+struct User {
+    name string
+    age  u32
+}
+
+pub copy struct Point<T> {
+    pub x T
+    pub y T
+}
+
+fn User.new(name string) User {
+    return User{name: name, age: 0}
+}
+
+fn User.rename(&mut self, name string) {
+    self.name = name
+}
+
+fn main() {
+    u := User{
+        name: "ana",
+        age: 3,
+    }
+    p := Point{x: 1.0, y: 2.0}
+    short := User{name, age}
+}

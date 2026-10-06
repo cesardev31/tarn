@@ -1,0 +1,7 @@
+(fn add ((a i32) (b i32)) -> i32
+  (block
+    (return (+ a b))))
+(fn main ()
+  (block
+    (let value (call add 20 22))
+    (call print value)))

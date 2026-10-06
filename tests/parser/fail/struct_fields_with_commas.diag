@@ -1,0 +1,16 @@
+error[E1001]: expected end of line after field, found `,`
+ --> tests/parser/fail/struct_fields_with_commas.tarn:2:16
+  |
+2 |     name string,
+  |                ^
+  |
+  = help: each field goes on its own line, without commas
+
+error[E1001]: expected end of line after field, found `,`
+ --> tests/parser/fail/struct_fields_with_commas.tarn:3:12
+  |
+3 |     age u32,
+  |            ^
+  |
+  = help: each field goes on its own line, without commas
+

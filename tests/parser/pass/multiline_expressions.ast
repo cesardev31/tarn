@@ -1,0 +1,5 @@
+(fn main ()
+  (block
+    (let total (+ (+ first second) third))
+    (call call a b)
+    (let cmd (call (. (call (. (call Command "swiftc") arg) "--version") capture)))))

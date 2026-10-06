@@ -1,0 +1,17 @@
+struct Counter {
+    value i64
+}
+
+fn bump(counter &mut Counter) {
+    counter.value = counter.value + 1
+}
+
+fn main() {
+    var c = Counter{value: 0}
+    bump(&mut c)
+    bump(&mut c)
+
+    r := &c
+    // bump(&mut c)    // error[E4101]: `c` is mutably borrowed while `r` is alive
+    print(r.value)
+}

@@ -1,0 +1,15 @@
+struct S {
+}
+
+fn S.new() S {
+    return S{}
+}
+
+fn main() {
+    match 1 {
+        foo(x) => print(x)
+        S.new(y) => print(y)
+        S.Nope(z) => print(z)
+        _ => print(0)
+    }
+}

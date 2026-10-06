@@ -1,0 +1,9 @@
+error[E2017]: variant `fast` must start with an uppercase letter
+ --> tests/resolve/fail/E2017_variant_case.tarn:2:5
+  |
+2 |     fast
+  |     ^^^^
+  |
+  = note: in patterns, capitalized names are variants and lowercase names are new bindings
+  = help: rename it to `Fast`
+

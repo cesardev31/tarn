@@ -1,0 +1,16 @@
+error[E0004]: invalid numeric literal `0b1021`
+ --> tests/lexer/fail/numbers.tarn:2:13
+  |
+2 |     mask := 0b1021
+  |             ^^^^^^
+  |
+  = help: digits may be separated by `_`, but not start or end with it; prefixes are 0x, 0o, 0b
+
+error[E0005]: integer literal is too large
+ --> tests/lexer/fail/numbers.tarn:3:12
+  |
+3 |     big := 99999999999999999999
+  |            ^^^^^^^^^^^^^^^^^^^^ does not fit in 64 bits
+  |
+  = note: the largest integer literal is 18446744073709551615
+

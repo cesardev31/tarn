@@ -1,0 +1,8 @@
+error[E0001]: unexpected character `;`
+ --> tests/lexer/fail/semicolon.tarn:2:11
+  |
+2 |     x := 1;
+  |           ^
+  |
+  = help: Tarn has no semicolons; end the statement with a line break
+

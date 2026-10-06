@@ -1,0 +1,14 @@
+error[E2016]: expected a struct, found variant `Shape.Circle`
+ --> tests/resolve/fail/E2016_not_a_struct.tarn:6:10
+  |
+6 |     s := Shape.Circle{r: 1.0}
+  |          ^^^^^^^^^^^^ not a struct
+  |
+  = help: variants take positional values: `Shape.Rect(1.0, 2.0)`
+
+error[E2016]: expected a struct, found builtin function `print`
+ --> tests/resolve/fail/E2016_not_a_struct.tarn:7:10
+  |
+7 |     t := print{}
+  |          ^^^^^ not a struct
+

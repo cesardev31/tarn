@@ -1,0 +1,11 @@
+struct S {
+}
+
+struct T {
+}
+
+impl S for T {
+}
+
+fn f<X: S>(x X) {
+}

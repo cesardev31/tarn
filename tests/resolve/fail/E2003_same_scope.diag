@@ -1,0 +1,40 @@
+error[E2003]: `a` is already declared in this scope
+ --> tests/resolve/fail/E2003_same_scope.tarn:2:5
+  |
+1 | fn f(a i32) {
+  |      - first declared here
+2 |     a := 2
+  |     ^ redeclared here
+  |
+  = help: use a different name, or assign with `=` if the binding is a `var`
+
+error[E2003]: `b` is already declared in this scope
+ --> tests/resolve/fail/E2003_same_scope.tarn:4:5
+  |
+3 |     b := 1
+  |     - first declared here
+4 |     b := 2
+  |     ^ redeclared here
+  |
+  = help: use a different name, or assign with `=` if the binding is a `var`
+
+error[E2003]: `i` is already declared in this scope
+ --> tests/resolve/fail/E2003_same_scope.tarn:6:9
+  |
+5 |     for i in 0..3 {
+  |         - first declared here
+6 |         i := 1
+  |         ^ redeclared here
+  |
+  = help: use a different name, or assign with `=` if the binding is a `var`
+
+error[E2003]: `x` is already declared in this scope
+  --> tests/resolve/fail/E2003_same_scope.tarn:10:13
+   |
+ 9 |         x => {
+   |         - first declared here
+10 |             x := 2
+   |             ^ redeclared here
+   |
+   = help: use a different name, or assign with `=` if the binding is a `var`
+

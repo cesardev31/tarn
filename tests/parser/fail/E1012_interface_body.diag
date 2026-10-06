@@ -1,0 +1,8 @@
+error[E1012]: interface methods cannot have a body
+ --> tests/parser/fail/E1012_interface_body.tarn:2:28
+  |
+2 |     fn name(&self) &string {
+  |                            ^ remove this body
+  |
+  = help: implement the method in an `impl` block
+

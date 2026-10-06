@@ -1,0 +1,22 @@
+error[E2006]: `hidden` is private to module `secret`
+ --> tests/resolve/fail/E2006_private/main.tarn:4:18
+  |
+4 |     print(secret.hidden())
+  |                  ^^^^^^ not `pub`
+ ::: tests/resolve/fail/E2006_private/secret.tarn:3:4
+3 | fn hidden() i64 {
+  |    ------ declared here
+  |
+  = help: mark it `pub` in `secret`
+
+error[E2006]: `fs` is private to module `secret`
+ --> tests/resolve/fail/E2006_private/main.tarn:6:17
+  |
+6 |     x := secret.fs
+  |                 ^^ not `pub`
+ ::: tests/resolve/fail/E2006_private/secret.tarn:1:8
+1 | import "fs"
+  |        ---- declared here
+  |
+  = note: imports are not re-exported
+

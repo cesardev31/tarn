@@ -1,0 +1,7 @@
+error[E1017]: range operators cannot be chained
+ --> tests/parser/fail/E1017_chained_range.tarn:2:14
+  |
+2 |     r := 0..5..10
+  |          ---- this is already a range
+  |              ^^ second range operator
+

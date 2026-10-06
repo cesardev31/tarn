@@ -1,0 +1,24 @@
+// ADR 0009: shadowing is an error in the same scope, allowed from an
+// enclosing scope, with a warning when it may confuse.
+
+fn count_words(line string) i64 {
+    var total = 0
+    // total := 0                 // error[E2003]: `total` is already declared in this scope
+    for word in line.split(" ") {
+        line := word.trim()       // ok: shadows the parameter inside the loop only
+        if !line.is_empty() {
+            total = total + 1
+        }
+    }
+    return total
+}
+
+fn main() {
+    limit := 10
+    if limit > 5 {
+        limit := 5                // warning[W2001]: `limit` is used again after this block
+        print(limit)
+    }
+    print(limit)
+    print(count_words("a b  c"))
+}

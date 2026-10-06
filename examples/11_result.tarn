@@ -1,0 +1,21 @@
+enum ParseError {
+    Empty
+    NotANumber(string)
+}
+
+fn parse_port(text &string) Result<u16, ParseError> {
+    if text.is_empty() {
+        return Err(ParseError.Empty)
+    }
+    match text.parse_u16() {
+        Some(port) => return Ok(port)
+        None => return Err(ParseError.NotANumber(text.clone()))
+    }
+}
+
+fn main() {
+    match parse_port(&"8080") {
+        Ok(port) => print(port)
+        Err(error) => print("invalid port")
+    }
+}

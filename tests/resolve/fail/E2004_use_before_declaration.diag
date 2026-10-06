@@ -1,0 +1,20 @@
+error[E2004]: `total` is used before its declaration
+ --> tests/resolve/fail/E2004_use_before_declaration.tarn:2:11
+  |
+2 |     print(total)
+  |           ^^^^^ used here
+3 |     total := 1
+  |     ----- declared here
+  |
+  = help: move the declaration above its first use
+
+error[E2004]: `later` is used before its declaration
+ --> tests/resolve/fail/E2004_use_before_declaration.tarn:5:15
+  |
+5 |         print(later)
+  |               ^^^^^ used here
+7 |     later := 2
+  |     ----- declared here
+  |
+  = help: move the declaration above its first use
+

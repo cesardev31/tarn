@@ -1,0 +1,18 @@
+(enum Shape
+  (Circle f64)
+  (Rect f64 f64)
+  (Empty))
+(fn area ((s &Shape)) -> f64
+  (block
+    (match s
+      ((Circle r) => (return (* (* 3.14 r) r)))
+      ((Rect w h) => (block
+        (return (* w h))))
+      ((Shape.Empty) => (return 0.0)))))
+(fn classify ((n i64))
+  (block
+    (match n
+      ((- 1) => (call print "minus one"))
+      ((..= 0 9) => (call print "digit"))
+      (x if (> x 100) => (call print "big"))
+      (_ => (call print "other")))))

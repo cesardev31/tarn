@@ -1,0 +1,17 @@
+[package]
+name = "tarn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tarn"
+path = "src/main.rs"
+
+[dependencies]
+tarn_diagnostics = { path = "../../compiler/diagnostics" }
+tarn_lexer = { path = "../../compiler/lexer" }
+tarn_ast = { path = "../../compiler/ast" }
+tarn_parser = { path = "../../compiler/parser" }
+tarn_driver = { path = "../../compiler/driver" }
+tarn_resolve = { path = "../../compiler/resolve" }

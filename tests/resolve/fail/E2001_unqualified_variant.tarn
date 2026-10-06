@@ -1,0 +1,8 @@
+enum Color {
+    Red
+    Blue
+}
+
+fn main() {
+    c := Red
+}

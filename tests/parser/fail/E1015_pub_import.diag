@@ -1,0 +1,8 @@
+error[E1015]: `pub` is not allowed on imports
+ --> tests/parser/fail/E1015_pub_import.tarn:1:1
+  |
+1 | pub import "fs"
+  | ^^^ remove this
+  |
+  = note: re-exports are not supported in draft 0
+

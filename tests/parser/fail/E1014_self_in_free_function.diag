@@ -1,0 +1,8 @@
+error[E1014]: `self` is only allowed in methods
+ --> tests/parser/fail/E1014_self_in_free_function.tarn:1:8
+  |
+1 | fn len(&self) usize {
+  |        ^^^^^
+  |
+  = help: declare methods as `fn Type.name(&self, ...)`
+

@@ -1,0 +1,8 @@
+error[E0003]: invalid escape sequence `\q`
+ --> tests/lexer/fail/invalid_escape.tarn:2:16
+  |
+2 |     path := "C:\q"
+  |                ^^
+  |
+  = help: valid escapes are \n \t \r \0 \\ \" \u{...}
+

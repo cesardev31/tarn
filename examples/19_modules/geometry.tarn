@@ -1,0 +1,8 @@
+pub copy struct Point {
+    pub x f64
+    pub y f64
+}
+
+pub fn length(p Point) f64 {
+    return (p.x * p.x + p.y * p.y).sqrt()
+}

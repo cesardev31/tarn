@@ -1,0 +1,15 @@
+(interface Writer
+  (fn write (&mut self (data &[]u8)) -> Result<usize, Error>)
+  (fn flush (&mut self)))
+(impl Writer for File
+  (fn write (&mut self (data &[]u8)) -> Result<usize, Error>
+    (block
+      (return (call Ok (call (. data len))))))
+  (fn flush (&mut self)
+    (block)))
+(fn identity <T> ((value T)) -> T
+  (block
+    (return value)))
+(fn save <W: Writer + Named> ((w &mut W))
+  (block
+    (call (. w flush))))

@@ -1,0 +1,41 @@
+# Roadmap
+
+Work proceeds in vertical slices. A phase is done only when it is functional,
+tested and documented.
+
+| # | Phase | Status |
+|---|-------|--------|
+| 0 | Design docs, examples, name, extension, workspace | **done** |
+| 1 | Lexer | **done** |
+| 2 | Parser + AST | **done** |
+| 3 | Name resolution (incl. shadowing rules, ADR 0009) | **done** |
+| 4 | Types (primitives, local inference) | next |
+| 5 | Diagnostics (text + JSON, golden tests) | partially (infra done) |
+| 6 | Typed IR | |
+| 7 | Cranelift backend, `tarn build`/`run` | |
+| 8 | Structs | |
+| 9 | Ownership (moves) | |
+| 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
+| 19 | Formatter (basic) | |
+| 20 | VS Code extension (TextMate) | **started**: language + highlighting |
+
+## Milestones
+
+1. `add(20, 22)` program compiles to a native binary through the full pipeline.
+2. Structs + move semantics; `print(a)` after `b := a` is rejected (E4001).
+3. Borrowing basics with conflict detection.
+4. Result/Option/enums/match/try.
+5. fs/path/process ─▶ start porting `xlinux doctor`.
+
+After milestone 2 plus CLI, fmt and VS Code basics (the "first big milestone"
+definition of done): **stop and review** architecture, syntax and ownership
+before borrowing, generics or a large stdlib.
+
+## Open design questions
+
+- Value-producing `if` (currently: no).
+- Exact iteration protocol for `for x in xs`.
+- `try` error conversion (`Error.from`) vs. explicit mapping.
+- Shared vs. monomorphized generics — decide with benchmarks.
+- Interfaces: explicit `impl I for T` chosen; revisit after xlinux.
+- Does `for x in &[]T` yield `T` (copy types) or `&T`? Examples assume copies of copy types.

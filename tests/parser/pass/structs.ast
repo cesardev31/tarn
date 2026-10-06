@@ -1,0 +1,17 @@
+(struct User
+  (name string)
+  (age u32))
+(pub copy struct Point <T>
+  (pub x T)
+  (pub y T))
+(fn User.new ((name string)) -> User
+  (block
+    (return (struct User (name name) (age 0)))))
+(fn User.rename (&mut self (name string))
+  (block
+    (= (. self name) name)))
+(fn main ()
+  (block
+    (let u (struct User (name "ana") (age 3)))
+    (let p (struct Point (x 1.0) (y 2.0)))
+    (let short (struct User (name) (age)))))

@@ -1,0 +1,8 @@
+error[E1010]: unclosed delimiter `{`
+ --> tests/parser/fail/E1010_unclosed_block.tarn:5:1
+  |
+1 | fn main() {
+  |           - opened here
+5 | 
+  | ^ expected `}` before end of file
+

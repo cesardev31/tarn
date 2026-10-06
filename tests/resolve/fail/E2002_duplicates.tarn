@@ -1,0 +1,23 @@
+fn run() {
+}
+
+struct run {
+}
+
+enum E {
+    A
+    A
+}
+
+fn E.A() {
+}
+
+struct S {
+    x i32
+    x i64
+}
+
+interface I {
+    fn m(&self)
+    fn m(&self)
+}

@@ -1,0 +1,16 @@
+fn find_even(items &[]i64) Option<i64> {
+    for item in items {
+        if item % 2 == 0 {
+            return Some(item)
+        }
+    }
+    return None
+}
+
+fn main() {
+    numbers := [5]i64{1, 3, 4, 7, 9}
+    match find_even(&numbers) {
+        Some(n) => print(n)
+        None => print("no even number")
+    }
+}

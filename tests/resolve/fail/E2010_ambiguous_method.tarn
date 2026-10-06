@@ -1,0 +1,25 @@
+interface A {
+    fn go(&self)
+}
+
+interface B {
+    fn go(&self)
+}
+
+struct T {
+}
+
+impl A for T {
+    fn go(&self) {
+    }
+}
+
+impl B for T {
+    fn go(&self) {
+    }
+}
+
+fn main() {
+    t := T{}
+    T.go(&t)
+}

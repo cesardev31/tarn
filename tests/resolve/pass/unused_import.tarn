@@ -1,0 +1,6 @@
+import "fs"
+import "process"
+
+fn main() {
+    out := process.run("ls")
+}

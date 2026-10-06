@@ -1,0 +1,18 @@
+error[E1018]: a type annotation on a binding needs `:`
+ --> tests/parser/fail/E1018_missing_type_colon.tarn:2:5
+  |
+2 |     limit u64 := 100
+  |     ^^^^^^^^^
+  |
+  = note: see ADR 0011: `x: T := v` and `var x: T = v`
+  = help: write `limit: u64 := ...`
+
+error[E1018]: a type annotation on a binding needs `:`
+ --> tests/parser/fail/E1018_missing_type_colon.tarn:3:9
+  |
+3 |     var total i64 = 0
+  |         ^^^^^^^^^
+  |
+  = note: see ADR 0011: `x: T := v` and `var x: T = v`
+  = help: write `var total: i64 = ...`
+

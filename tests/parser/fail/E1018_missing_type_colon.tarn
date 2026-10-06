@@ -1,0 +1,5 @@
+fn main() {
+    limit u64 := 100
+    var total i64 = 0
+    print(limit + total)
+}

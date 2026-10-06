@@ -1,0 +1,8 @@
+error[E1007]: compound assignment `+=` is not supported
+ --> tests/parser/fail/E1007_compound_assignment.tarn:3:7
+  |
+3 |     x += 1
+  |       ^^
+  |
+  = help: write `x = x + value`
+

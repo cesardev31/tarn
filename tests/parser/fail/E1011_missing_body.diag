@@ -1,0 +1,8 @@
+error[E1011]: function `main` has no body
+ --> tests/parser/fail/E1011_missing_body.tarn:1:10
+  |
+1 | fn main()
+  |          ^ expected `{`, found end of line
+  |
+  = help: the opening `{` must be on the same line as the signature
+

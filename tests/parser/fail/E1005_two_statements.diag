@@ -1,0 +1,8 @@
+error[E1005]: expected end of statement, found identifier `y`
+ --> tests/parser/fail/E1005_two_statements.tarn:2:12
+  |
+2 |     x := 1 y := 2
+  |            ^ expected a line break here
+  |
+  = help: put each statement on its own line
+

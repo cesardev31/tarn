@@ -1,0 +1,5 @@
+fn f(a &string, b &mut []u8, c [4]i64, d fn(i32, i32) bool, e &any Writer, g &&i32) &string {
+    x := &mut b
+    y := &a
+    return a
+}

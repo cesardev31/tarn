@@ -1,0 +1,131 @@
+# Tarn grammar (as implemented by `tarn_parser`, phase 2)
+
+EBNF-ish notation: `{x}` zero or more, `[x]` optional, `|` alternative,
+`NL` a `Newline` token. Newline handling (ADR 0008) is summarized after the
+grammar; inside `( )`, `[ ]`, `< >` and literal braces every `NL` is skipped.
+
+```ebnf
+module      = { NL } { item ( NL | EOF ) { NL } } EOF ;
+
+item        = [ "pub" ] ( import | fn_decl | extern_fn | struct_decl
+                        | enum_decl | interface | impl_decl ) ;
+import      = "import" STRING ;
+extern_fn   = "extern" STRING fn_decl ;                 (* body optional *)
+fn_decl     = "fn" IDENT [ "." IDENT ] [ generics ]
+              "(" [ params ] ")" [ type ] [ block ] ;
+params      = param { "," param } [ "," ] ;
+param       = receiver | IDENT type ;
+receiver    = "self" | "&" "self" | "&" "mut" "self" ;  (* first param of a method only *)
+generics    = "<" gparam { "," gparam } ">" ;
+gparam      = IDENT [ ":" path { "+" path } ] ;
+
+struct_decl = [ "copy" ] "struct" IDENT [ generics ] body(field) ;
+field       = [ "pub" ] IDENT type ;
+enum_decl   = "enum" IDENT [ generics ] body(variant) ;
+variant     = IDENT [ "(" type { "," type } [ "," ] ")" ] ;
+interface   = "interface" IDENT [ generics ] body(fn_decl) ;   (* no bodies *)
+impl_decl   = "impl" path "for" type body(fn_decl) ;
+body(m)     = "{" { NL } [ m { NL { NL } m } ] { NL } "}" ;   (* one member per line *)
+
+type        = path
+            | "&" [ "mut" ] type
+            | "[" "]" type                       (* slice *)
+            | "[" expr "]" type                  (* array *)
+            | "fn" "(" [ type { "," type } ] ")" [ type ]
+            | "any" path ;                       (* dynamic interface *)
+path        = IDENT { "." IDENT } [ "<" type { "," type } ">" ] ;
+
+block       = "{" { NL } [ stmt { NL { NL } stmt } ] { NL } "}" ;
+stmt        = "return" [ expr ]
+            | "break" | "continue"
+            | "var" IDENT [ ":" type ] "=" expr
+            | IDENT [ ":" type ] ":=" expr
+            | expr [ "=" expr ]                  (* assignment target: name, field, index *)
+            | if_stmt | for_stmt | match_stmt
+            | block
+            | "unsafe" block
+            | "scope" block                      (* contextual *)
+            | "spawn" expr ;
+if_stmt     = "if" cond block [ "else" ( if_stmt | block ) ] ;  (* else on the `}` line *)
+for_stmt    = "for" ( block | IDENT "in" cond block | cond block ) ;
+match_stmt  = "match" cond "{" { NL } { arm NL { NL } } "}" ;
+arm         = pattern [ "if" expr ] "=>" stmt ;
+cond        = expr ;                             (* no bare struct literals *)
+
+expr        = [ range_lhs ] ( ".." | "..=" ) [ binary ] | binary ;
+binary      = unary { BINOP binary } ;           (* precedence climbing, see below *)
+unary       = ( "-" | "!" | "&" [ "mut" ] | "try" ) unary | postfix ;
+postfix     = primary { "." IDENT | "(" [ args ] ")" | "[" expr "]"
+                      | "{" [ field_inits ] "}" } ;   (* struct literal: path-only primary *)
+primary     = INT | FLOAT | STRING | "true" | "false" | IDENT
+            | "(" ")" | "(" expr ")"
+            | ( "[" "]" type | "[" expr "]" type ) "{" [ args ] "}"   (* array literal *)
+            | "fn" "(" [ cparam { "," cparam } ] ")" [ type ] block ;  (* closure *)
+cparam      = IDENT [ type ] ;
+args        = expr { "," expr } [ "," ] ;
+field_inits = field_init { "," field_init } [ "," ] ;
+field_init  = IDENT [ ":" expr ] ;
+
+pattern     = "_" | literal [ ( ".." | "..=" ) literal ]
+            | path [ "(" [ pattern { "," pattern } ] ")"
+                   | "{" [ IDENT [ ":" pattern ] { "," ... } ] "}" ] ;
+literal     = [ "-" ] ( INT | FLOAT ) | STRING | "true" | "false" ;
+```
+
+## Operator precedence (loosest first)
+
+| Level | Operators | Associativity |
+|-------|-----------|---------------|
+| 0 | `..` `..=` | none — `a..b..c` is E1017 |
+| 1 | `\|\|` | left |
+| 2 | `&&` | left |
+| 3 | `==` `!=` `<` `<=` `>` `>=` | none — `a < b < c` is E1006 |
+| 4 | `\|` | left |
+| 5 | `^` | left |
+| 6 | `&` | left |
+| 7 | `<<` `>>` | left |
+| 8 | `+` `-` | left |
+| 9 | `*` `/` `%` | left |
+| 10 | prefix `-` `!` `&` `&mut` `try` | right (prefix) |
+| 11 | postfix `.name` `(args)` `[i]` `Path{...}` | left |
+
+Bitwise operators bind tighter than comparisons (unlike C), so
+`a & mask == 0` means `(a & mask) == 0`. `try` is a prefix operator:
+`try a.b() + 1` is `(try a.b()) + 1`.
+
+## Newlines (ADR 0008)
+
+1. Inside `( )`, `[ ]`, generic `< >`, struct literal and array literal braces:
+   ignored.
+2. Inside blocks and item bodies: they end statements/members.
+3. Skipped after a binary operator, prefix operator, `:=`, `=`, `=>`, `.`.
+4. In postfix position, newlines followed by `.` continue the chain.
+5. A line starting with a binary operator is a new (invalid) statement:
+   E1002 with a hint.
+6. `else` must follow `}` on the same line: E1016.
+
+## Disambiguation rules
+
+- The parser is deterministic: bounded lookahead, no backtracking (ADR 0011).
+- `IDENT :=` → immutable binding; `IDENT :` → annotated binding
+  `x: T := e`. Nothing else starts with `IDENT :` in statement position.
+- The draft-0 forms `x T := e` / `var x T = e` are diagnosed (E1018) with a
+  fix-it; the check scans the line for `:=` only to produce that diagnostic.
+- `scope` followed by `{` at statement start is a scope block; otherwise an
+  identifier.
+- `any` followed by an identifier in type position is a dynamic type.
+- `self` / `&self` / `&mut self` is a receiver only as first parameter.
+- A `{` after a path-only expression (`User`, `geometry.Point`) starts a
+  struct literal, except in `if`/`for`/`match` heads (E1009 if one is found).
+- `>>` closing two generic argument lists and `&&` in prefix/type position are
+  split into two tokens.
+- A bare identifier pattern is not classified by the parser (binding vs. unit
+  variant is name resolution's job).
+
+## Not in the implemented subset yet
+
+Everything in `docs/language.md` used by the 28 examples is parsed. Explicit
+generic arguments in expressions are a v0 restriction (ADR 0012). Not yet
+designed or parsed: attributes, `const`/statics, type aliases, raw pointer
+types `*T`, guards beyond a single expression, labeled breaks, numeric literal
+suffixes, char literals, doc-comment attachment to items.

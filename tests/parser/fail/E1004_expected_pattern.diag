@@ -1,0 +1,6 @@
+error[E1004]: expected pattern, found `+`
+ --> tests/parser/fail/E1004_expected_pattern.tarn:3:9
+  |
+3 |         + => a()
+  |         ^ expected a pattern such as `_`, `x`, `0`, `Some(x)`
+

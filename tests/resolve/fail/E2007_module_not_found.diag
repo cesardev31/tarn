@@ -1,0 +1,17 @@
+error[E2007]: cannot find module `fss`
+ --> tests/resolve/fail/E2007_module_not_found.tarn:1:8
+  |
+1 | import "fss"
+  |        ^^^^^ no such module
+  |
+  = note: local modules are files relative to the project root: `fss.tarn`
+  = help: did you mean the standard module `fs`?
+
+error[E2007]: cannot find module `nowhere/thing`
+ --> tests/resolve/fail/E2007_module_not_found.tarn:2:8
+  |
+2 | import "nowhere/thing"
+  |        ^^^^^^^^^^^^^^^ no such module
+  |
+  = note: local modules are files relative to the project root: `nowhere/thing.tarn`
+

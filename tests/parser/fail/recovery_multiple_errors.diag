@@ -1,0 +1,20 @@
+error[E1001]: expected `)`, found `:=`
+ --> tests/parser/fail/recovery_multiple_errors.tarn:3:7
+  |
+3 |     y := 2
+  |       ^^ expected `)`
+
+error[E1002]: expected expression, found `*`
+ --> tests/parser/fail/recovery_multiple_errors.tarn:8:10
+  |
+8 |     z := * 3
+  |          ^ expected an expression
+
+error[E1005]: expected end of statement, found identifier `b`
+  --> tests/parser/fail/recovery_multiple_errors.tarn:12:7
+   |
+12 |     a b
+   |       ^ expected a line break here
+   |
+   = help: put each statement on its own line
+

@@ -1,0 +1,17 @@
+interface Shape {
+    fn area(&self) f64
+    fn name(&self) string
+}
+
+struct Sq {
+}
+
+impl Shape for Sq {
+    fn area(&self) f64 {
+        return 1.0
+    }
+
+    fn perimeter(&self) f64 {
+        return 4.0
+    }
+}

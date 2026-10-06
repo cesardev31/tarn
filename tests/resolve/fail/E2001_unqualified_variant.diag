@@ -1,0 +1,8 @@
+error[E2001]: cannot find `Red` in this scope
+ --> tests/resolve/fail/E2001_unqualified_variant.tarn:7:10
+  |
+7 |     c := Red
+  |          ^^^ not found
+  |
+  = help: variants are qualified outside patterns: `Color.Red`
+

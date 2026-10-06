@@ -1,0 +1,8 @@
+fn main() {
+    print(total)
+    total := 1
+    {
+        print(later)
+    }
+    later := 2
+}

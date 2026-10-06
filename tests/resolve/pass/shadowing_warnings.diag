@@ -1,0 +1,48 @@
+warning[W2003]: unused import `fs`
+ --> tests/resolve/pass/shadowing_warnings.tarn:1:8
+  |
+1 | import "fs"
+  |        ^^^^
+  |
+  = help: remove the import
+
+warning[W2001]: `limit` is shadowed in an inner scope and used again after it
+ --> tests/resolve/pass/shadowing_warnings.tarn:6:9
+  |
+6 |         limit := 5
+  |         ^^^^^ inner binding hides the outer one here
+9 |     print(limit)
+  |           ----- this refers to the outer binding
+  |
+  = note: changes made through the inner binding are not visible here
+  = help: give the inner binding a different name
+
+warning[W2001]: `total` shadows a mutable variable of an enclosing scope
+  --> tests/resolve/pass/shadowing_warnings.tarn:13:9
+   |
+11 |     var total = 0
+   |         ----- `var` declared here
+13 |         total := i
+   |         ^^^^^ new binding here
+   |
+   = note: assignments to the inner binding do not change the outer one
+   = help: use a different name
+
+warning[W2002]: `print` shadows the builtin function `print`
+  --> tests/resolve/pass/shadowing_warnings.tarn:16:5
+   |
+16 |     print := 3
+   |     ^^^^^
+   |
+   = help: use a different name
+
+warning[W2002]: `fs` shadows the module `fs`
+  --> tests/resolve/pass/shadowing_warnings.tarn:17:5
+   |
+ 1 | import "fs"
+   |        ---- declared here
+17 |     fs := 1
+   |     ^^
+   |
+   = help: use a different name
+

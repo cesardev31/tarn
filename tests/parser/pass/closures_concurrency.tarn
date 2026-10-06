@@ -1,0 +1,10 @@
+fn main() {
+    ch: Channel<i64> := channel(4)
+    scope {
+        spawn work(1, ch.sender())
+    }
+    doubled := xs.map(fn(x) i64 {
+        return x * 2
+    })
+    typed := fn(a i32, b i32) i32 { return a + b }
+}

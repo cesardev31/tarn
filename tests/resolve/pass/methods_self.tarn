@@ -1,0 +1,34 @@
+struct Counter {
+    value i64
+}
+
+enum Light {
+    Red
+    Green
+}
+
+fn Counter.new() Counter {
+    return Counter{value: 0}
+}
+
+fn Counter.bump(&mut self) {
+    self.value = self.value + 1
+}
+
+fn Counter.into_value(self) i64 {
+    return self.value
+}
+
+fn Light.next(&self) Light {
+    match self {
+        Red => return Light.Green
+        Green => return Light.Red
+    }
+}
+
+fn main() {
+    var c = Counter.new()
+    c.bump()
+    l := Light.Red.next()
+    print(c.into_value())
+}

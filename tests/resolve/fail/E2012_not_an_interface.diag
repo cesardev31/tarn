@@ -1,0 +1,12 @@
+error[E2012]: expected an interface in `impl`, found struct `S`
+ --> tests/resolve/fail/E2012_not_an_interface.tarn:7:6
+  |
+7 | impl S for T {
+  |      ^ not an interface
+
+error[E2012]: expected an interface in a bound, found struct `S`
+  --> tests/resolve/fail/E2012_not_an_interface.tarn:10:9
+   |
+10 | fn f<X: S>(x X) {
+   |         ^ not an interface
+

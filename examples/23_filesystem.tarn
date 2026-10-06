@@ -1,0 +1,13 @@
+import "fs"
+import "path"
+
+fn check_sdk() Result<void, fs.Error> {
+    sdk := path.Path("/opt/xlinux/sdk")
+    if !sdk.exists() {
+        return Err(fs.Error.not_found("iOS SDK not found"))
+    }
+    for entry in try fs.read_dir(&sdk) {
+        print(entry.name())
+    }
+    return Ok(())
+}

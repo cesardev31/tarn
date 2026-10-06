@@ -1,0 +1,8 @@
+error[E1016]: `else` must be on the same line as `}`
+ --> tests/parser/fail/E1016_else_on_new_line.tarn:5:5
+  |
+5 |     else {
+  |     ^^^^
+  |
+  = help: write `} else {`
+

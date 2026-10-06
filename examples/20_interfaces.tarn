@@ -1,0 +1,28 @@
+
+interface Shape {
+    fn area(&self) f64
+}
+
+struct Square {
+    side f64
+}
+
+impl Shape for Square {
+    fn area(&self) f64 {
+        return self.side * self.side
+    }
+}
+
+fn print_area<S: Shape>(s &S) {          // static dispatch
+    print(s.area())
+}
+
+fn print_any(s &any Shape) {             // dynamic dispatch
+    print(s.area())
+}
+
+fn main() {
+    sq := Square{side: 2.0}
+    print_area(&sq)
+    print_any(&sq)
+}

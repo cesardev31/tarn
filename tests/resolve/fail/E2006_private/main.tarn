@@ -1,0 +1,7 @@
+import "secret"
+
+fn main() {
+    print(secret.hidden())
+    print(secret.visible())
+    x := secret.fs
+}

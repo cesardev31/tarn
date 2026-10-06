@@ -1,0 +1,6 @@
+error[E1001]: expected `,`, found string
+ --> tests/parser/fail/E1001_missing_paren.tarn:2:15
+  |
+2 |     print("a" "b")
+  |               ^^^ expected `,`
+

@@ -1,0 +1,9 @@
+[package]
+name = "tarn_resolve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tarn_ast = { path = "../ast" }
+tarn_diagnostics = { path = "../diagnostics" }

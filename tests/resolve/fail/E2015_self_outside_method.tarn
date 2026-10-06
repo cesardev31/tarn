@@ -1,0 +1,11 @@
+fn free() {
+    print(self)
+}
+
+struct S {
+    v i64
+}
+
+fn S.make() S {
+    return S{v: self.v}
+}

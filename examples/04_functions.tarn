@@ -1,0 +1,13 @@
+fn square(x i64) i64 {
+    return x * x
+}
+
+fn greet(name string) {
+    print("hello, ")
+    print(name)
+}
+
+fn main() {
+    greet("ana")
+    print(square(12))
+}

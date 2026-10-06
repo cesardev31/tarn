@@ -1,0 +1,16 @@
+error[E2015]: `self` is only available in methods with a receiver
+ --> tests/resolve/fail/E2015_self_outside_method.tarn:2:11
+  |
+2 |     print(self)
+  |           ^^^^
+  |
+  = help: declare a receiver: `fn Type.name(&self, ...)`
+
+error[E2015]: `self` is only available in methods with a receiver
+  --> tests/resolve/fail/E2015_self_outside_method.tarn:10:17
+   |
+10 |     return S{v: self.v}
+   |                 ^^^^
+   |
+   = help: declare a receiver: `fn Type.name(&self, ...)`
+

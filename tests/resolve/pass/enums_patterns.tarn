@@ -1,0 +1,36 @@
+enum Shape {
+    Circle(f64)
+    Rect(f64, f64)
+    Empty
+}
+
+struct User {
+    name string
+    age u32
+}
+
+fn area(s &Shape) f64 {
+    match s {
+        Circle(r) => return r * r
+        Shape.Rect(w, h) => return w * h
+        Empty => return 0.0
+    }
+}
+
+fn describe(u &User, o Option<i64>) {
+    match u {
+        User{name, age: 0} => print(name)
+        User{name: n, age} => print(age)
+    }
+    match o {
+        Some(v) if v > 0 => print(v)
+        Some(_) => print(0)
+        None => print(-1)
+    }
+}
+
+fn main() {
+    s := Shape.Circle(1.0)
+    e := Shape.Empty
+    print(area(&s))
+}

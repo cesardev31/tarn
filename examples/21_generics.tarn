@@ -1,0 +1,16 @@
+fn identity<T>(value T) T {
+    return value
+}
+
+struct Pair<A, B> {
+    first  A
+    second B
+}
+
+fn main() {
+    n := identity(42)
+    p := Pair{first: "port", second: 8080}
+    nothing: Option<i64> := None
+    print(n)
+    print(p.second)
+}

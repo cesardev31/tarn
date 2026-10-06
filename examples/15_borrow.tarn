@@ -1,0 +1,14 @@
+struct Buffer {
+    data string
+}
+
+fn inspect(buffer &Buffer) usize {
+    return buffer.data.len()
+}
+
+fn main() {
+    buffer := Buffer{data: "abc"}
+    n := inspect(&buffer)      // shared borrow ends after the call
+    m := inspect(&buffer)      // many shared borrows are fine
+    print(n + m)
+}

@@ -1,0 +1,13 @@
+fn first() {
+    x := (1 +
+    y := 2
+}
+
+fn second() {
+    print("still parsed")
+    z := * 3
+}
+
+fn third() {
+    a b
+}

@@ -1,0 +1,11 @@
+fn describe(n i64) string {
+    match n {
+        0 => return "zero"
+        1..=9 => return "small"
+        _ => return "large"
+    }
+}
+
+fn main() {
+    print(describe(7))
+}

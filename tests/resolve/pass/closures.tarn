@@ -1,0 +1,15 @@
+fn apply(f fn(i64) i64, x i64) i64 {
+    return f(x)
+}
+
+fn main() {
+    offset := 10
+    scale := 2
+    r := apply(fn(x) i64 {
+        inner := fn(y i64) i64 {
+            return y * scale + offset
+        }
+        return inner(x)
+    }, 5)
+    print(r)
+}

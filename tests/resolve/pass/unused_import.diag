@@ -1,0 +1,8 @@
+warning[W2003]: unused import `fs`
+ --> tests/resolve/pass/unused_import.tarn:1:8
+  |
+1 | import "fs"
+  |        ^^^^
+  |
+  = help: remove the import
+

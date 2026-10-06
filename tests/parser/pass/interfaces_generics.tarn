@@ -1,0 +1,21 @@
+interface Writer {
+    fn write(&mut self, data &[]u8) Result<usize, Error>
+    fn flush(&mut self)
+}
+
+impl Writer for File {
+    fn write(&mut self, data &[]u8) Result<usize, Error> {
+        return Ok(data.len())
+    }
+
+    fn flush(&mut self) {
+    }
+}
+
+fn identity<T>(value T) T {
+    return value
+}
+
+fn save<W: Writer + Named>(w &mut W) {
+    w.flush()
+}

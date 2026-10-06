@@ -1,0 +1,6 @@
+import "geometry"
+
+fn main() {
+    p := geometry.Point{x: 3.0, y: 4.0}
+    print(geometry.length(p))
+}

@@ -1,0 +1,10 @@
+(fn main ()
+  (block
+    (let x 1)
+    (let y u64 2)
+    (var z 3)
+    (var w i64 4)
+    (let nested Option<Result<i32, string>> None)
+    (= z (+ z 1))
+    (= (index arr 0) 1)
+    (= (. user age) 2)))

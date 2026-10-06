@@ -1,0 +1,13 @@
+import "process"
+
+fn swift_version() Result<string, process.Error> {
+    cmd := process.Command("swiftc")
+        .arg("--version")
+        .capture()
+
+    output := try cmd.run()
+    if output.code != 0 {
+        return Err(process.Error.failed(output.code))
+    }
+    return Ok(output.stdout)
+}

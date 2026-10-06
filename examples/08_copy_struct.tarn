@@ -1,0 +1,15 @@
+copy struct Point {
+    x f64
+    y f64
+}
+
+fn Point.add(self, other Point) Point {
+    return Point{x: self.x + other.x, y: self.y + other.y}
+}
+
+fn main() {
+    a := Point{x: 1.0, y: 2.0}
+    b := a              // copy, `a` is still usable
+    c := a.add(b)
+    print(c.x)
+}

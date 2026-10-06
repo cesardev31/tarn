@@ -1,0 +1,20 @@
+== closures
+1:15 i64 -> primitive i64 (prelude)
+1:20 i64 -> primitive i64 (prelude)
+1:27 i64 -> primitive i64 (prelude)
+1:32 i64 -> primitive i64 (prelude)
+2:12 f -> param f (closures:1:10)
+2:14 x -> param x (closures:1:25)
+8:10 apply -> fn apply (closures:1:4)
+8:22 i64 -> primitive i64 (prelude)
+9:23 i64 -> primitive i64 (prelude)
+9:28 i64 -> primitive i64 (prelude)
+10:20 y -> closure-param y (closures:9:21)
+10:24 scale -> local scale (closures:7:5)
+10:32 offset -> local offset (closures:6:5)
+12:16 inner -> local inner (closures:9:9)
+12:22 x -> closure-param x (closures:8:19)
+14:5 print -> builtin print (prelude)
+14:11 r -> local r (closures:8:5)
+8:16 closure captures scale, offset
+9:18 closure captures scale, offset

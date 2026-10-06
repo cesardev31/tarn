@@ -1,0 +1,8 @@
+(fn main ()
+  (block
+    (let a (array [3]i64 1 2 3))
+    (let s (array []u8 1 2))
+    (let part (& (index a (.. 1 _))))
+    (let head (& (index a (.. _ 1))))
+    (let all (& (index a (.. _ _))))
+    (let unit ())))

@@ -1,0 +1,24 @@
+enum Shape {
+    Circle(f64)
+    Rect(f64, f64)
+    Empty
+}
+
+fn area(s &Shape) f64 {
+    match s {
+        Circle(r) => return 3.14 * r * r
+        Rect(w, h) => {
+            return w * h
+        }
+        Shape.Empty => return 0.0
+    }
+}
+
+fn classify(n i64) {
+    match n {
+        -1 => print("minus one")
+        0..=9 => print("digit")
+        x if x > 100 => print("big")
+        _ => print("other")
+    }
+}

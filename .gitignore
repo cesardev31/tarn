@@ -1,0 +1,5 @@
+/target
+*.o
+/editors/vscode/node_modules
+/editors/vscode/*.vsix
+__pycache__/

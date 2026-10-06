@@ -1,0 +1,13 @@
+fn main() {
+    if true {
+        inner := 1
+    }
+    print(inner)
+    f := fn(x i64) i64 {
+        return x
+    }
+    print(x)
+    for i in 0..3 {
+    }
+    print(i)
+}

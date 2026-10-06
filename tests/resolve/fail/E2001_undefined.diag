@@ -1,0 +1,12 @@
+error[E2001]: cannot find `cuont` in this scope
+ --> tests/resolve/fail/E2001_undefined.tarn:3:11
+  |
+3 |     print(cuont)
+  |           ^^^^^ not found
+
+error[E2001]: cannot find `missing` in this scope
+ --> tests/resolve/fail/E2001_undefined.tarn:4:5
+  |
+4 |     missing()
+  |     ^^^^^^^ not found
+

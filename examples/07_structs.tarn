@@ -1,0 +1,23 @@
+struct User {
+    name string
+    age  u32
+}
+
+fn User.new(name string) User {
+    return User{name: name, age: 0}
+}
+
+fn User.birthday(&mut self) {
+    self.age = self.age + 1
+}
+
+fn User.greet(&self) {
+    print(self.name)
+}
+
+fn main() {
+    var user = User.new("ana")
+    user.birthday()
+    user.greet()
+    print(user.age)
+}

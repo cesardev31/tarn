@@ -1,0 +1,12 @@
+fn main() {
+    total := first +
+        second +
+        third
+    call(
+        a,
+        b,
+    )
+    cmd := Command("swiftc")
+        .arg("--version")
+        .capture()
+}

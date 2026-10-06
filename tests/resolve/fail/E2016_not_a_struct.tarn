@@ -1,0 +1,8 @@
+enum Shape {
+    Circle(f64)
+}
+
+fn main() {
+    s := Shape.Circle{r: 1.0}
+    t := print{}
+}

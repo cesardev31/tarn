@@ -1,0 +1,5 @@
+(fn extern "C" getpid () -> i32)
+(fn pid () -> i32
+  (block
+    (unsafe (block
+      (return (call getpid))))))

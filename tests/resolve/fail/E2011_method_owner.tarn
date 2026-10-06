@@ -1,0 +1,15 @@
+interface Named {
+    fn name(&self) string
+}
+
+fn helper() {
+}
+
+fn Named.extra(&self) {
+}
+
+fn helper.more() {
+}
+
+fn Missing.thing() {
+}

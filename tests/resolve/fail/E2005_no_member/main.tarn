@@ -1,0 +1,12 @@
+import "geo"
+
+enum Color {
+    Red
+    Green
+}
+
+fn main() {
+    c := Color.Gren
+    p := geo.Pont{x: 1}
+    q := Color.new()
+}

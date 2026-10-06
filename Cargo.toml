@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "compiler/diagnostics",
+    "compiler/lexer",
+    "compiler/ast",
+    "compiler/parser",
+    "compiler/resolve",
+    "compiler/driver",
+    "tools/cli",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[profile.release]
+debug = false

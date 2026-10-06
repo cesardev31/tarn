@@ -1,0 +1,14 @@
+struct Point {
+    x i64
+}
+
+enum Shape {
+    Dot
+}
+
+fn main() {
+    match 1 {
+        Shape.Dot.Extra(x) => print(x)
+        _ => print(0)
+    }
+}

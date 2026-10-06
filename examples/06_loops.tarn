@@ -1,0 +1,20 @@
+fn main() {
+    var sum = 0
+    for i in 0..10 {
+        sum = sum + i
+    }
+
+    var n = 27
+    for n != 1 {
+        if n % 2 == 0 {
+            n = n / 2
+        } else {
+            n = 3 * n + 1
+        }
+    }
+
+    for {
+        break
+    }
+    print(sum)
+}

@@ -1,0 +1,19 @@
+import "net"
+
+fn download(url string, out Sender<Result<usize, net.Error>>) {
+    out.send(net.get(&url).map(fn(body) usize { return body.len() }))
+}
+
+fn main() {
+    ch: Channel<Result<usize, net.Error>> := channel(2)
+    scope {
+        spawn download("https://example.com/a", ch.sender())
+        spawn download("https://example.com/b", ch.sender())
+    }
+    for result in ch.drain() {
+        match result {
+            Ok(n) => print(n)
+            Err(_) => print("failed")
+        }
+    }
+}

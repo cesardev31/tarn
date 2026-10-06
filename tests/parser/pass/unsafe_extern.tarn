@@ -1,0 +1,7 @@
+extern "C" fn getpid() i32
+
+fn pid() i32 {
+    unsafe {
+        return getpid()
+    }
+}

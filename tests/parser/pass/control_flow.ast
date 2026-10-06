@@ -1,0 +1,19 @@
+(fn main ()
+  (block
+    (if (> a 0)
+      (block
+        (call b))
+      else (if (< a 0)
+        (block
+          (call c))
+        else (block
+          (call d))))
+    (for
+      (block
+        (break)))
+    (for (!= n 1)
+      (block
+        (continue)))
+    (for i in (..= 0 10)
+      (block
+        (call print i)))))

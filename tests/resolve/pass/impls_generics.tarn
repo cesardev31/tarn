@@ -1,0 +1,45 @@
+interface Shape {
+    fn area(&self) f64
+    fn name(&self) string
+}
+
+struct Square {
+    side f64
+}
+
+impl Shape for Square {
+    fn area(&self) f64 {
+        return self.side * self.side
+    }
+
+    fn name(&self) string {
+        return "square"
+    }
+}
+
+fn largest<S: Shape>(items &[]S) f64 {
+    var best = 0.0
+    for item in items {
+        a := item.area()
+        if a > best {
+            best = a
+        }
+    }
+    return best
+}
+
+fn show(s &any Shape) {
+    print(s.name())
+}
+
+struct Pair<A, B> {
+    first A
+    second B
+}
+
+fn main() {
+    sq := Square{side: 2.0}
+    print(Square.area(&sq))
+    show(&sq)
+    p := Pair{first: 1, second: "x"}
+}

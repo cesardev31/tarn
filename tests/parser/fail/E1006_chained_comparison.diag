@@ -1,0 +1,9 @@
+error[E1006]: comparison operators cannot be chained
+ --> tests/parser/fail/E1006_chained_comparison.tarn:2:17
+  |
+2 |     ok := 0 < x < 10
+  |             - first comparison
+  |                 ^ second comparison
+  |
+  = help: split it: `a < b && b < c`
+

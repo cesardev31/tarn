@@ -1,0 +1,7 @@
+fn helper() {
+}
+
+fn main() {
+    x: helper := 1
+    var y: print = 2
+}

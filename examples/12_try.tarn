@@ -1,0 +1,19 @@
+import "fs"
+
+struct Config {
+    name string
+    port u16
+}
+
+fn load(path &string) Result<Config, fs.Error> {
+    text := try fs.read_text(path)
+    name := try first_line(&text)
+    return Ok(Config{name: name, port: 8080})
+}
+
+fn first_line(text &string) Result<string, fs.Error> {
+    match text.lines().next() {
+        Some(line) => return Ok(line.to_string())
+        None => return Err(fs.Error.invalid_data("empty file"))
+    }
+}

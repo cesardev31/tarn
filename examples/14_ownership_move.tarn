@@ -1,0 +1,18 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+    print(b.data)
+}
+
+fn main() {
+    a := Buffer.new()
+    b := a              // `a` is moved into `b`
+    consume(b)          // `b` is moved into `consume`
+    // print(a.data)    // error[E4001]: use of moved value `a`
+}

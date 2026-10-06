@@ -1,0 +1,22 @@
+enum DoctorError {
+    MissingTool(string)
+    SdkNotFound
+}
+
+fn DoctorError.message(&self) string {
+    match self {
+        MissingTool(name) => return "missing tool: " + name
+        SdkNotFound => return "iOS SDK not found"
+    }
+}
+
+fn check() Result<void, DoctorError> {
+    return Err(DoctorError.SdkNotFound)
+}
+
+fn main() {
+    match check() {
+        Ok(_) => print("ok")
+        Err(e) => print(e.message())
+    }
+}

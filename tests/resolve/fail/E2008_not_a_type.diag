@@ -1,0 +1,12 @@
+error[E2008]: expected a type, found function `helper`
+ --> tests/resolve/fail/E2008_not_a_type.tarn:5:8
+  |
+5 |     x: helper := 1
+  |        ^^^^^^ not a type
+
+error[E2008]: expected a type, found builtin function `print`
+ --> tests/resolve/fail/E2008_not_a_type.tarn:6:12
+  |
+6 |     var y: print = 2
+  |            ^^^^^ not a type
+

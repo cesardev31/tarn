@@ -1,0 +1,8 @@
+error[E1002]: expected expression, found `+`
+ --> tests/parser/fail/E1002_leading_operator.tarn:3:9
+  |
+3 |         + second
+  |         ^ expected an expression
+  |
+  = help: a line cannot start with a binary operator; put the operator at the end of the previous line
+

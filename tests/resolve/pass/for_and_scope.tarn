@@ -1,0 +1,23 @@
+fn main() {
+    var sum = 0
+    for i in 0..10 {
+        sum = sum + i
+    }
+    for {
+        break
+    }
+    var n = 3
+    for n > 0 {
+        n = n - 1
+    }
+    scope {
+        spawn work(sum)
+    }
+    unsafe {
+        print(n)
+    }
+}
+
+fn work(x i64) {
+    print(x)
+}

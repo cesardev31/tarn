@@ -1,0 +1,18 @@
+enum Shape {
+    Circle(f64)
+    Rect(f64, f64)
+    Empty
+}
+
+fn area(s &Shape) f64 {
+    match s {
+        Circle(r) => return 3.14159 * r * r
+        Rect(w, h) => return w * h
+        Empty => return 0.0
+    }
+}
+
+fn main() {
+    shape := Shape.Rect(2.0, 3.0)
+    print(area(&shape))
+}

@@ -1,0 +1,19 @@
+// Shadowing an outer binding without using the outer one afterwards: no warning.
+fn count(line string) i64 {
+    var n = 0
+    for part in line.split(",") {
+        line := part.trim()
+        if !line.is_empty() {
+            n = n + 1
+        }
+    }
+    return n
+}
+
+fn main() {
+    value := 1
+    match Some(value) {
+        Some(value) => print(value)
+        None => print(0)
+    }
+}

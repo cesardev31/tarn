@@ -1,0 +1,36 @@
+// No lifetime syntax. The compiler infers each function's provenance:
+// which reference parameters the returned reference may borrow from.
+
+fn first(value &string) &string {        // provenance: {value}
+    return value
+}
+
+fn longest(a &string, b &string) &string {
+    if a.len() >= b.len() {
+        return a
+    }
+    return b                             // provenance: {a, b}
+}
+
+fn pick_left(a &string, b &string) &string {
+    return a                             // provenance: {a}; `b` is not kept borrowed
+}
+
+interface Named {
+    fn name(&self) &string               // bodyless: receiver rule, provenance {self}
+    // fn pick(a &string, b &string) &string
+    //                                   // error[E4202]: cannot infer where the
+    //                                   // returned reference comes from
+}
+
+// fn dangling() &string {
+//     s := "temp"
+//     return &s                         // error[E4201]: returned reference may outlive its owner
+// }
+
+fn main() {
+    x := "short"
+    y := "much longer"
+    print(longest(&x, &y))
+    print(first(pick_left(&x, &y)))
+}

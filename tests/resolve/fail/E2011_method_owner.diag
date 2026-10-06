@@ -1,0 +1,22 @@
+error[E2011]: cannot declare method `extra` on interface `Named`
+ --> tests/resolve/fail/E2011_method_owner.tarn:8:4
+  |
+8 | fn Named.extra(&self) {
+  |    ^^^^^
+  |
+  = note: methods are declared on structs and enums defined in the same module
+
+error[E2011]: cannot declare method `more` on function `helper`
+  --> tests/resolve/fail/E2011_method_owner.tarn:11:4
+   |
+11 | fn helper.more() {
+   |    ^^^^^^
+   |
+   = note: methods are declared on structs and enums defined in the same module
+
+error[E2001]: cannot find type `Missing` in this module
+  --> tests/resolve/fail/E2011_method_owner.tarn:14:4
+   |
+14 | fn Missing.thing() {
+   |    ^^^^^^^ not found
+

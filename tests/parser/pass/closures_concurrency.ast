@@ -1,0 +1,11 @@
+(fn main ()
+  (block
+    (let ch Channel<i64> (call channel 4))
+    (scope (block
+      (spawn (call work 1 (call (. ch sender))))))
+    (let doubled (call (. xs map) (closure (x) -> i64
+      (block
+        (return (* x 2))))))
+    (let typed (closure (a i32 b i32) -> i32
+      (block
+        (return (+ a b)))))))

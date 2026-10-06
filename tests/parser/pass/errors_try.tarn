@@ -1,0 +1,9 @@
+import "fs"
+
+fn load(path &string) Result<string, fs.Error> {
+    text := try fs.read_text(path)
+    for entry in try fs.read_dir(path) {
+        print(entry.name())
+    }
+    return Ok(text)
+}

@@ -1,0 +1,22 @@
+error[E2005]: enum `Color` has no member `Gren`
+ --> tests/resolve/fail/E2005_no_member/main.tarn:9:16
+  |
+9 |     c := Color.Gren
+  |                ^^^^ not found
+  |
+  = help: did you mean `Green`?
+
+error[E2005]: module `geo` has no member `Pont`
+  --> tests/resolve/fail/E2005_no_member/main.tarn:10:14
+   |
+10 |     p := geo.Pont{x: 1}
+   |              ^^^^ not found
+   |
+   = help: did you mean `Point`?
+
+error[E2005]: enum `Color` has no member `new`
+  --> tests/resolve/fail/E2005_no_member/main.tarn:11:16
+   |
+11 |     q := Color.new()
+   |                ^^^ not found
+

@@ -1,0 +1,14 @@
+error[E2014]: `impl Shape` is missing `name`
+ --> tests/resolve/fail/E2013_E2014_impl_members.tarn:9:6
+  |
+9 | impl Shape for Sq {
+  |      ^^^^^ incomplete implementation
+
+error[E2013]: `perimeter` is not a method of interface `Shape`
+  --> tests/resolve/fail/E2013_E2014_impl_members.tarn:14:8
+   |
+14 |     fn perimeter(&self) f64 {
+   |        ^^^^^^^^^
+   |
+   = help: inherent methods are declared outside `impl`: `fn Type.name(...)`
+
