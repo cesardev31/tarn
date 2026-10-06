@@ -1,0 +1,13 @@
+fn main() {
+    scope {
+        var value: i64 = 0
+        task := spawn fn() { value = value + 1 }
+        task.join()
+        print(value)
+    }
+    scope {
+        value := "shared"
+        spawn fn() { print(value) }
+        spawn fn() { print(value) }
+    }
+}

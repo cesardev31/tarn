@@ -9,6 +9,12 @@ fn exit_return(c &mut Counter) {
         return
     }
 }
+fn share_in_worker<T: Share>(value &T) {
+    scope { spawn fn() { value } }
+}
+fn transfer_in_worker<T: Transfer>(value T) {
+    scope { spawn move fn() { value } }
+}
 fn main() {
     var counter = Counter{value: 0}
     for i in 0..128 {
@@ -19,6 +25,8 @@ fn main() {
         }
     }
     print(counter.value)
+    share_in_worker(&counter)
+    transfer_in_worker("generic-owned")
     var pair = Pair{left: Counter{value: 0}, right: Counter{value: 0}}
     scope {
         left := &mut pair.left
@@ -37,7 +45,9 @@ fn main() {
         print(a.join() + b.join() + c.join() + d.join())
     }
     scope {
-        f := move fn() i64 { return 42 }
+        text := "shared"
+        f := move fn() i64 { return i64(text.len()) + 36 }
+        share_in_worker(&f)
         a := spawn fn() i64 { return f() }
         b := spawn fn() i64 { return f() }
         print(a.join() + b.join())

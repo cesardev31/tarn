@@ -1,0 +1,8 @@
+error[E3047]: scoped capture `value` of type `&any Observe` requires `Transfer`
+ --> tests/types/fail/E3047_scoped_dynamic_reference.tarn:6:23
+  |
+6 |         task := spawn move fn() i32 { return value.read() }
+  |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot cross this native task boundary
+  |
+  = help: use structurally capable owned data or declare the required generic bound; unknown native and erased callable values need explicit evidence
+

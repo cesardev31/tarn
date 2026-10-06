@@ -1,0 +1,7 @@
+fn main() {
+    scope {
+        value := "parent"
+        task := spawn fn() &string { return &value }
+        task.join()
+    }
+}

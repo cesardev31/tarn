@@ -1,0 +1,8 @@
+error[E4208]: a scoped task handle cannot escape its creating scope
+ --> tests/borrows/fail/E4208_scoped_task_escape.tarn:4:9
+  |
+3 |         task := spawn move fn() i32 { return 42 }
+  |                 --------------------------------- the task starts in this scope
+4 |         return task
+  |         ^^^^^^^^^^^ join the task inside its scope and return its owned result
+

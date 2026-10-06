@@ -1,0 +1,11 @@
+error[E4104]: cannot use `value` while it is mutably borrowed
+ --> tests/borrows/fail/E4104_scoped_task_parent_read.tarn:5:15
+  |
+4 |         spawn fn() { value = value + 1 }
+  |               -------------------------- mutable borrow of `value` starts here
+5 |         print(value)
+  |               ^^^^^ used here
+  |
+  = note: a borrow lasts until the last use of the reference that holds it
+  = note: a scoped worker keeps its borrow until join or scope completion
+

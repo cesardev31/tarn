@@ -153,6 +153,7 @@ stream them:
 | E3042 | `invalid_semantic_contract` | invalid borrowed-result source clause on a declaration |
 | E3047 | `task_capability_required` | a task capture or result lacks cross-thread capability evidence |
 | E3048 | `semantic_capability_impl` | Transfer/Share authority cannot be granted by an ordinary impl |
+| E3049 | `scoped_task_borrowed_result` | borrowed scoped task results remain unsupported |
 | E4001 | `use_after_move` | use of (possibly) moved value `x` |
 | E4002 | `use_of_partially_moved` | use of (possibly) partially moved value `p` |
 | E4003 | `move_out_of_reference` | cannot move a value out from behind a reference |
@@ -173,6 +174,7 @@ stream them:
 | E4204 | `provenance_mismatch` | implementation returns a borrow its interface does not allow |
 | E4205 | `closure_escapes_borrow` | returned closure captures `k` by reference |
 | E4206 | `reference_to_spawned_task` | unscoped spawn cannot receive borrowed captures/references in 11A |
+| E4208 | `scoped_task_escape` | scoped task handles must remain and complete in their creating scope |
 | E4207 | `borrow_escapes_through_reference` | cannot store a reference to `x` into `out.f` |
 
 Golden tests in `tests/**/fail/*.tarn` pin the rendered text of each code.

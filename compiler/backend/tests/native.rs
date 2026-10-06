@@ -418,3 +418,36 @@ fn worker_panic_aborts_the_process_and_task_metadata_is_verified() {
     }
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn scoped_completion_destroys_results_before_borrowed_storage_and_verifies_witnesses() {
+    let path = "../../tests/native/pass/scoped_task_completion.tarn";
+    let (exe, result) = compile(&std::fs::read_to_string(path).unwrap(), "scoped-completion-trace");
+    let output = Command::new(&exe).env("TARN_TRACE_DROPS", "1").output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "42\n");
+    let expected = ["normal-result", "normal-parent", "return-result", "return-parent", "try-result", "try-parent",
+        "continue-result", "continue-parent", "continue-result", "continue-parent", "break-result", "break-parent",
+        "inner-result", "inner-parent", "outer-result", "outer-parent"];
+    let trace: Vec<_> = String::from_utf8(output.stderr).unwrap().lines().map(str::to_owned).collect();
+    assert_eq!(trace, expected.map(|s| format!("drop:{s}")));
+    let source = result.drops.as_ref().unwrap();
+    let typed = result.typed.as_ref().unwrap();
+    for kind in 0..3 {
+        let mut corrupted = tarn_ir::post_drop::Program { functions: source.functions.clone(), by_symbol: source.by_symbol.clone() };
+        if kind == 0 {
+            let local = corrupted.functions.iter_mut().flat_map(|f| &mut f.decl.locals)
+                .find(|l| l.kind == tarn_ir::LocalKind::TaskScopeWitness).unwrap();
+            local.kind = tarn_ir::LocalKind::User;
+        } else {
+            let block = corrupted.functions.iter_mut().flat_map(|f| &mut f.blocks).find(|b|
+                matches!(b.term, tarn_ir::Terminator::Call { callee: tarn_ir::Callee::TaskSpawn { scoped: true, .. }, .. })).unwrap();
+            if let tarn_ir::Terminator::Call { callee: tarn_ir::Callee::TaskSpawn { scoped, .. }, args, .. } = &mut block.term {
+                if kind == 1 { *scoped = false; } else { args.pop(); }
+            }
+        }
+        assert!(!tarn_ir::post_drop::verify(&corrupted, typed).is_empty());
+        assert!(tarn_backend::emit_object(&corrupted, typed).is_err());
+    }
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}

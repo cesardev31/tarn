@@ -1,0 +1,8 @@
+error[E3049]: scoped task results containing references are not supported yet
+ --> tests/types/fail/E3049_scoped_borrowed_result.tarn:4:23
+  |
+4 |         task := spawn fn() &string { return &value }
+  |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ return owned data from the worker
+  |
+  = note: join completes the worker; it does not by itself establish result provenance
+

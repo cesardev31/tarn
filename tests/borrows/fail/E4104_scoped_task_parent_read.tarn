@@ -1,0 +1,7 @@
+fn main() {
+    scope {
+        var value: i64 = 0
+        spawn fn() { value = value + 1 }
+        print(value)
+    }
+}

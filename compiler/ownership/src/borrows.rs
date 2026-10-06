@@ -526,7 +526,7 @@ impl<'a> Fx<'a> {
                 if matches!(rv, Rvalue::Aggregate(tarn_ir::Aggregate::Closure(..), _)) {
                     let inflow = self.rvalue_inflow(h, b, i, rv);
                     if inflow.iter().any(|l| self.f.local(self.loans[l].place.local).kind == tarn_ir::LocalKind::TaskScopeWitness) {
-                        self.diags.push(Diagnostic::error("E4207", "scoped_task_escape", "a scoped task handle cannot be captured by another callable")
+                        self.diags.push(Diagnostic::error("E4208", "scoped_task_escape", "a scoped task handle cannot be captured by another callable")
                             .primary(span, "join the task inside its scope before capturing its result"));
                     }
                 }
@@ -636,7 +636,7 @@ impl<'a> Fx<'a> {
                 if !matches!(callee, Callee::Intrinsic(name) if name == "Task.join") && !matches!(callee, Callee::TaskSpawn { .. }) {
                     if args.iter().filter_map(operand_place).any(|p| self.t.decls.contains_task(&self.f.local(p.local).ty)
                         && h[p.local.0 as usize].iter().any(|l| self.f.local(self.loans[l].place.local).kind == tarn_ir::LocalKind::TaskScopeWitness)) {
-                        self.diags.push(Diagnostic::error("E4207", "scoped_task_escape", "a scoped task handle must complete inside its creating scope")
+                        self.diags.push(Diagnostic::error("E4208", "scoped_task_escape", "a scoped task handle must complete inside its creating scope")
                             .primary(tspan, "join the handle locally before passing its result"));
                     }
                 }
@@ -668,7 +668,7 @@ impl<'a> Fx<'a> {
             if storage_loan(ln) && capture_error { continue; }
             let name = place_name(self.f, self.t, &ln.place);
             let d = if self.f.local(ln.place.local).kind == tarn_ir::LocalKind::TaskScopeWitness {
-                Diagnostic::error("E4207", "scoped_task_escape", "a scoped task handle cannot escape its creating scope")
+                Diagnostic::error("E4208", "scoped_task_escape", "a scoped task handle cannot escape its creating scope")
                     .primary(span, "join the task inside its scope and return its owned result")
                     .secondary(ln.span, "the task starts in this scope")
             } else if storage_loan(ln) {
@@ -766,6 +766,9 @@ impl<'a> Fx<'a> {
             d = d.secondary(u, "the borrow is still used here");
         }
         d = d.note("a borrow lasts until the last use of the reference that holds it");
+        if holders.iter().any(|l| self.t.decls.contains_task(&self.f.local(*l).ty)) {
+            d = d.note("a scoped worker keeps its borrow until join or scope completion");
+        }
         self.diags.push(d);
     }
 

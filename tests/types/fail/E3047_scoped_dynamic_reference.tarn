@@ -1,0 +1,11 @@
+interface Observe {
+    fn read(&self) i32
+}
+fn inspect(value &any Observe) {
+    scope {
+        task := spawn move fn() i32 { return value.read() }
+        task.join()
+    }
+}
+fn main() {
+}

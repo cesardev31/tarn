@@ -1,0 +1,11 @@
+error[E4101]: cannot borrow `value` as mutable more than once at a time
+ --> tests/borrows/fail/E4101_scoped_task_alias.tarn:5:15
+  |
+4 |         spawn fn() { value = value + 1 }
+  |               -------------------------- mutable borrow of `value` starts here
+5 |         spawn fn() { value = value + 1 }
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^ second mutable borrow here
+  |
+  = note: a borrow lasts until the last use of the reference that holds it
+  = note: a scoped worker keeps its borrow until join or scope completion
+

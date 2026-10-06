@@ -23,7 +23,7 @@ pub struct FnCx<'e, 'a> {
     /// Integer literals to range-check once types are known: (span, value, type).
     literals: Vec<(Span, i128, Ty)>,
     /// Generic arguments that must implement an interface: (type, interface, span).
-    obligations: Vec<(Ty, SymbolId, Span)>,
+    obligations: Vec<(Ty, SymbolId, Span, Option<Vec<Ty>>)>,
     /// Arguments of `print` to check once types are known.
     printables: Vec<(Ty, Span)>,
     task_capabilities: Vec<(Ty, crate::Capability, Span, String)>,
@@ -182,7 +182,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
     fn obligations_for(&mut self, generics: &[ParamId], map: &HashMap<ParamId, Ty>, span: Span) {
         for p in generics {
             for iface in self.env.decls.bounds.get(p).cloned().unwrap_or_default() {
-                self.obligations.push((map[p].clone(), iface, span));
+                self.obligations.push((map[p].clone(), iface, span, None));
             }
         }
     }
@@ -268,9 +268,13 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     .help("use structurally capable owned data or declare the required generic bound; unknown native and erased callable values need explicit evidence"));
             }
         }
-        for (t, iface, span) in std::mem::take(&mut self.obligations) {
+        for (t, iface, span, evidence) in std::mem::take(&mut self.obligations) {
             let z = self.infer.zonk(&t);
-            if !self.implements(&z, iface) && !matches!(z, Ty::Var(_)) {
+            let cap = if Some(iface) == self.env.decls.transfer { Some(crate::Capability::Transfer) }
+                else if Some(iface) == self.env.decls.share { Some(crate::Capability::Share) } else { None };
+            let witnessed = matches!(z, Ty::Fn(..)) && cap.zip(evidence.as_ref()).is_some_and(|(cap, fields)|
+                fields.iter().all(|t| self.env.decls.capability(&self.infer.zonk(t), cap)));
+            if !witnessed && !self.implements(&z, iface) && !matches!(z, Ty::Var(_)) {
                 let (tn, iname) = (self.show(&z), self.env.r.symbol(iface).name.clone());
                 let help = if Some(iface) == self.env.decls.transfer || Some(iface) == self.env.decls.share {
                     format!("`{tn}` must satisfy `{iname}` structurally; generic parameters require an explicit bound")
@@ -1599,13 +1603,42 @@ impl<'e, 'a> FnCx<'e, 'a> {
             ps.push(receiver_ty(r, st));
         }
         ps.extend(sig.params.iter().cloned());
+        let source_parameters = ps.clone();
         let ps: Vec<Ty> = ps.iter().map(|p| subst(p, &map)).collect();
         if !sig.generics.is_empty() {
             self.tables.type_args.insert(e.id, sig.generics.iter().map(|p| map[p].clone()).collect());
         }
         let what = if has_recv { format!("method `{name}`") } else { format!("`{name}`") };
         self.args(e, &what, &ps, args);
+        let obligation_start = self.obligations.len();
         self.obligations_for(&sig.generics, &map, e.span);
+        let mut evidence_updates = Vec::new();
+        for index in obligation_start..self.obligations.len() {
+            let (ty, iface, _, _) = &self.obligations[index];
+            let cap = if Some(*iface) == self.env.decls.transfer { crate::Capability::Transfer }
+                else if Some(*iface) == self.env.decls.share { crate::Capability::Share } else { continue };
+            if !matches!(self.infer.zonk(ty), Ty::Fn(..)) { continue; }
+            let Some(parameter) = sig.generics.iter().find(|p| map[*p] == *ty) else { continue };
+            let mut components = Vec::new();
+            let mut found = false;
+            let mut complete = true;
+            for (declared, argument) in source_parameters.iter().zip(args) {
+                let source = match declared {
+                    Ty::Param(p) if p == parameter => Some(argument),
+                    Ty::Ref(_, t) if **t == Ty::Param(*parameter) => match &argument.kind {
+                        ExprKind::Unary { op: UnaryOp::Ref | UnaryOp::RefMut, operand } => Some(operand.as_ref()),
+                        _ => None,
+                    },
+                    _ => continue,
+                };
+                found = true;
+                let evidence = source.and_then(|a| self.callable_capability_evidence(a, cap));
+                if let Some(fields) = evidence { components.extend(fields); } else { complete = false; }
+                if components.len() > 4096 { complete = false; break; }
+            }
+            if found && complete { evidence_updates.push((index, components)); }
+        }
+        for (index, evidence) in evidence_updates { self.obligations[index].3 = Some(evidence); }
         subst(&sig.ret, &map)
     }
 

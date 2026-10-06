@@ -6,6 +6,14 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("scoped mutable parent access before completion", Some("E4104"), "fn main() { scope { var value: i64 = 0\n spawn fn() { value = value + 1 }\n print(value) } }"),
+    ("scoped concurrent mutable aliases", Some("E4101"), "fn main() { scope { var value: i64 = 0\n spawn fn() { value = value + 1 }\n spawn fn() { value = value + 1 } } }"),
+    ("scoped parent assignment while worker active", Some("E4102"), "fn main() { scope { var value: i64 = 0\n spawn fn() { value = value + 1 }\n value = 42 } }"),
+    ("scoped handle escape", Some("E4208"), "fn escape() Task<i32> { scope { task := spawn move fn() i32 { return 42 }\n return task } }\nfn main() {}"),
+    ("shared cross-thread reference requires evidence", Some("E3047"), "interface Observe { fn read(&self) i32 }\nfn inspect(value &any Observe) { scope { task := spawn move fn() i32 { return value.read() }\n task.join() } }\nfn main() {}"),
+    ("multiple shared scoped workers", None, "fn main() { scope { value := Buffer.new()\n spawn fn() { read(&value) }\n spawn fn() { read(&value) } } }"),
+    ("access after scoped explicit join", None, "fn main() { scope { var value: i64 = 0\n task := spawn fn() { value = value + 1 }\n task.join()\n print(value) } }"),
+    ("scoped mutable disjoint fields", None, "struct Pair { first Buffer\n second Buffer }\nfn main() { var pair = Pair{first: Buffer.new(), second: Buffer.new()}\n scope { first := &mut pair.first\n second := &mut pair.second\n spawn move fn() { write(first) }\n spawn move fn() { write(second) } } }"),
     ("task capture requires transfer bound", Some("E3047"), "fn launch<T>(value T) { t := spawn move fn() { value }\n t.join() }\nfn main() {}"),
     ("share bound does not grant result transfer", Some("E3047"), "fn launch<T: Share>(value T) { t := spawn move fn() T { return value }\n t.join() }\nfn main() {}"),
     ("owned structural transfer capture", None, "fn main() { value := Buffer.new()\n task := spawn move fn() Buffer { return value }\n result := task.join()\n read(&result) }"),

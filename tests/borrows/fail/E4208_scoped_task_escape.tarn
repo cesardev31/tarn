@@ -1,0 +1,8 @@
+fn escape() Task<i32> {
+    scope {
+        task := spawn move fn() i32 { return 42 }
+        return task
+    }
+}
+fn main() {
+}
