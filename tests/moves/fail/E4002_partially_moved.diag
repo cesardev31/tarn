@@ -1,0 +1,10 @@
+error[E4002]: use of partially moved value `p`
+  --> tests/moves/fail/E4002_partially_moved.tarn:26:10
+   |
+25 |     x := p.first
+   |          ------- `p.first` moved here
+26 |     take(p)
+   |          ^ the whole value is used here
+   |
+   = note: the fields of `p` that were not moved can still be used one by one
+

@@ -1,0 +1,9 @@
+error[E4003]: cannot move a value out from behind a reference
+  --> tests/moves/fail/E4003_move_out_of_reference.tarn:16:12
+   |
+16 |     return b.data
+   |            ^^^^^^ this moves a non-copy value out of a borrowed place
+   |
+   = note: a reference only lends the value; the owner keeps it
+   = help: borrow it instead (`&...`), or work with a copy if the type allows it
+

@@ -1,0 +1,11 @@
+error[E4001]: use of moved value `a`
+  --> tests/moves/fail/E4001_use_after_move.tarn:18:10
+   |
+17 |     b := a
+   |          - value moved here
+18 |     read(&a)
+   |          ^^ value used here after move
+   |
+   = note: `Buffer` is not a copy type, so assigning or passing it moves it
+   = help: to keep using `a`, borrow it where it is moved (`&a`) instead of moving it
+

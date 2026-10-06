@@ -91,7 +91,30 @@
         "scopeName": "source.tarn-ast",
         "path": "./syntaxes/tarn-ast.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "tarn.restartServer",
+        "title": "Tarn: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Tarn",
+      "properties": {
+        "tarn.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to tarn-lsp. Empty searches the local checkout, workspace targets, then PATH."
+        }
+      }
+    }
   },
-  "icon": "icons/tarn.png"
+  "icon": "icons/tarn.png",
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:tarn"
+  ],
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
 }

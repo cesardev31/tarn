@@ -1,0 +1,24 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+copy struct P {
+    x i64
+}
+
+fn main() {
+    a := P{x: 1}
+    b := a
+    c := a                    // copy types are never moved
+    print(a.x + b.x + c.x)
+}

@@ -17,13 +17,13 @@ Source ─▶ Lexer ─▶ Parser ─▶ AST ─▶ Resolve ─▶ Types ─▶ 
 | `compiler/types` | `tarn_types` | type checking, local inference, mutability, exhaustiveness (docs/types.md) | done (v0) |
 | `compiler/driver` | `tarn_driver` | load modules from disk, run phases, sort diagnostics | done (v0) |
 | `compiler/ir` | `tarn_ir` | typed CFG IR, lowering, verifier, printer (ADR 0023) | done (v0) |
-| `compiler/ownership` | `tarn_ownership` | move/borrow analysis on IR | planned |
+| `compiler/ownership` | `tarn_ownership` | 6A move/init checking + drop decisions (ADR 0024); 6B borrows next | started |
 | `compiler/backend` | `tarn_backend` | IR ─▶ Cranelift ─▶ object | planned |
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | `tarn_runtime` | `print`, `panic`, startup (staticlib) | planned |
 | `tools/cli` | `tarn` | the single CLI | started |
 | `tools/fmt` | `tarn_fmt` | canonical formatter | planned |
-| `tools/lsp` | `tarn_lsp` | LSP on top of the frontend | later |
+| `tools/lsp` | `tarn-lsp` | stdio LSP: diagnostics, hover, definition, unsaved buffers | initial |
 
 Rules:
 
@@ -41,7 +41,8 @@ Each external crate needs a line in this table with a justification.
 
 | Crate | Used by | Why |
 |-------|---------|-----|
-| *(none yet)* | | JSON output and CLI parsing are hand-written: small and dependency-free. |
+| `serde_json` | tools/lsp | JSON-RPC messages and robust JSON encoding/decoding |
+| `url` | tools/lsp | Correct file URI encoding/decoding, including escaped paths |
 | `cranelift-*` (planned) | backend | native code generation; the reason the backend exists |
 
 ## Linking (planned)

@@ -27,6 +27,8 @@ pub struct FnCx<'e, 'a> {
     printables: Vec<(Ty, Span)>,
     /// Bindings whose type must be fully inferred: (symbol, name span).
     inferred_lets: Vec<(SymbolId, Span)>,
+    /// Operand of the `&`/`&mut` being checked (slices are legal there).
+    borrowed: Option<NodeId>,
 }
 
 fn peel(t: &Ty) -> (Ty, Option<bool>) {
@@ -66,6 +68,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             obligations: Vec::new(),
             printables: Vec::new(),
             inferred_lets: Vec::new(),
+            borrowed: None,
         }
     }
 
@@ -286,7 +289,15 @@ impl<'e, 'a> FnCx<'e, 'a> {
 
     fn stmt(&mut self, s: &Stmt) {
         match &s.kind {
-            StmtKind::Let { name, ty, value, .. } => {
+            StmtKind::Let { value: None, ty, .. } => {
+                // `var x: T`: the type is the annotation; initialization is
+                // checked on the IR (E4005).
+                let t = ty.as_ref().map(|t| self.env_lower(t)).unwrap_or(Ty::Error);
+                if let Some(sym) = self.def(s.id) {
+                    self.locals.insert(sym, t);
+                }
+            }
+            StmtKind::Let { name, ty, value: Some(value), .. } => {
                 let ann = ty.as_ref().map(|t| self.env_lower(t));
                 let vt = self.expr(value, ann.as_ref());
                 let t = match ann {
@@ -785,7 +796,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 None => self.field(e, base, name),
             },
             ExprKind::Call { callee, args } => self.call(e, callee, args, expected),
-            ExprKind::Index { base, index } => self.index(base, index),
+            ExprKind::Index { base, index } => self.index(e, base, index),
             ExprKind::Unary { op, operand } => self.unary(e, *op, operand, expected),
             ExprKind::Binary { op, lhs, rhs } => self.binary(e, *op, lhs, rhs),
             ExprKind::Range { .. } => {
@@ -935,7 +946,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
         }
     }
 
-    fn index(&mut self, base: &Expr, index: &Expr) -> Ty {
+    fn index(&mut self, e: &Expr, base: &Expr, index: &Expr) -> Ty {
         let bt = self.expr(base, None);
         let (inner, _) = peel(&self.infer.zonk(&bt));
         let elem = match &inner {
@@ -954,6 +965,16 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 self.coerce(&t, &usize_, b.span, Some(b.id));
             }
             self.record(index, Ty::Opaque);
+            // v0 has no owned slices: `arr[a..b]` only exists behind `&`.
+            if self.borrowed != Some(e.id) {
+                self.err(
+                    Diagnostic::error("E3039", "slice_by_value", "a slice can only be used through a reference")
+                        .primary(e.span, "this is an unsized slice")
+                        .help("borrow it: `&arr[a..b]` (or `&mut arr[a..b]`)")
+                        .note("Tarn v0 has no owned slices"),
+                );
+                return Ty::Error;
+            }
             return Ty::Slice(Box::new(elem));
         }
         let it = self.expr(index, Some(&usize_));
@@ -997,7 +1018,14 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     Some(Ty::Ref(_, x)) => Some(*x),
                     _ => None,
                 };
+                // `&arr[a..b]`: the slice is legal only as the borrowed operand.
+                let mut target = operand;
+                while let ExprKind::Paren(inner) = &target.kind {
+                    target = inner;
+                }
+                let saved = self.borrowed.replace(target.id);
                 let t = self.expr(operand, inner_expected.as_ref());
+                self.borrowed = saved;
                 let mutable = op == UnaryOp::RefMut;
                 if mutable {
                     self.require_mut(operand, true);

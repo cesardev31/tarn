@@ -1,0 +1,11 @@
+error[E4001]: use of possibly moved value `x`
+  --> tests/moves/fail/E4001_moved_via_continue.tarn:24:10
+   |
+19 |             consume(x)
+   |                     - value moved here
+24 |     read(&x)
+   |          ^^ used here, but it may have been moved
+   |
+   = note: `Buffer` is not a copy type, so assigning or passing it moves it
+   = help: move it on every path or on none, or reassign it before this use
+

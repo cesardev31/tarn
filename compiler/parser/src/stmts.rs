@@ -107,11 +107,24 @@ impl Parser {
                 } else {
                     None
                 };
+                // `var x: T` without `=`: declared, initialized later.
+                if ty.is_some() && matches!(self.peek(), TokenKind::Newline | TokenKind::RBrace | TokenKind::Eof) {
+                    return StmtKind::Let { mutable: true, name, ty, value: None };
+                }
+                if ty.is_none() && matches!(self.peek(), TokenKind::Newline | TokenKind::RBrace | TokenKind::Eof) {
+                    let span = name.span;
+                    self.error(
+                        Diagnostic::error("E1019", "uninit_var_needs_type", format!("`var {}` without a value needs a type", name.name))
+                            .primary(span, "")
+                            .help(format!("write `var {}: <type>` and assign it before use, or give it a value: `var {} = ...`", name.name, name.name)),
+                    );
+                    return StmtKind::Let { mutable: true, name, ty, value: None };
+                }
                 if !self.expect(&TokenKind::Eq) {
                     return StmtKind::Error;
                 }
                 self.skip_newlines();
-                StmtKind::Let { mutable: true, name, ty, value: self.parse_expr() }
+                StmtKind::Let { mutable: true, name, ty, value: Some(self.parse_expr()) }
             }
             TokenKind::If => StmtKind::If(self.parse_if()),
             TokenKind::For => self.parse_for(),
@@ -133,7 +146,7 @@ impl Parser {
                 let name = self.expect_ident("name");
                 self.bump();
                 self.skip_newlines();
-                StmtKind::Let { mutable: false, name, ty: None, value: self.parse_expr() }
+                StmtKind::Let { mutable: false, name, ty: None, value: Some(self.parse_expr()) }
             }
             TokenKind::Ident(_) if *self.nth(1) == TokenKind::Colon => {
                 let name = self.expect_ident("name");
@@ -167,7 +180,7 @@ impl Parser {
             return StmtKind::Error;
         }
         self.skip_newlines();
-        StmtKind::Let { mutable: false, name, ty: Some(ty), value: self.parse_expr() }
+        StmtKind::Let { mutable: false, name, ty: Some(ty), value: Some(self.parse_expr()) }
     }
 
     /// Is there a `:=` later on this line, outside delimiters? Only used to

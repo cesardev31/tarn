@@ -1,0 +1,11 @@
+[package]
+name = "tarn_ownership"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tarn_diagnostics = { path = "../diagnostics" }
+tarn_ir = { path = "../ir" }
+tarn_resolve = { path = "../resolve" }
+tarn_types = { path = "../types" }

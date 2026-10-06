@@ -11,5 +11,6 @@ tarn_parser = { path = "../parser" }
 tarn_resolve = { path = "../resolve" }
 tarn_types = { path = "../types" }
 tarn_ir = { path = "../ir" }
+tarn_ownership = { path = "../ownership" }
 
 [dev-dependencies]

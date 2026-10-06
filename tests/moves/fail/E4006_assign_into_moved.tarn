@@ -1,0 +1,27 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+struct Pair {
+    first Buffer
+    second Buffer
+}
+
+fn main() {
+    var p = Pair{first: Buffer.new(), second: Buffer.new()}
+    take(p)                   // the whole `p` is gone
+    p.first = Buffer.new()    // cannot rebuild one field of a moved value
+}
+
+fn take(p Pair) {
+}

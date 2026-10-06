@@ -1,0 +1,23 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+fn pick(c bool) {
+    var x: Buffer
+    if c {
+        x = Buffer.new()
+    } else {
+        x = Buffer{data: "other"}
+    }
+    read(&x)                  // initialized on every path
+}

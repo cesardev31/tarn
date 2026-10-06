@@ -235,8 +235,13 @@ impl Dumper {
                     self.s(" ");
                     self.ty(t);
                 }
-                self.s(" ");
-                self.expr(value, ind);
+                match value {
+                    Some(v) => {
+                        self.s(" ");
+                        self.expr(v, ind);
+                    }
+                    None => self.s(" <uninit>"),
+                }
                 self.s(")");
             }
             StmtKind::Assign { target, value } => {

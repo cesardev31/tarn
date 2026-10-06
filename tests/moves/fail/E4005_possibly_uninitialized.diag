@@ -1,0 +1,10 @@
+error[E4005]: use of possibly uninitialized `x`
+  --> tests/moves/fail/E4005_possibly_uninitialized.tarn:20:10
+   |
+16 |     var x: Buffer
+   |     ------------- declared here without a value
+20 |     read(&x)
+   |          ^^ may not be initialized here
+   |
+   = help: assign it on every path before this use
+

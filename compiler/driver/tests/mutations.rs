@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 fn corpus() -> Vec<PathBuf> {
     let root = Path::new("../..");
     let mut out = Vec::new();
-    for dir in ["examples", "tests/types/pass", "tests/types/fail", "tests/resolve/pass"] {
+    for dir in ["examples", "tests/types/pass", "tests/types/fail", "tests/resolve/pass", "tests/moves/pass", "tests/moves/fail"] {
         for e in std::fs::read_dir(root.join(dir)).unwrap() {
             let p = e.unwrap().path();
             if p.extension().is_some_and(|e| e == "tarn") {

@@ -1,0 +1,29 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+enum Msg {
+    Text(Buffer)
+    Empty
+}
+
+fn again(m Msg) {
+}
+
+fn handle(m Msg) {
+    match m {
+        Text(b) => consume(b)
+        Empty => print(0)
+    }
+    again(m)
+}

@@ -1,0 +1,3 @@
+consume bb0: drop _1 -> static
+handle bb1: drop _1 -> conditional (flag)
+handle bb6: drop _3 -> dead (moved)

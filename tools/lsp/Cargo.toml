@@ -1,0 +1,12 @@
+[package]
+name = "tarn-lsp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json = "1"
+url = "2"
+tarn_driver = { path = "../../compiler/driver" }
+tarn_diagnostics = { path = "../../compiler/diagnostics" }
+tarn_resolve = { path = "../../compiler/resolve" }

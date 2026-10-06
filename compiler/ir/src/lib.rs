@@ -20,7 +20,7 @@ mod pretty;
 mod verify;
 
 pub use lower::lower_program;
-pub use pretty::{print_function, print_program};
+pub use pretty::{print_function, print_program, print_program_annotated};
 pub use verify::verify;
 
 use std::collections::HashMap;
@@ -60,8 +60,21 @@ pub enum FnKind {
     Extern,
     /// `extern "intrinsic"` in `core`: implemented by the compiler/backend.
     Intrinsic,
-    /// A closure; its captures are its first `captures` parameters.
-    Closure { parent: FunctionId, captures: u32 },
+    /// A closure; its captures are its first `captures.len()` parameters.
+    Closure { parent: FunctionId, captures: Vec<CaptureMode> },
+}
+
+/// How a closure holds a captured variable. Lowering produces only borrows
+/// today; `Move` exists so that `spawn` and returned closures do not require
+/// a new representation (no public syntax yet).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureMode {
+    /// The capture parameter is `&T`.
+    SharedBorrow,
+    /// The capture parameter is `&mut T`.
+    MutableBorrow,
+    /// The capture parameter is `T`, moved into the closure.
+    Move,
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +112,10 @@ pub enum LocalKind {
     User,
     /// Compiler temporary holding an intermediate value.
     Temp,
+    /// The array consumed by `for x in arr` (non-copy elements). Its elements
+    /// are moved out one by one by index; the move checker does not track
+    /// them, and dropping it drops the elements not yet yielded.
+    IterArray,
 }
 
 #[derive(Clone, Debug)]
@@ -289,7 +306,8 @@ pub enum Terminator {
     Switch { discr: Operand, cases: Vec<(i128, BlockId)>, otherwise: BlockId },
     /// `next` is `None` when the callee never returns (`panic`).
     /// `spawn` runs the call as a concurrent task inside the current scope.
-    Call { callee: Callee, args: Vec<Operand>, dest: Place, next: Option<BlockId>, spawn: bool },
+    /// `arg_spans[i]` is the source span of `args[i]` (for diagnostics).
+    Call { callee: Callee, args: Vec<Operand>, arg_spans: Vec<Span>, dest: Place, next: Option<BlockId>, spawn: bool },
     Return,
     /// Proven unreachable (e.g. after an exhaustive `match`).
     Unreachable,

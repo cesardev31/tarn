@@ -69,14 +69,22 @@ Local `_0` is the return place; parameters are `_1.._n`.
     recorded binding mode; `match` a chain of tests per arm (discriminant
     switches, literal comparisons), bindings created only after all tests of
     the arm pass, `Unreachable` after the last arm (exhaustiveness proven).
-11. **Closures** are separate functions whose first parameters are references
-    to the captured locals (`&mut` if the body writes or mutably borrows the
-    capture); the closure value is `Aggregate::Closure(id)[captures]`.
+11. **Closures** are separate functions whose first parameters are the
+    captures; `FnKind::Closure` records a `CaptureMode` per capture
+    (`SharedBorrow`, `MutableBorrow`, `Move`). v0 only produces borrows
+    (`&mut` if the body writes or mutably borrows the capture); `Move` exists
+    so returned closures and `spawn` need no new representation. No public
+    syntax for move closures yet. The closure value is
+    `Aggregate::Closure(id)[captures]`.
 12. **Generic code stays generic** (types contain parameters); calls carry
     their type arguments.
-13. **Builtin semantics fixed here:** `print` borrows its argument; string
-    `==`, `<`, `+`… call intrinsics with borrowed operands; `scope { }` ends
-    with `JoinScope`; `spawn f(x)` is a `Call` with `spawn = true`.
+13. **Observers borrow.** `print` takes a shared borrow of its argument and
+    never consumes an owned value; string `==`, `<`, `+`… call intrinsics
+    with borrowed operands. The same rule applies to every purely observing
+    operation on strings and collections (`len`, comparisons…): reading never
+    moves. Methods of opaque std values also borrow their receiver (their
+    signature is unknown; assuming a move would invent errors).
+    `scope { }` ends with `JoinScope`; `spawn f(x)` is a `Call` with `spawn`.
 14. **Opaque std** values and calls stay as `Const::Opaque` /
     `Callee::Opaque`: such programs check but cannot be compiled.
 

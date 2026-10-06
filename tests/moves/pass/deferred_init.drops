@@ -1,0 +1,6 @@
+consume bb0: drop _1 -> static
+pick bb2: drop _2 -> dead (moved)
+pick bb2: drop _4 -> dead (moved)
+pick bb4: drop _2 -> dead (moved)
+pick bb4: drop _3 -> dead (moved)
+pick bb5: drop _2 -> static

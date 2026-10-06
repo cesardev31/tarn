@@ -1,0 +1,25 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+fn main(n i64) {
+    var x = Buffer.new()
+    for i in 0..n {
+        if i == 2 {
+            consume(x)
+            continue          // skips the reinitialization below
+        }
+        x = Buffer.new()
+    }
+    read(&x)
+}

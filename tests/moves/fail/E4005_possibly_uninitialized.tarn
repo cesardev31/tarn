@@ -1,0 +1,21 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+fn main(condition bool) {
+    var x: Buffer
+    if condition {
+        x = Buffer.new()
+    }
+    read(&x)
+}

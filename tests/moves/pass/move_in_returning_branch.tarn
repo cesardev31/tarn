@@ -1,0 +1,22 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+fn f(c bool) {
+    x := Buffer.new()
+    if c {
+        consume(x)
+        return                // the moved path never reaches the join
+    }
+    read(&x)
+}

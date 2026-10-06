@@ -1,0 +1,11 @@
+error[E4001]: use of moved value `p.first`
+  --> tests/moves/fail/E4001_field_after_move.tarn:23:10
+   |
+22 |     x := p.first
+   |          ------- value moved here
+23 |     y := p.first
+   |          ^^^^^^^ value used here after move
+   |
+   = note: `Buffer` is not a copy type, so assigning or passing it moves it
+   = help: to keep using `p.first`, borrow it where it is moved (`&p.first`) instead of moving it
+

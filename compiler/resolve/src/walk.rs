@@ -757,7 +757,9 @@ impl<'c, 'a> Walker<'c, 'a> {
                     self.ty(t);
                 }
                 // The initializer cannot see the new name.
-                self.expr(value);
+                if let Some(v) = value {
+                    self.expr(v);
+                }
                 self.declare_local(name, SymbolKind::Local { mutable: *mutable }, s.id);
             }
             StmtKind::Assign { target, value } => {

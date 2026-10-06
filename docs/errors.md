@@ -80,6 +80,7 @@ stream them:
 | E1016 | `else_on_new_line` | `else` must be on the same line as `}` |
 | E1017 | `chained_range` | range operators cannot be chained |
 | E1018 | `missing_type_colon` | a type annotation on a binding needs `:` |
+| E1019 | `uninit_var_needs_type` | `var x` without a value needs a type |
 | E2001 | `undefined_name` | cannot find `x` in this scope |
 | E2002 | `duplicate_definition` | `x` is defined more than once |
 | E2003 | `duplicate_in_scope` | `x` is already declared in this scope |
@@ -145,6 +146,13 @@ stream them:
 | E2027 | `intrinsic_outside_core` | `extern "intrinsic"` functions can only be declared in `core` |
 | W3001 | `unreachable_arm` | this arm can never match |
 | W3002 | `unreachable_code` | unreachable code |
+| E3039 | `slice_by_value` | a slice can only be used through a reference |
+| E4001 | `use_after_move` | use of (possibly) moved value `x` |
+| E4002 | `use_of_partially_moved` | use of (possibly) partially moved value `p` |
+| E4003 | `move_out_of_reference` | cannot move a value out from behind a reference |
+| E4004 | `move_out_of_index` | cannot move an element out of an array by index |
+| E4005 | `uninitialized` | use of (possibly) uninitialized `x` |
+| E4006 | `assign_into_moved` | cannot assign to `p.f`: `p` has been moved |
 | W2001 | `confusing_shadow` | `x` is shadowed in an inner scope and used again after it |
 | W2002 | `shadows_item` | `x` shadows the builtin function `x` |
 | W2003 | `unused_import` | unused import `m` |

@@ -1,0 +1,27 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+struct Pair {
+    first Buffer
+    second Buffer
+}
+
+fn take(p Pair) {
+}
+
+fn main() {
+    p := Pair{first: Buffer.new(), second: Buffer.new()}
+    x := p.first
+    take(p)
+}

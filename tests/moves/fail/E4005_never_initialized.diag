@@ -1,0 +1,10 @@
+error[E4005]: use of uninitialized `x`
+  --> tests/moves/fail/E4005_never_initialized.tarn:17:13
+   |
+16 |     var x: Buffer
+   |     ------------- declared here without a value
+17 |     consume(x)
+   |             ^ not initialized here
+   |
+   = help: assign it on every path before this use
+

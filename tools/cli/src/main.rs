@@ -175,7 +175,8 @@ fn cmd_ir(args: &[String]) -> ExitCode {
     };
     let map = &res.program.sources;
     if let (Some(r), Some(t), Some(ir)) = (&res.resolved, &res.typed, &res.ir) {
-        print!("{}", tarn_ir::print_program(ir, r, t));
+        let notes = res.moves.as_ref().map(|m| m.drop_notes()).unwrap_or_default();
+        print!("{}", tarn_ir::print_program_annotated(ir, r, t, &notes));
     }
     for d in &res.diagnostics {
         eprint!("{}", d.render(map));

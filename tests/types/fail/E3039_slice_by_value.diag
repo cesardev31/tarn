@@ -1,0 +1,18 @@
+error[E3039]: a slice can only be used through a reference
+ --> tests/types/fail/E3039_slice_by_value.tarn:7:10
+  |
+7 |     x := arr[1..3]
+  |          ^^^^^^^^^ this is an unsized slice
+  |
+  = note: Tarn v0 has no owned slices
+  = help: borrow it: `&arr[a..b]` (or `&mut arr[a..b]`)
+
+error[E3039]: a slice can only be used through a reference
+  --> tests/types/fail/E3039_slice_by_value.tarn:10:15
+   |
+10 |     print(sum(arr[..]))
+   |               ^^^^^^^ this is an unsized slice
+   |
+   = note: Tarn v0 has no owned slices
+   = help: borrow it: `&arr[a..b]` (or `&mut arr[a..b]`)
+

@@ -1,0 +1,10 @@
+error[E4006]: cannot assign to `p.first`: `p` has been moved
+  --> tests/moves/fail/E4006_assign_into_moved.tarn:23:5
+   |
+22 |     take(p)                   // the whole `p` is gone
+   |          - `p` moved here
+23 |     p.first = Buffer.new()    // cannot rebuild one field of a moved value
+   |     ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: assign the whole value instead: `p = ...`
+

@@ -1,0 +1,8 @@
+error[E4004]: cannot move an element out of an array by index
+  --> tests/moves/fail/E4004_move_out_of_index.tarn:17:14
+   |
+17 |     first := names[0]
+   |              ^^^^^^^^ moving this element would leave a hole in the array
+   |
+   = help: borrow it (`&arr[i]`), or consume the whole array with `for x in arr`
+

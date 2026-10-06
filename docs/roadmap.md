@@ -12,7 +12,9 @@ tested and documented.
 | 4 | Types (primitives, structs, enums, generics, interfaces, mutability) | **done** |
 | 5 | Diagnostics (text + JSON, golden tests) | done for phases 1–4 |
 | 6 | Typed IR (ADR 0023) | **done** |
-| 9–10 | Ownership/borrow analysis + drop elaboration on the IR | next |
+| 6A | Move/init checking on the IR (ADR 0024) | **done** |
+| 6B | Borrow checking on the IR | next |
+| — | Drop elaboration (consumes 6A decisions) | after 6B |
 | 7 | Cranelift backend, `tarn build`/`run` | |
 | 8 | Structs | |
 | 9 | Ownership (moves) | |

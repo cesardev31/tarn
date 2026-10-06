@@ -80,6 +80,8 @@ var index = 0          // mutable, inferred
 - In statement position a type annotation is introduced by `:`; in
   declaration lists (parameters, fields) the type follows the name directly:
   `fn f(a i32)`, `struct S { a i32 }` (ADR 0011).
+- `var name: Type` declares a mutable binding **without a value**; it must be
+  assigned on every path before it is used (E4005, ADR 0024).
 - `var name = value` / `var name: Type = value` declares a **mutable** binding. Type annotation optional; initializer
   required (no uninitialized variables in draft 0).
 - `=` assigns to an existing mutable place.
@@ -117,7 +119,7 @@ Compound:
 | Form | Meaning |
 |------|---------|
 | `[N]T` | fixed-size array, a value |
-| `[]T` | slice (unsized; only usable behind a reference: `&[]T`, `&mut []T`) |
+| `[]T` | slice (unsized; only usable behind a reference: `&[]T`, `&mut []T`; `&arr[a..b]` borrows one, `arr[a..b]` alone is E3039) |
 | `&T` | shared reference |
 | `&mut T` | mutable (exclusive) reference |
 | `fn(A, B) R` | function type |
@@ -159,7 +161,8 @@ if x > 0 {
 }
 
 for i in 0..10 { }       // range, exclusive end; 0..=10 inclusive
-for item in list { }     // iteration (provisional: iteration protocol)
+for item in &list { }    // iterate by reference: `list` stays usable
+for item in list { }     // copy arrays: by value; non-copy arrays: consumes `list`
 for running { }          // while-style
 for { }                  // infinite
 ```

@@ -1,0 +1,10 @@
+error[E4002]: use of possibly partially moved value `m`
+  --> tests/moves/fail/E4002_enum_payload_moved.tarn:28:11
+   |
+25 |         Text(b) => consume(b)
+   |              - `m.Text.0` moved here
+28 |     again(m)
+   |           ^ the whole value is used here
+   |
+   = note: the fields of `m` that were not moved can still be used one by one
+

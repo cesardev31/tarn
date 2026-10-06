@@ -373,7 +373,13 @@ impl<'a, 'l> Builder<'a, 'l> {
     fn stmt(&mut self, s: &Stmt) {
         let span = s.span;
         match &s.kind {
-            StmtKind::Let { value, .. } => {
+            StmtKind::Let { value: None, .. } => {
+                // `var x: T`: storage only; the move/init checker tracks it.
+                if let Some(sym) = self.def(s.id) {
+                    self.declare_user(sym, span);
+                }
+            }
+            StmtKind::Let { value: Some(value), .. } => {
                 let Some(sym) = self.def(s.id) else { return };
                 // Evaluate before declaring: the initializer cannot see the name.
                 // `r := &make()` keeps the temporary alive as long as `r`'s
@@ -383,7 +389,7 @@ impl<'a, 'l> Builder<'a, 'l> {
                 let op = self.operand(value);
                 self.extend_temps = false;
                 let l = self.declare_user(sym, span);
-                self.assign(Place::local(l), Rvalue::Use(op), span);
+                self.assign(Place::local(l), Rvalue::Use(op), value.span);
             }
             StmtKind::Assign { target, value } => {
                 let op = self.operand(value);
@@ -439,7 +445,7 @@ impl<'a, 'l> Builder<'a, 'l> {
                     let t = self.temp(Ty::Void, span);
                     let next = self.new_block();
                     self.terminate(
-                        Terminator::Call { callee: Callee::Builtin(Builtin::JoinScope), args: Vec::new(), dest: Place::local(t), next: Some(next), spawn: false },
+                        Terminator::Call { callee: Callee::Builtin(Builtin::JoinScope), args: Vec::new(), arg_spans: Vec::new(), dest: Place::local(t), next: Some(next), spawn: false },
                         span,
                     );
                     self.switch_to(next);
@@ -583,11 +589,15 @@ impl<'a, 'l> Builder<'a, 'l> {
             });
             return;
         }
-        // Base place of the elements: `*it` through a reference, or the array itself.
-        let it = self.new_local(it_ty.clone(), LocalKind::Temp, None, None, false, iter.span);
+        // Base place of the elements: `*it` through a reference, or the array
+        // itself. Iterating an owned non-copy array consumes it: it is moved
+        // into an `IterArray` local whose elements are then moved out by index.
+        let owned_noncopy = !matches!(it_ty, Ty::Ref(..)) && self.needs_drop(&it_ty);
+        let kind = if owned_noncopy { LocalKind::IterArray } else { LocalKind::Temp };
+        let it = self.new_local(it_ty.clone(), kind, None, None, false, iter.span);
         let it_op = self.operand(iter);
         self.assign(Place::local(it), Rvalue::Use(it_op), iter.span);
-        if !matches!(it_ty, Ty::Ref(..)) && self.needs_drop(&it_ty) {
+        if owned_noncopy {
             self.scopes.last_mut().unwrap().push(it);
         }
         let base = match it_ty {
@@ -767,6 +777,7 @@ impl<'a, 'l> Builder<'a, 'l> {
                 Terminator::Call {
                     callee: Callee::Intrinsic(format!("string.{}", binop_name(op))),
                     args: vec![Operand::Copy(Place::local(lhs_ref)), Operand::Copy(Place::local(rhs_ref))],
+                    arg_spans: vec![span, lit.span],
                     dest: Place::local(c),
                     next: Some(next),
                     spawn: false,
@@ -1162,7 +1173,14 @@ impl<'a, 'l> Builder<'a, 'l> {
             let b = self.str_ref(rhs);
             let next = self.new_block();
             self.terminate(
-                Terminator::Call { callee: Callee::Intrinsic(format!("string.{}", binop_name(bop))), args: vec![a, b], dest, next: Some(next), spawn: false },
+                Terminator::Call {
+                    callee: Callee::Intrinsic(format!("string.{}", binop_name(bop))),
+                    args: vec![a, b],
+                    arg_spans: vec![lhs.span, rhs.span],
+                    dest,
+                    next: Some(next),
+                    spawn: false,
+                },
                 span,
             );
             self.switch_to(next);
@@ -1227,9 +1245,10 @@ impl<'a, 'l> Builder<'a, 'l> {
 
     // ------------------------------------------------------------ calls
 
-    fn finish_call(&mut self, callee: Callee, args: Vec<Operand>, dest: Place, diverges: bool, spawn: bool, span: Span) {
+    #[allow(clippy::too_many_arguments)]
+    fn finish_call(&mut self, callee: Callee, args: Vec<Operand>, arg_spans: Vec<Span>, dest: Place, diverges: bool, spawn: bool, span: Span) {
         let next = (!diverges).then(|| self.new_block());
-        self.terminate(Terminator::Call { callee, args, dest, next, spawn }, span);
+        self.terminate(Terminator::Call { callee, args, arg_spans, dest, next, spawn }, span);
         if let Some(n) = next {
             self.switch_to(n);
         }
@@ -1241,7 +1260,7 @@ impl<'a, 'l> Builder<'a, 'l> {
         match self.res(callee.id) {
             Some(Res::External { module, path }) => {
                 let ops = args.iter().map(|a| self.operand(a)).collect();
-                self.finish_call(Callee::Opaque(format!("{module}.{}", path.join("."))), ops, dest, false, spawn, span);
+                self.finish_call(Callee::Opaque(format!("{module}.{}", path.join("."))), ops, spans_of(args), dest, false, spawn, span);
             }
             Some(Res::Symbol(s)) => {
                 let s = *s;
@@ -1267,7 +1286,7 @@ impl<'a, 'l> Builder<'a, 'l> {
                                 }
                             })
                             .collect();
-                        self.finish_call(Callee::Builtin(b), ops, dest, diverges, spawn, span);
+                        self.finish_call(Callee::Builtin(b), ops, spans_of(args), dest, diverges, spawn, span);
                     }
                     SymbolKind::Primitive => {
                         let o = args.first().map(|a| self.operand(a)).unwrap_or(Operand::Const(Const::Opaque));
@@ -1285,13 +1304,13 @@ impl<'a, 'l> Builder<'a, 'l> {
                     SymbolKind::Function | SymbolKind::Method { .. } | SymbolKind::ImplMethod { .. } => {
                         let ops = args.iter().map(|a| self.arg(a)).collect();
                         let c = self.fn_callee(s, type_args);
-                        self.finish_call(c, ops, dest, false, spawn, span);
+                        self.finish_call(c, ops, spans_of(args), dest, false, spawn, span);
                     }
                     _ => {
                         // A local holding a function or closure.
                         let f = self.operand(callee);
                         let ops = args.iter().map(|a| self.arg(a)).collect();
-                        self.finish_call(Callee::Value(f), ops, dest, false, spawn, span);
+                        self.finish_call(Callee::Value(f), ops, spans_of(args), dest, false, spawn, span);
                     }
                 }
             }
@@ -1301,7 +1320,7 @@ impl<'a, 'l> Builder<'a, 'l> {
                 _ => {
                     let f = self.operand(callee);
                     let ops = args.iter().map(|a| self.operand(a)).collect();
-                    self.finish_call(Callee::Value(f), ops, dest, false, spawn, span);
+                    self.finish_call(Callee::Value(f), ops, spans_of(args), dest, false, spawn, span);
                 }
             },
         }
@@ -1355,12 +1374,17 @@ impl<'a, 'l> Builder<'a, 'l> {
                 let mut ops = vec![recv_op];
                 ops.extend(args.iter().map(|a| self.arg(a)));
                 let c = self.fn_callee(m, type_args);
-                self.finish_call(c, ops, dest, false, spawn, span);
+                let spans = std::iter::once(base.span).chain(args.iter().map(|a| a.span)).collect();
+                self.finish_call(c, ops, spans, dest, false, spawn, span);
             }
             _ => {
-                let mut ops = vec![self.read(place, &bt)];
+                // Opaque std method: its signature is unknown, so the receiver
+                // is assumed to be borrowed (never moved): an unchecked call
+                // must not invent moves the real API may not make.
+                let mut ops = vec![self.ref_temp(false, place, &bt, span)];
                 ops.extend(args.iter().map(|a| self.operand(a)));
-                self.finish_call(Callee::Opaque(format!("<std>.{}", name.name)), ops, dest, false, spawn, span);
+                let spans = std::iter::once(base.span).chain(args.iter().map(|a| a.span)).collect();
+                self.finish_call(Callee::Opaque(format!("<std>.{}", name.name)), ops, spans, dest, false, spawn, span);
             }
         }
     }
@@ -1388,7 +1412,11 @@ impl<'a, 'l> Builder<'a, 'l> {
             Ty::Fn(ps, r) => (ps, *r),
             _ => (vec![Ty::Error; params.len()], Ty::Error),
         };
-        cb.f.kind = FnKind::Closure { parent: self.f.id, captures: captured.len() as u32 };
+        let modes = captured
+            .iter()
+            .map(|s| if mutated.contains(s) { CaptureMode::MutableBorrow } else { CaptureMode::SharedBorrow })
+            .collect();
+        cb.f.kind = FnKind::Closure { parent: self.f.id, captures: modes };
         cb.f.ret = ret.clone();
         cb.f.generics = self.f.generics.clone();
         cb.new_local(ret, LocalKind::Return, None, None, false, e.span);
@@ -1418,6 +1446,10 @@ impl<'a, 'l> Builder<'a, 'l> {
         self.lx.extra.borrow_mut().push(f);
         self.assign(dest, Rvalue::Aggregate(Aggregate::Closure(id), cap_ops), e.span);
     }
+}
+
+fn spans_of(args: &[Expr]) -> Vec<Span> {
+    args.iter().map(|a| a.span).collect()
 }
 
 fn peel_ty(t: &Ty) -> &Ty {
@@ -1481,7 +1513,7 @@ fn mutated_symbols(body: &ast::Block, uses: &HashMap<ast::NodeId, tarn_resolve::
         }
         fn stmt(&mut self, s: &Stmt) {
             match &s.kind {
-                StmtKind::Let { value, .. } => self.expr(value),
+                StmtKind::Let { value: Some(value), .. } => self.expr(value),
                 StmtKind::Assign { target, value } => {
                     if let Some(r) = root(target, self.uses) {
                         self.out.insert(r);

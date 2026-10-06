@@ -12,18 +12,25 @@
 //! ```
 
 use crate::*;
+use std::collections::HashMap;
 use std::fmt::Write;
 use tarn_resolve::Resolved;
 use tarn_types::Typed;
 
 pub fn print_program(p: &Program, r: &Resolved, t: &Typed) -> String {
+    print_program_annotated(p, r, t, &HashMap::new())
+}
+
+/// Like `print_program`, with a trailing `// note` on annotated statements
+/// (used to show drop elaboration decisions).
+pub fn print_program_annotated(p: &Program, r: &Resolved, t: &Typed, notes: &HashMap<(FunctionId, BlockId, usize), String>) -> String {
     let mut out = String::new();
     for f in &p.functions {
         // `core` declarations are not printed (they have no body).
         if f.blocks.is_empty() {
             continue;
         }
-        out.push_str(&print_function(f, p, r, t));
+        out.push_str(&print_function_annotated(f, p, r, t, notes));
         out.push('\n');
     }
     out
@@ -135,6 +142,10 @@ impl P<'_> {
 }
 
 pub fn print_function(f: &Function, p: &Program, r: &Resolved, t: &Typed) -> String {
+    print_function_annotated(f, p, r, t, &HashMap::new())
+}
+
+fn print_function_annotated(f: &Function, p: &Program, r: &Resolved, t: &Typed, notes: &HashMap<(FunctionId, BlockId, usize), String>) -> String {
     let pp = P { p, r, t };
     let mut out = String::new();
     let params: Vec<String> = f.params().map(|l| format!("_{}: {}", l.0, pp.ty(&f.local(l).ty))).collect();
@@ -145,19 +156,27 @@ pub fn print_function(f: &Function, p: &Program, r: &Resolved, t: &Typed) -> Str
             LocalKind::Param => format!("param {}", l.name.clone().unwrap_or_default()),
             LocalKind::User => format!("{}{}", if l.mutable { "var " } else { "let " }, l.name.clone().unwrap_or_default()),
             LocalKind::Temp => "temp".to_string(),
+            LocalKind::IterArray => "iteration array".to_string(),
         };
         let _ = writeln!(out, "    _{i}: {}    // {what}", pp.ty(&l.ty));
     }
     for (i, b) in f.blocks.iter().enumerate() {
         let _ = writeln!(out, "  bb{i}:");
-        for s in &b.stmts {
+        for (si, s) in b.stmts.iter().enumerate() {
             let line = match &s.kind {
                 StatementKind::Assign(pl, rv) => format!("{} = {}", pp.place(pl), pp.rvalue(rv)),
                 StatementKind::StorageLive(l) => format!("live _{}", l.0),
                 StatementKind::StorageDead(l) => format!("dead _{}", l.0),
                 StatementKind::Drop(pl) => format!("drop {}", pp.place(pl)),
             };
-            let _ = writeln!(out, "    {line}");
+            match notes.get(&(f.id, BlockId(i as u32), si)) {
+                Some(n) => {
+                    let _ = writeln!(out, "    {line}    // {n}");
+                }
+                None => {
+                    let _ = writeln!(out, "    {line}");
+                }
+            }
         }
         let term = match &b.term {
             Terminator::Goto(t) => format!("goto bb{}", t.0),
@@ -165,7 +184,7 @@ pub fn print_function(f: &Function, p: &Program, r: &Resolved, t: &Typed) -> Str
                 let cs: Vec<String> = cases.iter().map(|(v, b)| format!("{v} => bb{}", b.0)).collect();
                 format!("switch {} [{}, _ => bb{}]", pp.operand(discr), cs.join(", "), otherwise.0)
             }
-            Terminator::Call { callee, args, dest, next, spawn } => format!(
+            Terminator::Call { callee, args, dest, next, spawn, .. } => format!(
                 "{}{} = call {}({}){}",
                 if *spawn { "spawn " } else { "" },
                 pp.place(dest),

@@ -41,6 +41,7 @@ block       = "{" { NL } [ stmt { NL { NL } stmt } ] { NL } "}" ;
 stmt        = "return" [ expr ]
             | "break" | "continue"
             | "var" IDENT [ ":" type ] "=" expr
+            | "var" IDENT ":" type                  (* uninitialized, ADR 0024 *)
             | IDENT [ ":" type ] ":=" expr
             | expr [ "=" expr ]                  (* assignment target: name, field, index *)
             | if_stmt | for_stmt | match_stmt

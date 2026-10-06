@@ -1,0 +1,21 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+fn main() {
+    x := Buffer.new()
+    for {
+        consume(x)
+        break                 // leaves the loop right after moving
+    }
+}

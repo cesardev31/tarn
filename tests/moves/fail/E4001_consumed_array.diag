@@ -1,0 +1,11 @@
+error[E4001]: use of moved value `names`
+  --> tests/moves/fail/E4001_consumed_array.tarn:20:14
+   |
+17 |     for b in names {
+   |              ----- value moved here
+20 |     for b in &names {
+   |              ^^^^^^ value used here after move
+   |
+   = note: `[2]Buffer` is not a copy type, so assigning or passing it moves it
+   = help: to keep using `names`, borrow it where it is moved (`&names`) instead of moving it
+

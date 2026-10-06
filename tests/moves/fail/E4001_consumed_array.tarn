@@ -1,0 +1,23 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn consume(b Buffer) {
+}
+
+fn read(b &Buffer) {
+}
+
+fn main() {
+    names := [2]Buffer{Buffer.new(), Buffer.new()}
+    for b in names {
+        consume(b)
+    }
+    for b in &names {
+        read(b)
+    }
+}

@@ -216,8 +216,9 @@ pub struct Stmt {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum StmtKind {
-    /// `x := e`, `x T := e`, `var x = e`, `var x T = e`
-    Let { mutable: bool, name: Ident, ty: Option<Type>, value: Expr },
+    /// `x := e`, `x: T := e`, `var x = e`, `var x: T = e`, and the
+    /// uninitialized `var x: T` (`value` is `None`; ADR 0024).
+    Let { mutable: bool, name: Ident, ty: Option<Type>, value: Option<Expr> },
     /// `place = e`
     Assign { target: Expr, value: Expr },
     Expr(Expr),
