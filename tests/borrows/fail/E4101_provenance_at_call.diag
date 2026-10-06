@@ -1,0 +1,12 @@
+error[E4101]: cannot borrow `y` as mutable because it is also borrowed as shared
+  --> tests/borrows/fail/E4101_provenance_at_call.tarn:38:10
+   |
+37 |     r := longest(&x, &y)
+   |                      -- shared borrow of `y` starts here
+38 |     m := &mut y               // `r` may borrow `y` (provenance {a, b})
+   |          ^^^^^^ mutable borrow conflicts here
+39 |     print(r)
+   |           - the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

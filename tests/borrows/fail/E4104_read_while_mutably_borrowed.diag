@@ -1,0 +1,12 @@
+error[E4104]: cannot use `c.value` while it is mutably borrowed
+  --> tests/borrows/fail/E4104_read_while_mutably_borrowed.tarn:37:10
+   |
+36 |     m := &mut c
+   |          ------ mutable borrow of `c` starts here
+37 |     v := c.value              // plain read of a copy field
+   |          ^^^^^^^ used here
+38 |     bump(m)
+   |          - the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

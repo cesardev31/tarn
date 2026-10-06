@@ -1,0 +1,12 @@
+error[E4105]: `b` does not live long enough
+  --> tests/borrows/fail/E4105_does_not_live_long_enough.tarn:32:5
+   |
+31 |         r = &b
+   |             -- `b` is borrowed here
+32 |     }
+   |     ^ `b` goes out of scope here while still borrowed
+33 |     read(r)
+   |          - the borrow is still used here
+   |
+   = help: declare `b` in an outer scope so it outlives the reference
+

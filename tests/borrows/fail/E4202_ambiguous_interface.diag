@@ -1,0 +1,9 @@
+error[E4202]: cannot infer where the reference returned by `choose` comes from
+  --> tests/borrows/fail/E4202_ambiguous_interface.tarn:28:8
+   |
+28 |     fn choose(a &string, b &string) &string
+   |        ^^^^^^ 2 reference parameters could be the source
+   |
+   = note: without a body, only a `&self` receiver or a single reference parameter determines it (ADR 0010)
+   = help: return an owned value, or split the function so only one reference parameter remains
+

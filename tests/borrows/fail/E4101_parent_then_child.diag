@@ -1,0 +1,12 @@
+error[E4101]: cannot borrow `p.first` as mutable because it is also borrowed as shared
+  --> tests/borrows/fail/E4101_parent_then_child.tarn:30:10
+   |
+29 |     a := &p
+   |          -- shared borrow of `p` starts here
+30 |     b := &mut p.first
+   |          ^^^^^^^^^^^^ mutable borrow conflicts here
+32 |     print(a.first.data)
+   |           ------------ the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

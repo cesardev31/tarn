@@ -1,0 +1,62 @@
+fn Buffer.new [post-drop] {
+    _0: Buffer
+  bb0:
+    _0 = Buffer{"resource"}
+    return
+}
+
+fn consume [post-drop] {
+    _0: void
+    _1: Buffer
+  bb0:
+    _0 = ()
+    destroy _1
+    return
+}
+
+fn main [post-drop] {
+    _0: void
+    _1: bool
+    _2: Buffer
+    _3: Buffer
+    _4: void
+    _5: Buffer
+    _6: Buffer
+    df0: bool for _2
+  bb0:
+    df0 = false
+    live _2
+    df0 = false
+    _3 = call Buffer.new() -> bb1
+  bb1:
+    df0 = false
+    _2 = move _3
+    df0 = true
+    df0 = false
+    _4 = call consume(move _2) -> bb2
+  bb2:
+    switch copy _1 [0 => bb4, _ => bb3]
+  bb3:
+    _5 = call Buffer.new() -> bb6
+  bb4:
+    goto bb5
+  bb5:
+    _6 = call Buffer.new() -> bb7
+  bb6:
+    df0 = false
+    _2 = move _5
+    df0 = true
+    goto bb5
+  bb7:
+    if df0 { destroy _2 }
+    df0 = false
+    _2 = move _6
+    df0 = true
+    _0 = ()
+    destroy _2
+    df0 = false
+    dead _2
+    df0 = false
+    return
+}
+

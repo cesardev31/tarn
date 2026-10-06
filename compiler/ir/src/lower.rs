@@ -392,10 +392,21 @@ impl<'a, 'l> Builder<'a, 'l> {
                 self.assign(Place::local(l), Rvalue::Use(op), value.span);
             }
             StmtKind::Assign { target, value } => {
-                let op = self.operand(value);
+                let mut op = self.operand(value);
                 let place = self.place(target);
                 let ty = self.ty(target);
                 if self.needs_drop(&ty) {
+                    // Evaluate an overlapping owned RHS before destroying the
+                    // destination (x = x, p.field = p.field). An Operand is
+                    // deferred until Assign; merely lowering it is not a read.
+                    if let Operand::Move(source) = &op
+                        && source.local == place.local
+                        && (source.proj.starts_with(&place.proj) || place.proj.starts_with(&source.proj))
+                    {
+                        let tmp = self.temp(ty.clone(), value.span);
+                        self.assign(Place::local(tmp), Rvalue::Use(op), value.span);
+                        op = Operand::Move(Place::local(tmp));
+                    }
                     // The old value is dropped before being overwritten.
                     self.push(StatementKind::Drop(place.clone()), span);
                 }
@@ -1366,13 +1377,33 @@ impl<'a, 'l> Builder<'a, 'l> {
                 }
             }
             Some(MethodTarget::Symbol(m)) => {
+                // Arguments are evaluated *before* the receiver is borrowed, so
+                // `c.add(c.value)` reads `c` before `&mut c` exists. This gives
+                // the effect of two-phase borrows without a separate concept.
+                let arg_ops: Vec<Operand> = args
+                    .iter()
+                    .map(|a| {
+                        // Materialize place operands now: the call terminator
+                        // reads its operands after the receiver borrow.
+                        let op = self.arg(a);
+                        match op {
+                            Operand::Copy(_) | Operand::Move(_) => {
+                                let ty = self.ty(a);
+                                let t = self.new_local(ty.clone(), LocalKind::Temp, None, None, false, a.span);
+                                self.assign(Place::local(t), Rvalue::Use(op), a.span);
+                                self.read(Place::local(t), &ty)
+                            }
+                            c => c,
+                        }
+                    })
+                    .collect();
                 let recv_op = match recv.map(|r| r.kind) {
-                    Some(ReceiverKind::Ref) | None => self.ref_temp(false, place, &bt, span),
-                    Some(ReceiverKind::RefMut) => self.ref_temp(true, place, &bt, span),
+                    Some(ReceiverKind::Ref) | None => self.ref_temp(false, place, &bt, base.span),
+                    Some(ReceiverKind::RefMut) => self.ref_temp(true, place, &bt, base.span),
                     Some(ReceiverKind::Value) => self.read(place, &bt),
                 };
                 let mut ops = vec![recv_op];
-                ops.extend(args.iter().map(|a| self.arg(a)));
+                ops.extend(arg_ops);
                 let c = self.fn_callee(m, type_args);
                 let spans = std::iter::once(base.span).chain(args.iter().map(|a| a.span)).collect();
                 self.finish_call(c, ops, spans, dest, false, spawn, span);

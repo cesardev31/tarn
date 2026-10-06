@@ -104,9 +104,22 @@ change that alters provenance invalidates dependents.
 - `unsafe` does not disable the borrow checker; it only allows raw pointer
   operations whose invariants the programmer documents.
 
-## 5. Implementation plan
+## 5. Implementation
 
-1. Phase 9: moves and use-after-move on the typed IR, straight-line code, then
-   if/loops with a dataflow analysis over the CFG.
-2. Phase 10: borrows with liveness (NLL-style), conflict detection.
-3. Phase 10+: provenance inference for returned references (ADR 0010).
+- Moves and initialization: phase 6A, ADR 0024.
+- Borrows, non-lexical lifetimes, provenance: phase 6B, ADR 0025.
+- The joint contract of both is `compiler/driver/tests/memory_safety.rs`.
+- Drop elaboration: phase 6C, [ADR 0026](adr/0026-drop-elaboration.md), before any
+  backend executes the IR.
+
+## Executable drops (6C)
+
+Drop elaboration preserves reverse scope-binding order and destroys aggregate
+fields in increasing declaration order, recursively. Static drops execute, dead
+drops disappear, conditional drops use explicit runtime bits, and partial drops
+execute only live child plans. Reinitialization restores the affected child bits;
+overwrites destroy the old live value first. Consuming arrays use element
+bitmaps so moved elements are never destroyed twice. Panic aborts, with no unwind
+or stack cleanup. Copy values have no owned-resource drop; user destructors are
+not implemented. The post-drop IR is independently verified and printed with
+`tarn ir file.tarn --drops`.

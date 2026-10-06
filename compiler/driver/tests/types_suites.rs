@@ -31,7 +31,7 @@ fn types_fail_suite() {
     let mut failures = Vec::new();
     for f in &files {
         let o = run(f);
-        if !o.codes.iter().any(|c| c.starts_with("E3")) {
+        if !o.codes.iter().any(|c| c.starts_with("E3") || *c == "E4203") {
             failures.push(format!("{} should fail type checking, got {:?}", f.display(), o.codes));
             continue;
         }

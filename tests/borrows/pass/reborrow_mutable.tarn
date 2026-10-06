@@ -1,0 +1,32 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn read(b &Buffer) {
+}
+
+fn write(b &mut Buffer) {
+}
+
+fn consume(b Buffer) {
+}
+
+struct Pair {
+    first Buffer
+    second Buffer
+}
+
+fn Pair.new() Pair {
+    return Pair{first: Buffer.new(), second: Buffer.new()}
+}
+
+// Passing `x` reborrows `*x` for the call: `x` is not moved.
+fn f(x &mut Buffer) {
+    write(x)
+    write(x)
+    read(x)
+}

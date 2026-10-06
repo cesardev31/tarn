@@ -1,0 +1,12 @@
+error[E4103]: cannot move out of `a` because it is borrowed
+  --> tests/borrows/fail/E4103_move_while_borrowed.tarn:30:10
+   |
+29 |     r := &a
+   |          -- shared borrow of `a` starts here
+30 |     b := a
+   |          ^ moved here while borrowed
+31 |     read(r)
+   |          - the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

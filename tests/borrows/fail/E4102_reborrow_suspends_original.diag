@@ -1,0 +1,12 @@
+error[E4102]: cannot assign to `c.value` because it is borrowed
+  --> tests/borrows/fail/E4102_reborrow_suspends_original.tarn:33:5
+   |
+32 |     r := &mut c.value
+   |          ------------ mutable borrow of `c.value` starts here
+33 |     c.value = 1               // writing through `c` while `r` still borrows it
+   |     ^^^^^^^^^^^ assigned here while borrowed
+34 |     print(r)
+   |           - the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

@@ -323,6 +323,7 @@ dependencies = [
 name = "tarn_ownership"
 version = "0.0.1"
 dependencies = [
+ "tarn_ast",
  "tarn_diagnostics",
  "tarn_ir",
  "tarn_resolve",

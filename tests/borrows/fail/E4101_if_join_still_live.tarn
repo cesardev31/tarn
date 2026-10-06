@@ -1,0 +1,36 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn read(b &Buffer) {
+}
+
+fn write(b &mut Buffer) {
+}
+
+fn consume(b Buffer) {
+}
+
+struct Pair {
+    first Buffer
+    second Buffer
+}
+
+fn Pair.new() Pair {
+    return Pair{first: Buffer.new(), second: Buffer.new()}
+}
+
+fn main(c bool) {
+    var x = Buffer.new()
+    var y = Buffer.new()
+    var r = &y
+    if c {
+        r = &x                // after the join, `r` may borrow `x`
+    }
+    write(&mut x)
+    read(r)
+}

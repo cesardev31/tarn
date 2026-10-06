@@ -1,0 +1,12 @@
+error[E4102]: cannot assign to `a` because it is borrowed
+  --> tests/borrows/fail/E4102_assign_while_borrowed.tarn:30:5
+   |
+29 |     r := &a
+   |          -- shared borrow of `a` starts here
+30 |     a = Buffer.new()
+   |     ^^^^^^^^^^^^^^^^ assigned here while borrowed
+31 |     read(r)
+   |          - the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

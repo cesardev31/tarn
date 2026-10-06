@@ -1,0 +1,79 @@
+fn Buffer.new [post-drop] {
+    _0: Buffer
+  bb0:
+    _0 = Buffer{"resource"}
+    return
+}
+
+fn consume [post-drop] {
+    _0: void
+    _1: Buffer
+  bb0:
+    _0 = ()
+    destroy _1
+    return
+}
+
+fn main [post-drop] {
+    _0: void
+    _1: bool
+    _2: Choice
+    _3: Buffer
+    _4: Choice
+    _5: Choice
+    _6: Buffer
+    _7: Buffer
+    _8: u32
+    _9: Buffer
+    _10: u32
+    _11: Buffer
+    _12: void
+  bb0:
+    _3 = call Buffer.new() -> bb1
+  bb1:
+    _2 = Choice.One(move _3)
+    live _4
+    _4 = move _2
+    switch copy _1 [0 => bb3, _ => bb2]
+  bb2:
+    _6 = call Buffer.new() -> bb5
+  bb3:
+    goto bb4
+  bb4:
+    goto bb7
+  bb5:
+    _7 = call Buffer.new() -> bb6
+  bb6:
+    _5 = Choice.Two(move _6, move _7)
+    destroy _4
+    _4 = move _5
+    goto bb4
+  bb7:
+    _8 = discriminant(_4)
+    switch copy _8 [0 => bb10, _ => bb8]
+  bb8:
+    _10 = discriminant(_4)
+    switch copy _10 [1 => bb11, _ => bb9]
+  bb9:
+    unreachable
+  bb10:
+    live _9
+    _9 = move (_4 as #0).0
+    _0 = ()
+    destroy _9
+    dead _9
+    variants _4 { #0: , #1: destroy (_4 as #1).0; destroy (_4 as #1).1 }
+    dead _4
+    return
+  bb11:
+    live _11
+    _11 = move (_4 as #1).0
+    _12 = call consume(move _11) -> bb12
+  bb12:
+    _0 = ()
+    dead _11
+    variants _4 { #0: destroy (_4 as #0).0, #1: destroy (_4 as #1).1 }
+    dead _4
+    return
+}
+

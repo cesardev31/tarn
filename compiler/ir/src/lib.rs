@@ -15,6 +15,7 @@
 //! Not SSA: locals are mutable slots assigned many times; places (`x.f`,
 //! `(*r)[i]`) are first-class because borrow checking reasons about them.
 
+pub mod post_drop;
 mod lower;
 mod pretty;
 mod verify;

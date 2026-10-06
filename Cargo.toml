@@ -10,6 +10,7 @@ members = [
     "compiler/ir",
     "compiler/ownership",
     "compiler/driver",
+    "compiler/backend",
     "tools/cli",
     "tools/lsp",
 ]

@@ -1,0 +1,12 @@
+error[E4101]: cannot borrow `x` as mutable because it is also borrowed as shared
+  --> tests/borrows/fail/E4101_shared_then_mutable.tarn:30:10
+   |
+29 |     a := &x
+   |          -- shared borrow of `x` starts here
+30 |     b := &mut x
+   |          ^^^^^^ mutable borrow conflicts here
+31 |     read(a)
+   |          - the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

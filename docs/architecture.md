@@ -17,7 +17,7 @@ Source ─▶ Lexer ─▶ Parser ─▶ AST ─▶ Resolve ─▶ Types ─▶ 
 | `compiler/types` | `tarn_types` | type checking, local inference, mutability, exhaustiveness (docs/types.md) | done (v0) |
 | `compiler/driver` | `tarn_driver` | load modules from disk, run phases, sort diagnostics | done (v0) |
 | `compiler/ir` | `tarn_ir` | typed CFG IR, lowering, verifier, printer (ADR 0023) | done (v0) |
-| `compiler/ownership` | `tarn_ownership` | 6A move/init checking + drop decisions (ADR 0024); 6B borrows next | started |
+| `compiler/ownership` | `tarn_ownership` | 6A move/init + drop decisions (ADR 0024), 6B borrows + provenance (ADR 0025), 6C executable drop elaboration (ADR 0026) | done (v0) |
 | `compiler/backend` | `tarn_backend` | IR ─▶ Cranelift ─▶ object | planned |
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | `tarn_runtime` | `print`, `panic`, startup (staticlib) | planned |
@@ -55,3 +55,11 @@ the system `cc` (Linux x86_64 only). Evaluate invoking `ld` directly later.
 Global cache at `~/.tarn/cache/`, keys = hash(compiler version, target, source
 hash, dependency interface hashes, flags). Per-module first; finer later only
 if measurements justify it.
+
+## Executable destruction boundary
+
+After successful ownership checking, the driver produces `CheckResult.drops`: a
+separate `tarn_ir::post_drop::Program` with explicit destruction plans, runtime
+flags and verified CFG edges. A backend consumes it without reading move/borrow
+results. See [ADR 0026](adr/0026-drop-elaboration.md). Inspect it with
+`tarn ir file.tarn --drops`. Native code generation is still deferred.

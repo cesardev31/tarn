@@ -1,0 +1,12 @@
+error[E4101]: cannot borrow `x` as mutable because it is also borrowed as shared
+  --> tests/borrows/fail/E4101_loop_back_edge.tarn:32:15
+   |
+32 |         write(&mut x)         // conflicts only with the loan from the previous iteration
+   |               ^^^^^^ mutable borrow conflicts here
+33 |         read(keep)
+   |              ---- the borrow is still used here
+34 |         keep = &x             // crosses the back edge, still held at the next `read`
+   |                -- shared borrow of `x` starts here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

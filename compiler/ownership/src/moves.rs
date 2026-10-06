@@ -7,7 +7,7 @@
 //! at that point and classifies every `Drop` for drop elaboration.
 
 use crate::paths::{Lookup, MovePathId, MovePaths, PathElem};
-use crate::{DropDecision, FnMoves};
+use crate::{DropDecision, FnMoves, InitState};
 use std::collections::{HashMap, HashSet};
 use tarn_diagnostics::{Diagnostic, Span};
 use tarn_ir::{BlockId, Callee, Function, LocalKind, Operand, Place, Rvalue, StatementKind, Terminator};
@@ -58,6 +58,7 @@ struct Cx<'a> {
     reported: HashSet<MovePathId>,
     diags: Vec<Diagnostic>,
     drops: Vec<(BlockId, usize, DropDecision)>,
+    drop_states: HashMap<(BlockId, usize), Vec<(Place, InitState)>>,
 }
 
 pub fn check_function(f: &Function, r: &Resolved, t: &Typed) -> (FnMoves, Vec<Diagnostic>) {
@@ -65,7 +66,7 @@ pub fn check_function(f: &Function, r: &Resolved, t: &Typed) -> (FnMoves, Vec<Di
         return (FnMoves::default(), Vec::new());
     }
     let mp = MovePaths::build(f);
-    let mut cx = Cx { f, r, t, mp, sites: HashMap::new(), site_info: Vec::new(), report: false, reported: HashSet::new(), diags: Vec::new(), drops: Vec::new() };
+    let mut cx = Cx { f, r, t, mp, sites: HashMap::new(), site_info: Vec::new(), report: false, reported: HashSet::new(), diags: Vec::new(), drops: Vec::new(), drop_states: HashMap::new() };
     let entry = cx.entry_state();
     let n = f.blocks.len();
     let mut ins: Vec<Option<State>> = vec![None; n];
@@ -95,7 +96,7 @@ pub fn check_function(f: &Function, r: &Resolved, t: &Typed) -> (FnMoves, Vec<Di
             cx.block(b, &mut st);
         }
     }
-    (FnMoves { drops: cx.drops }, cx.diags)
+    (FnMoves { drops: cx.drops, drop_states: cx.drop_states, has_errors: false }, cx.diags)
 }
 
 impl Cx<'_> {
@@ -159,8 +160,30 @@ impl Cx<'_> {
                         if self.report {
                             let d = self.drop_decision(st, p);
                             self.drops.push((BlockId(b as u32), si, d));
+                            let states = self.mp.paths.iter().enumerate().map(|(i, path)| {
+                                let mut proj = Vec::new();
+                                let mut cur = MovePathId(i as u32);
+                                while let Some(parent) = self.mp.path(cur).parent {
+                                    proj.push(match self.mp.path(cur).elem.unwrap() {
+                                        PathElem::Field(f) => tarn_ir::Proj::Field(f),
+                                        PathElem::Downcast(v) => tarn_ir::Proj::Downcast(v),
+                                    });
+                                    cur = parent;
+                                }
+                                proj.reverse();
+                                let state = match (st.init[i], st.uninit[i]) {
+                                    (true, false) => InitState::Live,
+                                    (true, true) => InitState::Maybe,
+                                    _ => InitState::Dead,
+                                };
+                                (Place { local: path.local, proj }, state)
+                            }).collect();
+                            self.drop_states.insert((BlockId(b as u32), si), states);
                         }
                         self.set_uninit(st, p, None);
+                    } else if self.report {
+                        self.drops.push((BlockId(b as u32), si, DropDecision::Static));
+                        self.drop_states.insert((BlockId(b as u32), si), vec![(place.clone(), InitState::Live)]);
                     }
                 }
             }

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 fn corpus() -> Vec<PathBuf> {
     let root = Path::new("../..");
     let mut out = Vec::new();
-    for dir in ["examples", "tests/types/pass", "tests/types/fail", "tests/resolve/pass", "tests/moves/pass", "tests/moves/fail"] {
+    for dir in ["examples", "tests/types/pass", "tests/types/fail", "tests/resolve/pass", "tests/moves/pass", "tests/moves/fail", "tests/borrows/pass", "tests/borrows/fail", "tests/drops/pass"] {
         for e in std::fs::read_dir(root.join(dir)).unwrap() {
             let p = e.unwrap().path();
             if p.extension().is_some_and(|e| e == "tarn") {
@@ -33,11 +33,18 @@ fn line_deletions_never_panic() {
             std::fs::write(&file, &mutated).unwrap();
             let result = std::panic::catch_unwind(|| tarn_driver::check(&file));
             assert!(result.is_ok(), "panic on {} without line {}:\n{mutated}", path.display(), i + 1);
+            assert!(result.as_ref().unwrap().is_ok(), "compiler failure on {} without line {}: {:?}", path.display(), i + 1, result.as_ref().unwrap().as_ref().err());
             if let Ok(Ok(res)) = &result
                 && let Some(ir) = &res.ir
             {
                 let errs = tarn_ir::verify(ir);
                 assert!(errs.is_empty(), "invalid IR for {} without line {}:\n{}", path.display(), i + 1, errs.join("\n"));
+            }
+            if let Ok(Ok(res)) = &result
+                && let (Some(drops), Some(typed)) = (&res.drops, &res.typed)
+            {
+                let errs = tarn_ir::post_drop::verify(drops, typed);
+                assert!(errs.is_empty(), "invalid post-drop IR for {} without line {}:\n{}", path.display(), i + 1, errs.join("\n"));
             }
             runs += 1;
         }

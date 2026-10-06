@@ -17,7 +17,7 @@ fn main() {
 }
 ```
 
-Status: move/init checking done (phase 6A); next is the borrow checker (6B). See [docs/roadmap.md](docs/roadmap.md).
+Status: ownership, borrow checking and executable drop elaboration done (phases 6A + 6B + 6C); the backend is next. See [docs/roadmap.md](docs/roadmap.md).
 
 ```bash
 cargo build --release

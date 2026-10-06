@@ -1,0 +1,12 @@
+error[E4101]: cannot borrow `x` as mutable because it is also borrowed as shared
+  --> tests/borrows/fail/E4101_if_join_still_live.tarn:34:11
+   |
+32 |         r = &x                // after the join, `r` may borrow `x`
+   |             -- shared borrow of `x` starts here
+34 |     write(&mut x)
+   |           ^^^^^^ mutable borrow conflicts here
+35 |     read(r)
+   |          - the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

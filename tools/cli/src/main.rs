@@ -12,7 +12,7 @@ usage:
     tarn check <file.tarn> [--json]  lex, parse and resolve names; report diagnostics
     tarn resolve <file.tarn>         print what every name resolves to
     tarn types <file.tarn>           print the type of every local and parameter
-    tarn ir <file.tarn>              print the typed IR (control-flow graph)
+    tarn ir <file.tarn>              print typed IR; --drops prints executable drops
     tarn version                     print the compiler version
 
 planned: build, run, test, check, fmt, clean, cache
@@ -175,8 +175,12 @@ fn cmd_ir(args: &[String]) -> ExitCode {
     };
     let map = &res.program.sources;
     if let (Some(r), Some(t), Some(ir)) = (&res.resolved, &res.typed, &res.ir) {
-        let notes = res.moves.as_ref().map(|m| m.drop_notes()).unwrap_or_default();
-        print!("{}", tarn_ir::print_program_annotated(ir, r, t, &notes));
+        if args.iter().any(|a| a == "--drops") {
+            if let Some(drops) = &res.drops { print!("{}", tarn_ir::post_drop::print_program(drops, r, t)); }
+        } else {
+            let notes = res.moves.as_ref().map(|m| m.drop_notes()).unwrap_or_default();
+            print!("{}", tarn_ir::print_program_annotated(ir, r, t, &notes));
+        }
     }
     for d in &res.diagnostics {
         eprint!("{}", d.render(map));

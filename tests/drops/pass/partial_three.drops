@@ -1,0 +1,51 @@
+fn Buffer.new [post-drop] {
+    _0: Buffer
+  bb0:
+    _0 = Buffer{"resource"}
+    return
+}
+
+fn consume [post-drop] {
+    _0: void
+    _1: Buffer
+  bb0:
+    _0 = ()
+    destroy _1
+    return
+}
+
+fn main [post-drop] {
+    _0: void
+    _1: Deep
+    _2: Nest
+    _3: Pair
+    _4: Buffer
+    _5: Buffer
+    _6: Buffer
+    _7: Buffer
+    _8: Deep
+    _9: Buffer
+  bb0:
+    _4 = call Buffer.new() -> bb1
+  bb1:
+    _5 = call Buffer.new() -> bb2
+  bb2:
+    _3 = Pair{move _4, move _5}
+    _6 = call Buffer.new() -> bb3
+  bb3:
+    _2 = Nest{move _3, move _6}
+    _7 = call Buffer.new() -> bb4
+  bb4:
+    _1 = Deep{move _2, move _7}
+    live _8
+    _8 = move _1
+    live _9
+    _9 = move _8.0.0.0
+    _0 = ()
+    destroy _9
+    dead _9
+    partial _8 { partial _8.0 { partial _8.0.0 { destroy _8.0.0.1 }; destroy _8.0.1 }; destroy _8.1 }
+    dead _8
+    return
+}
+

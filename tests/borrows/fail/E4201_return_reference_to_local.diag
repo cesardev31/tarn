@@ -1,0 +1,20 @@
+error[E4201]: cannot return a reference to `x`
+  --> tests/borrows/fail/E4201_return_reference_to_local.tarn:29:5
+   |
+29 |     return &x
+   |     ^^^^^^^^^ returned here
+   |            -- `x` is borrowed here
+   |
+   = note: `x` belongs to this function and is dropped when it returns
+   = help: return an owned value instead, or borrow from a parameter
+
+error[E4201]: cannot return a reference to `b.data`
+  --> tests/borrows/fail/E4201_return_reference_to_local.tarn:33:5
+   |
+33 |     return &b.data
+   |     ^^^^^^^^^^^^^^ returned here
+   |            ------- `b.data` is borrowed here
+   |
+   = note: `b.data` belongs to this function and is dropped when it returns
+   = help: return an owned value instead, or borrow from a parameter
+

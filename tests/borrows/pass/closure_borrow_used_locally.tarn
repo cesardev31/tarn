@@ -1,0 +1,35 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn read(b &Buffer) {
+}
+
+fn write(b &mut Buffer) {
+}
+
+fn consume(b Buffer) {
+}
+
+struct Pair {
+    first Buffer
+    second Buffer
+}
+
+fn Pair.new() Pair {
+    return Pair{first: Buffer.new(), second: Buffer.new()}
+}
+
+fn apply(f fn(i64) i64) i64 {
+    return f(1)
+}
+
+fn main() {
+    k := 3
+    r := apply(fn(x) i64 { return x + k })
+    print(r)
+}

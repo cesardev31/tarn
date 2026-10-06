@@ -1,0 +1,12 @@
+error[E4101]: cannot borrow `x` as mutable more than once at a time
+  --> tests/borrows/fail/E4101_mutable_twice.tarn:30:10
+   |
+29 |     a := &mut x
+   |          ------ mutable borrow of `x` starts here
+30 |     b := &mut x
+   |          ^^^^^^ second mutable borrow here
+31 |     write(a)
+   |           - the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

@@ -1,0 +1,79 @@
+fn Buffer.new [post-drop] {
+    _0: Buffer
+  bb0:
+    _0 = Buffer{"resource"}
+    return
+}
+
+fn consume [post-drop] {
+    _0: void
+    _1: Buffer
+  bb0:
+    _0 = ()
+    destroy _1
+    return
+}
+
+fn main [post-drop] {
+    _0: void
+    _1: bool
+    _2: [3]Buffer
+    _3: Buffer
+    _4: Buffer
+    _5: Buffer
+    _6: [3]Buffer
+    _7: [3]Buffer
+    _8: usize
+    _9: usize
+    _10: bool
+    _11: Buffer
+    df0: bits[3] for _7
+  bb0:
+    df0.fill(false)
+    _3 = call Buffer.new() -> bb1
+  bb1:
+    _4 = call Buffer.new() -> bb2
+  bb2:
+    _5 = call Buffer.new() -> bb3
+  bb3:
+    _2 = [move _3, move _4, move _5]
+    live _6
+    _6 = move _2
+    _7 = move _6
+    df0.fill(true)
+    _8 = len(_7)
+    _9 = 0_usize
+    goto bb5
+  bb4:
+    _0 = ()
+    destroy_remaining _7 using df0
+    df0.fill(false)
+    dead _6
+    return
+  bb5:
+    _10 = lt(copy _9, copy _8)
+    switch copy _10 [0 => bb4, _ => bb6]
+  bb6:
+    live _11
+    _11 = move _7[_9]
+    df0[_9] = false
+    switch copy _1 [0 => bb9, _ => bb8]
+  bb7:
+    _9 = add(copy _9, 1_usize)
+    goto bb5
+  bb8:
+    _0 = ()
+    destroy _11
+    dead _11
+    destroy_remaining _7 using df0
+    df0.fill(false)
+    dead _6
+    return
+  bb9:
+    goto bb10
+  bb10:
+    destroy _11
+    dead _11
+    goto bb7
+}
+

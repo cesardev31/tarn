@@ -36,18 +36,18 @@ pub fn print_program_annotated(p: &Program, r: &Resolved, t: &Typed, notes: &Has
     out
 }
 
-struct P<'a> {
-    p: &'a Program,
-    r: &'a Resolved,
-    t: &'a Typed,
+pub(crate) struct P<'a> {
+    pub(crate) p: &'a Program,
+    pub(crate) r: &'a Resolved,
+    pub(crate) t: &'a Typed,
 }
 
 impl P<'_> {
-    fn ty(&self, ty: &Ty) -> String {
+    pub(crate) fn ty(&self, ty: &Ty) -> String {
         self.t.display(ty, self.r)
     }
 
-    fn place(&self, pl: &Place) -> String {
+    pub(crate) fn place(&self, pl: &Place) -> String {
         let mut s = format!("_{}", pl.local.0);
         for pr in &pl.proj {
             s = match pr {
@@ -60,7 +60,7 @@ impl P<'_> {
         s
     }
 
-    fn operand(&self, o: &Operand) -> String {
+    pub(crate) fn operand(&self, o: &Operand) -> String {
         match o {
             Operand::Copy(p) => format!("copy {}", self.place(p)),
             Operand::Move(p) => format!("move {}", self.place(p)),
@@ -88,11 +88,11 @@ impl P<'_> {
         }
     }
 
-    fn ops(&self, os: &[Operand]) -> String {
+    pub(crate) fn ops(&self, os: &[Operand]) -> String {
         os.iter().map(|o| self.operand(o)).collect::<Vec<_>>().join(", ")
     }
 
-    fn rvalue(&self, rv: &Rvalue) -> String {
+    pub(crate) fn rvalue(&self, rv: &Rvalue) -> String {
         match rv {
             Rvalue::Use(o) => self.operand(o),
             Rvalue::Ref(m, p) => format!("&{}{}", if *m { "mut " } else { "" }, self.place(p)),
@@ -129,7 +129,7 @@ impl P<'_> {
         }
     }
 
-    fn callee(&self, c: &Callee) -> String {
+    pub(crate) fn callee(&self, c: &Callee) -> String {
         match c {
             Callee::Fn(id, targs) => format!("{}{}", self.p.function(*id).name, self.targs(targs)),
             Callee::Virtual { method, type_args } => format!("virtual {}{}", self.r.symbol(*method).name, self.targs(type_args)),

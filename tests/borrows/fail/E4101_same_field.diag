@@ -1,0 +1,12 @@
+error[E4101]: cannot borrow `p.first` as shared because it is mutably borrowed
+  --> tests/borrows/fail/E4101_same_field.tarn:30:10
+   |
+29 |     a := &mut p.first
+   |          ------------ mutable borrow of `p.first` starts here
+30 |     b := &p.first
+   |          ^^^^^^^^ shared borrow conflicts here
+31 |     write(a)
+   |           - the borrow is still used here
+   |
+   = note: a borrow lasts until the last use of the reference that holds it
+

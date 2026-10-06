@@ -1,0 +1,18 @@
+error[E4203]: `View` cannot hold a reference (`&string`) in its fields
+ --> tests/types/fail/E4203_reference_in_field.tarn:1:8
+  |
+1 | struct View {
+  |        ^^^^
+  |
+  = note: v0 types own their data; references live only in variables and parameters (ADR 0010)
+  = help: store an owned value, or make the type generic and instantiate it with a reference
+
+error[E4203]: `Token` cannot hold a reference (`&string`) in its fields
+ --> tests/types/fail/E4203_reference_in_field.tarn:5:6
+  |
+5 | enum Token {
+  |      ^^^^^
+  |
+  = note: v0 types own their data; references live only in variables and parameters (ADR 0010)
+  = help: store an owned value, or make the type generic and instantiate it with a reference
+

@@ -1,0 +1,8 @@
+error[E4206]: a spawned task cannot receive a reference
+  --> tests/borrows/fail/E4206_reference_to_spawn.tarn:33:20
+   |
+33 |         spawn work(&x)
+   |                    ^^ this argument holds a reference
+   |
+   = note: v0 does not track borrows across tasks; pass owned values to `spawn`
+

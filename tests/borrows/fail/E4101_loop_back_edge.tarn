@@ -1,0 +1,36 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn read(b &Buffer) {
+}
+
+fn write(b &mut Buffer) {
+}
+
+fn consume(b Buffer) {
+}
+
+struct Pair {
+    first Buffer
+    second Buffer
+}
+
+fn Pair.new() Pair {
+    return Pair{first: Buffer.new(), second: Buffer.new()}
+}
+
+fn main() {
+    var x = Buffer.new()
+    y := Buffer.new()
+    var keep = &y
+    for i in 0..3 {
+        write(&mut x)         // conflicts only with the loan from the previous iteration
+        read(keep)
+        keep = &x             // crosses the back edge, still held at the next `read`
+    }
+}

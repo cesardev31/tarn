@@ -101,6 +101,7 @@ pub fn check(inputs: &[ModuleInput], r: &Resolved) -> (Typed, Vec<Diagnostic>) {
     let mut env = Env::new(inputs, r);
     let mut diags = std::mem::take(&mut env.diags);
     validate_copy(&env, &mut diags);
+    validate_no_ref_fields(&env, &mut diags);
     validate_impls(&env, &mut diags);
     let mut tables: Vec<TypeTables> = (0..inputs.len()).map(|_| TypeTables::default()).collect();
     let mut locals = HashMap::new();
@@ -163,6 +164,40 @@ fn validate_copy(env: &Env, diags: &mut Vec<Diagnostic>) {
         }
         if let Some(d) = env.decls.enums.get(&s).filter(|d| d.is_copy) {
             check(s, d.variants.iter().flat_map(|v| v.fields.iter()).collect());
+        }
+    }
+}
+
+/// Struct fields and variant payloads cannot be declared as references in v0
+/// (ADR 0010, E4203). This is what lets the borrow checker treat locals as the
+/// only holders of references (ADR 0025). Type arguments may still be
+/// references (`Option<&T>`, `Pair<&T, U>`): those values are tracked as
+/// holders like any local.
+fn validate_no_ref_fields(env: &Env, diags: &mut Vec<Diagnostic>) {
+    fn has_ref(t: &Ty) -> bool {
+        match t {
+            Ty::Ref(..) => true,
+            Ty::Adt(_, args) => args.iter().any(has_ref),
+            Ty::Array(e, _) | Ty::Slice(e) => has_ref(e),
+            _ => false,
+        }
+    }
+    let mut syms: Vec<_> = env.decls.structs.keys().chain(env.decls.enums.keys()).copied().collect();
+    syms.sort();
+    for s in syms {
+        let tys: Vec<&Ty> = match (env.decls.structs.get(&s), env.decls.enums.get(&s)) {
+            (Some(d), _) => d.fields.iter().map(|f| &f.ty).collect(),
+            (_, Some(d)) => d.variants.iter().flat_map(|v| v.fields.iter()).collect(),
+            _ => continue,
+        };
+        if let Some(t) = tys.into_iter().find(|t| has_ref(t)) {
+            let sym = env.r.symbol(s);
+            diags.push(
+                Diagnostic::error("E4203", "reference_in_field", format!("`{}` cannot hold a reference (`{}`) in its fields", sym.name, display(t, env)))
+                    .primary(sym.span.unwrap(), "")
+                    .note("v0 types own their data; references live only in variables and parameters (ADR 0010)")
+                    .help("store an owned value, or make the type generic and instantiate it with a reference"),
+            );
         }
     }
 }

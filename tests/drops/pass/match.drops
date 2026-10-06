@@ -1,0 +1,98 @@
+fn Buffer.new [post-drop] {
+    _0: Buffer
+  bb0:
+    _0 = Buffer{"resource"}
+    return
+}
+
+fn consume [post-drop] {
+    _0: void
+    _1: Buffer
+  bb0:
+    _0 = ()
+    destroy _1
+    return
+}
+
+fn main [post-drop] {
+    _0: void
+    _1: bool
+    _2: Choice
+    _3: Buffer
+    _4: Choice
+    _5: Choice
+    _6: Buffer
+    _7: Buffer
+    _8: u32
+    _9: Buffer
+    _10: void
+    _11: u32
+    _12: Buffer
+    _13: void
+    df0: bool for (_4 as #0).0
+    df1: bool for (_4 as #1).0
+  bb0:
+    df0 = false
+    df1 = false
+    _3 = call Buffer.new() -> bb1
+  bb1:
+    _2 = Choice.One(move _3)
+    live _4
+    df0 = false
+    df1 = false
+    _4 = move _2
+    df0 = true
+    df1 = true
+    switch copy _1 [0 => bb3, _ => bb2]
+  bb2:
+    _6 = call Buffer.new() -> bb5
+  bb3:
+    goto bb4
+  bb4:
+    goto bb8
+  bb5:
+    _7 = call Buffer.new() -> bb6
+  bb6:
+    _5 = Choice.Two(move _6, move _7)
+    destroy _4
+    df0 = false
+    df1 = false
+    _4 = move _5
+    df0 = true
+    df1 = true
+    goto bb4
+  bb7:
+    _0 = ()
+    variants _4 { #0: if df0 { destroy (_4 as #0).0 }, #1: if df1 { destroy (_4 as #1).0 }; destroy (_4 as #1).1 }
+    df0 = false
+    df1 = false
+    dead _4
+    df0 = false
+    df1 = false
+    return
+  bb8:
+    _8 = discriminant(_4)
+    switch copy _8 [0 => bb11, _ => bb9]
+  bb9:
+    _11 = discriminant(_4)
+    switch copy _11 [1 => bb13, _ => bb10]
+  bb10:
+    unreachable
+  bb11:
+    live _9
+    _9 = move (_4 as #0).0
+    df0 = false
+    _10 = call consume(move _9) -> bb12
+  bb12:
+    dead _9
+    goto bb7
+  bb13:
+    live _12
+    _12 = move (_4 as #1).0
+    df1 = false
+    _13 = call consume(move _12) -> bb14
+  bb14:
+    dead _12
+    goto bb7
+}
+

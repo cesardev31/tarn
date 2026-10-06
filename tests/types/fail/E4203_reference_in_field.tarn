@@ -1,0 +1,8 @@
+struct View {
+    text &string
+}
+
+enum Token {
+    Word(&string)
+    End
+}

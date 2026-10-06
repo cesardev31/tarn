@@ -1,0 +1,9 @@
+error[E4207]: cannot store a reference to `local` into `out.value`
+  --> tests/borrows/fail/E4207_store_through_reference.tarn:33:5
+   |
+33 |     out.value = &local        // would outlive this function through `out`
+   |     ^^^^^^^^^^^^^^^^^^ the reference would outlive this function
+   |                 ------ `local` is borrowed here
+   |
+   = note: `out.value` belongs to the caller; `local` is dropped when this function returns
+

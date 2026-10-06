@@ -156,9 +156,17 @@ stream them:
 | W2001 | `confusing_shadow` | `x` is shadowed in an inner scope and used again after it |
 | W2002 | `shadows_item` | `x` shadows the builtin function `x` |
 | W2003 | `unused_import` | unused import `m` |
-| E4201 | `reference_escapes` | returned reference may outlive its owner (planned) |
-| E4202 | `ambiguous_provenance` | cannot infer where the returned reference comes from (planned) |
-| E4203 | `reference_in_struct` | struct fields cannot hold references (planned) |
-| E4204 | `provenance_mismatch` | implementation returns a borrow its interface does not allow (planned) |
+| E4101 | `conflicting_borrow` | cannot borrow `x` as mutable because it is also borrowed as shared |
+| E4102 | `assign_while_borrowed` | cannot assign to `x` because it is borrowed |
+| E4103 | `move_while_borrowed` | cannot move out of `x` because it is borrowed |
+| E4104 | `use_while_mutably_borrowed` | cannot use `x` while it is mutably borrowed |
+| E4105 | `does_not_live_long_enough` | `x` does not live long enough |
+| E4201 | `reference_escapes` | cannot return a reference to `x` |
+| E4202 | `ambiguous_provenance` | cannot infer where the returned reference comes from |
+| E4203 | `reference_in_field` | `T` cannot hold a reference in its fields |
+| E4204 | `provenance_mismatch` | implementation returns a borrow its interface does not allow |
+| E4205 | `closure_escapes_borrow` | returned closure captures `k` by reference |
+| E4206 | `reference_to_spawned_task` | a spawned task cannot receive a reference |
+| E4207 | `borrow_escapes_through_reference` | cannot store a reference to `x` into `out.f` |
 
 Golden tests in `tests/**/fail/*.tarn` pin the rendered text of each code.

@@ -1,0 +1,42 @@
+struct Buffer {
+    data string
+}
+
+fn Buffer.new() Buffer {
+    return Buffer{data: ""}
+}
+
+fn read(b &Buffer) {
+}
+
+fn write(b &mut Buffer) {
+}
+
+fn consume(b Buffer) {
+}
+
+struct Pair {
+    first Buffer
+    second Buffer
+}
+
+fn Pair.new() Pair {
+    return Pair{first: Buffer.new(), second: Buffer.new()}
+}
+
+enum Slot {
+    Full(Buffer)
+    Empty
+}
+
+fn main() {
+    var s = Slot.Full(Buffer.new())
+    match &s {
+        Full(b) => read(b)
+        Empty => print(0)
+    }
+    match &mut s {
+        Full(b) => write(b)
+        Empty => print(0)
+    }
+}

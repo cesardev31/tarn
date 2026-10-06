@@ -17,3 +17,5 @@ tarn_driver = { path = "../../compiler/driver" }
 tarn_resolve = { path = "../../compiler/resolve" }
 tarn_types = { path = "../../compiler/types" }
 tarn_ir = { path = "../../compiler/ir" }
+
+tarn_backend = { path = "../../compiler/backend" }

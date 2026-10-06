@@ -27,6 +27,10 @@ pub struct CheckResult {
     pub ir: Option<tarn_ir::Program>,
     /// Move/init checking results (drop elaboration input).
     pub moves: Option<tarn_ownership::MoveResults>,
+    /// Borrow checking results (loans, provenance).
+    pub borrows: Option<tarn_ownership::BorrowResults>,
+    /// Self-contained executable destruction IR, only after successful ownership checking.
+    pub drops: Option<tarn_ir::post_drop::Program>,
     /// Sorted by file, then position.
     pub diagnostics: Vec<Diagnostic>,
 }
@@ -97,6 +101,8 @@ pub fn check_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pa
     let mut typed = None;
     let mut ir = None;
     let mut moves = None;
+    let mut borrows = None;
+    let mut drops = None;
     let errors = |ds: &[Diagnostic]| ds.iter().any(|d| d.severity == Severity::Error);
     if !errors(&diagnostics) {
         let inputs: Vec<ModuleInput> = program.modules.iter().map(|(n, m)| ModuleInput { name: n.clone(), ast: m }).collect();
@@ -111,6 +117,13 @@ pub fn check_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pa
                 diagnostics.extend(d);
                 let (m, d) = tarn_ownership::check_moves(&p, &r, &t);
                 diagnostics.extend(d);
+                let (bo, d) = tarn_ownership::check_borrows(&p, &r, &t, &m.failed());
+                diagnostics.extend(d);
+                if !errors(&diagnostics) {
+                    drops = Some(tarn_ownership::elaborate_drops(&p, &t, &m)
+                        .map_err(|bugs| format!("compiler bug in drop elaboration:\n{}", bugs.join("\n")))?);
+                }
+                borrows = Some(bo);
                 moves = Some(m);
                 ir = Some(p);
             }
@@ -119,5 +132,5 @@ pub fn check_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pa
         resolved = Some(r);
     }
     diagnostics.sort_by_key(|d| d.primary_span().map(|s| (s.file, s.start)));
-    Ok(CheckResult { program, resolved, typed, ir, moves, diagnostics })
+    Ok(CheckResult { program, resolved, typed, ir, moves, borrows, drops, diagnostics })
 }

@@ -1,0 +1,10 @@
+error[E4205]: returned closure captures `k` by reference, but `k` is dropped when the function returns
+  --> tests/borrows/fail/E4205_closure_escapes.tarn:29:5
+   |
+29 |     return fn(x) i64 { return x + k }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the closure escapes here
+   |            -------------------------- `k` is captured by reference here
+   |
+   = note: closures capture by reference in v0; capture by value is not supported yet
+   = help: pass the value to the closure as a parameter instead of capturing it
+

@@ -1,13 +1,19 @@
 //! Ownership analysis on the typed IR.
 //!
-//! Phase 6A (this crate today): move/initialization checking — use after
+//! Phase 6A: move/initialization checking — use after
 //! move, possibly moved values at joins, uninitialized values, partial moves,
 //! reinitialization — plus the information drop elaboration needs.
 //! Phase 6B (borrow checking) builds on the same move paths.
+//! Phase 6C elaborates executable drops after both analyses succeed.
 
+mod borrows;
+mod drops;
 mod moves;
 mod paths;
+mod util;
 
+pub use borrows::{BorrowResults, FnBorrows, Loan, LoanKind, Provenance, check_borrows, overlap};
+pub use drops::elaborate_drops;
 pub use paths::{Lookup, MovePathId, MovePaths, PathElem};
 
 use std::collections::HashMap;
@@ -30,10 +36,19 @@ pub enum DropDecision {
     Partial(Vec<String>),
 }
 
+/// Initialization of a move path at an abstract drop site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InitState { Live, Dead, Maybe }
+
 #[derive(Debug, Default)]
 pub struct FnMoves {
     /// `(block, statement index, decision)` for every `Drop` statement.
     pub drops: Vec<(BlockId, usize, DropDecision)>,
+    /// Sparse move-path state at each drop, including the local root. Missing
+    /// fields inherit their nearest tracked ancestor (paths are structural).
+    pub drop_states: HashMap<(BlockId, usize), Vec<(tarn_ir::Place, InitState)>>,
+    /// Move/init errors were reported in this function (6B skips it).
+    pub has_errors: bool,
 }
 
 #[derive(Debug, Default)]
@@ -60,12 +75,20 @@ impl MoveResults {
     }
 }
 
+/// Functions with move/init errors.
+impl MoveResults {
+    pub fn failed(&self) -> std::collections::HashSet<FunctionId> {
+        self.functions.iter().filter(|(_, m)| m.has_errors).map(|(f, _)| *f).collect()
+    }
+}
+
 /// Run the move/init checker on every function of the program.
 pub fn check_moves(p: &Program, r: &Resolved, t: &Typed) -> (MoveResults, Vec<Diagnostic>) {
     let mut results = MoveResults::default();
     let mut diags = Vec::new();
     for f in &p.functions {
-        let (m, mut d) = moves::check_function(f, r, t);
+        let (mut m, mut d) = moves::check_function(f, r, t);
+        m.has_errors = !d.is_empty();
         diags.append(&mut d);
         results.functions.insert(f.id, m);
     }

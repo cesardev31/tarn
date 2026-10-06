@@ -1,0 +1,31 @@
+struct Buffer {
+    data string
+}
+fn Buffer.new() Buffer {
+    return Buffer{data: "resource"}
+}
+fn consume(b Buffer) {
+}
+struct Pair {
+    first Buffer
+    second Buffer
+}
+struct Nest {
+    pair Pair
+    tail Buffer
+}
+struct Deep {
+    nest Nest
+    tail Buffer
+}
+fn main(c bool, d bool) {
+    x := Buffer.new()
+    if c {
+        y := Buffer.new()
+        if d {
+            consume(x)
+        }
+        return
+    }
+    consume(x)
+}
