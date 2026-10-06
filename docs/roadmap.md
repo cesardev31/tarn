@@ -11,7 +11,8 @@ tested and documented.
 | 3 | Name resolution (incl. shadowing rules, ADR 0009) | **done** |
 | 4 | Types (primitives, structs, enums, generics, interfaces, mutability) | **done** |
 | 5 | Diagnostics (text + JSON, golden tests) | done for phases 1–4 |
-| 6 | Typed IR | next |
+| 6 | Typed IR (ADR 0023) | **done** |
+| 9–10 | Ownership/borrow analysis + drop elaboration on the IR | next |
 | 7 | Cranelift backend, `tarn build`/`run` | |
 | 8 | Structs | |
 | 9 | Ownership (moves) | |
@@ -36,6 +37,9 @@ before borrowing, generics or a large stdlib.
 - Value-producing `if` (currently: no).
 - Equality for structs/enums (needs an `Equal` interface).
 - Error conversion in `try` (currently exact match only).
+- Method-owner syntax for `[]T` / `[N]T` so `len` can move to `core` (ADR 0020).
+- `Self` in interface signatures (needed by `Eq`, ADR 0022).
+- Well-formedness of type annotations w.r.t. bounds (`x: Point<string>`).
 - Exact iteration protocol for `for x in xs`.
 - `try` error conversion (`Error.from`) vs. explicit mapping.
 - Shared vs. monomorphized generics — decide with benchmarks.

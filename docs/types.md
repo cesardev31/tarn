@@ -60,9 +60,9 @@ automatically: `&self` borrows a place, `&mut self` borrows mutably (requires
 a mutable place or `&mut`), `self` moves (through a reference only for copy
 types, E3030).
 
-**Provisional intrinsics** until the stdlib exists: `len()` and `is_empty()`
-on `string`, arrays and slices; `clone()` on `string`; `sqrt()`/`abs()` on
-floats; `abs()` on signed integers.
+Methods of primitive types are declared in `core` (`stdlib/core/core.tarn`,
+ADR 0020) as `extern "intrinsic"` functions. Only `len()`/`is_empty()` on
+arrays and slices remain compiler-defined (closed list).
 
 ## Patterns (ADR 0014, 0018)
 
@@ -70,14 +70,12 @@ Unqualified capitalized names resolve against the scrutinee's enum here
 (E3019 unknown variant). Bindings reached through a reference follow ADR 0018:
 copy types bind by value, others by reference.
 
-## Exhaustiveness (conservative)
+## Exhaustiveness (ADR 0019)
 
-- Enums: every variant needs an unguarded arm whose sub-patterns are all
-  irrefutable, or a catch-all arm.
-- `bool`: `true` and `false`, or a catch-all.
-- Everything else: a catch-all arm.
-- Guarded arms and nested refutable patterns never count as covering: some
-  exhaustive matches are rejected (add `_`). Precise nested analysis later.
+Usefulness over pattern matrices: nested patterns are analyzed precisely,
+`E3018` names a missing value (`Some(Err(_))`), `W3001` flags arms that can
+never match. Guarded arms never count as covering. Integer ranges are opaque
+(a final arm is needed after `0..=127`, `128..=255`).
 
 ## Returns
 
@@ -91,6 +89,12 @@ every arm diverges, or `for { }` without a `break`.
 `try e` on `Result<T, E>` in a function returning `Result<_, E>` yields `T`;
 on `Option<T>` in a function returning `Option<_>` yields `T`. The error types
 must be the same: **no automatic conversion in v0** (E3017).
+
+## Unification
+
+Unification is transactional: every binding is recorded in an undo log and a
+failed `unify` restores exactly the previous state, so a failure never
+influences later inference or diagnostics.
 
 ## Unsafe
 

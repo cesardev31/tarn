@@ -16,9 +16,10 @@ Source ─▶ Lexer ─▶ Parser ─▶ AST ─▶ Resolve ─▶ Types ─▶ 
 | `compiler/resolve` | `tarn_resolve` | scopes, symbols, `NodeId` side tables (docs/resolution.md) | done (v0) |
 | `compiler/types` | `tarn_types` | type checking, local inference, mutability, exhaustiveness (docs/types.md) | done (v0) |
 | `compiler/driver` | `tarn_driver` | load modules from disk, run phases, sort diagnostics | done (v0) |
-| `compiler/ir` | `tarn_ir` | typed CFG IR | planned |
+| `compiler/ir` | `tarn_ir` | typed CFG IR, lowering, verifier, printer (ADR 0023) | done (v0) |
 | `compiler/ownership` | `tarn_ownership` | move/borrow analysis on IR | planned |
 | `compiler/backend` | `tarn_backend` | IR ─▶ Cranelift ─▶ object | planned |
+| `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | `tarn_runtime` | `print`, `panic`, startup (staticlib) | planned |
 | `tools/cli` | `tarn` | the single CLI | started |
 | `tools/fmt` | `tarn_fmt` | canonical formatter | planned |

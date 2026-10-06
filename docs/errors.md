@@ -141,6 +141,10 @@ stream them:
 | E3036 | `spawn_needs_call` | `spawn` takes a function call |
 | E3037 | `array_length_mismatch` | array of length 3 has 2 elements |
 | E3038 | `variant_needs_args` | variant `E.V` takes 1 value |
+| E2026 | `impl_copy` | `Copy` is not implemented with `impl` |
+| E2027 | `intrinsic_outside_core` | `extern "intrinsic"` functions can only be declared in `core` |
+| W3001 | `unreachable_arm` | this arm can never match |
+| W3002 | `unreachable_code` | unreachable code |
 | W2001 | `confusing_shadow` | `x` is shadowed in an inner scope and used again after it |
 | W2002 | `shadows_item` | `x` shadows the builtin function `x` |
 | W2003 | `unused_import` | unused import `m` |

@@ -17,7 +17,7 @@ fn main() {
 }
 ```
 
-Status: phase 4 (type checker) done; next is the typed IR. See [docs/roadmap.md](docs/roadmap.md).
+Status: typed IR done (phase 6); next is ownership and borrow checking. See [docs/roadmap.md](docs/roadmap.md).
 
 ```bash
 cargo build --release
