@@ -36,7 +36,7 @@ tested and documented.
 | 16 | Bounded async HTTP/1.1 server over buffered I/O | **done within documented server subset**: [16A–F plan](phase-16-plan.md), [report](phase-16-report.md), [ADR 0046](adr/0046-bounded-async-http.md) |
 | 17 | Application ergonomics: string.Builder, json, http.serve and response helpers (ADR 0048) | **done**: [plan](phase-17-plan.md), [report](phase-17-report.md) |
 | 18 | Minimal native C FFI: scalar extern calls, raw pointers, `--link`, SQLite acceptance (ADR 0047) | **done within documented v0 limits**: [plan](phase-18-plan.md), [report](phase-18-report.md) |
-| 19 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
+| 19 | CLI: command surface, `test`, `--watch`, `clean` | started (`check`, `build`, `run`, inspection commands); [plan](phase-19-plan.md) |
 | 20 | Formatter (basic) | |
 | 21 | VS Code extension (TextMate) | **started**: language + highlighting |
 
