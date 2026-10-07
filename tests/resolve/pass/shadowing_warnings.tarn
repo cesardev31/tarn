@@ -1,4 +1,4 @@
-import "fs"
+import "path"
 
 fn main() {
     limit := 10
@@ -14,5 +14,5 @@ fn main() {
         print(total)
     }
     print := 3
-    fs := 1
+    path := 1
 }

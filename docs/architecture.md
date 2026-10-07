@@ -21,6 +21,7 @@ Source → Lexer → Parser → AST → Resolve → Types → Typed IR
 | `compiler/ownership` | `tarn_ownership` | 6A move/init + drop decisions (ADR 0024), 6B borrows + provenance (ADR 0025), 6C executable drop elaboration (ADR 0026) | done (v0) |
 | `compiler/backend` | `tarn_backend` | post-drop IR → Cranelift → ELF object/link | initial Linux x86_64 subset (ADR 0027) |
 | `stdlib/net` | — | blocking/nonblocking TCP/UDP, owned sockets, level-triggered epoll and explicit errors (ADRs 0034/0035) | done (12A/12B Linux v0) |
+| `stdlib/fs` | — | owned blocking regular files, directories and explicit io.Error (ADR 0043) | done (15B Linux v0) |
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | — | embedded C runtime: primitive print, strings, panic/abort; libc startup | initial (ADR 0027) |
 | `tools/cli` | `tarn` | the single CLI | started |

@@ -1,2 +1,2 @@
-import "fs"
-fn observe(x &fs.File) {}
+import "process"
+fn observe(x &process.Process) {}

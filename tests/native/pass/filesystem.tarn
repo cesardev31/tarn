@@ -1,0 +1,17 @@
+import "fs"
+import "io"
+fn inspect(file fs.File) Result<bool, io.Error> {
+    return Ok((try file.metadata()).is_file)
+}
+fn main() Result<void, io.Error> {
+    file := try fs.File.open(&"/proc/self/status")
+    var moved = file
+    var data = [8]u8{0, 0, 0, 0, 0, 0, 0, 0}
+    print((try moved.read(&mut data)) > usize(0))
+    print(try inspect(moved))
+    text := try fs.read_text(&"/proc/self/status")
+    print(!text.is_empty())
+    entries := try fs.read_dir(&"/proc/self/fd")
+    print(!entries.is_empty())
+    return Ok(())
+}

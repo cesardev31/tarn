@@ -1,4 +1,4 @@
-import "fs"
+import "process"
 fn main() {
-    x := fs.open("file")
+    x := process.run("file")
 }

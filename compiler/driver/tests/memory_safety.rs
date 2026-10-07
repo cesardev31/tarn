@@ -6,6 +6,15 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("file cannot be used after move", Some("E4001"), "import \"fs\"\nfn bad(file fs.File) { moved := file\n file.metadata() }"),
+    ("file cannot close twice", Some("E4001"), "import \"fs\"\nfn bad(file fs.File) { file.close()\n file.close() }"),
+    ("file cannot move while borrowed", Some("E4103"), "import \"fs\"\nfn bad(file fs.File) { loan := &file\n moved := file\n loan.metadata() }"),
+    ("file cannot overwrite while borrowed", Some("E4102"), "import \"fs\"\nfn bad(first fs.File, second fs.File) { var file = first\n loan := &file\n file = second\n loan.metadata() }"),
+    ("file shared task access needs Share", Some("E3047"), "import \"fs\"\nfn bad(file fs.File) { scope { task := spawn fn() { file.metadata() }\n task.join() } }"),
+    ("file original unusable after spawn", Some("E4001"), "import \"fs\"\nfn bad(file fs.File) { task := spawn move fn() { file.close() }\n file.metadata()\n task.join() }"),
+    ("file read retains mutable buffer exclusivity", Some("E4101"), "import \"fs\"\nfn bad(file &mut fs.File) { var data = [1]u8{0}\n loan := &data\n file.read(&mut data)\n print(loan[0]) }"),
+    ("file transfers into and returns from native task", None, "import \"fs\"\nfn good(file fs.File) { task := spawn move fn() fs.File { return file }\n returned := task.join()\n returned.metadata() }"),
+    ("directory names cannot escape owned entries", Some("E4201"), "import \"fs\"\nfn bad(entries Vec<fs.DirEntry>) &string { return entries.get(usize(0)).name() }"),
     ("string byte view cannot mutate storage", Some("E3015"), "fn main() { value := \"text\"\n data := value.bytes()\n data[0] = u8(65) }"),
     ("string byte view cannot escape local owner", Some("E4201"), "fn bad() &[]u8 { value := \"text\"\n return value.bytes() }"),
     ("string cannot move while byte view remains live", Some("E4103"), "fn main() { value := \"text\"\n bytes := value.bytes()\n moved := value\n print(bytes[0]) }"),
@@ -84,8 +93,8 @@ const CASES: &[(&str, Option<&str>, &str)] = &[
     ("owned task containing local loan", Some("E4206"), "fn main() { x: i64 := 42\n r := &x\n t := spawn move fn() i64 { return r.abs() }\n t.join() }") ,
     ("task result cannot borrow its environment", Some("E4201"), "fn main() { x := 42\n t := spawn move fn() &i64 { return &x }\n t.join() }") ,
     ("task handle ownership transfer", None, "fn main() { t := spawn move fn() i64 { return 42 }\n u := t\n print(u.join()) }") ,
-    ("opaque std return rejected", Some("E3040"), "import \"fs\"\nfn main() {\n    x := fs.open(\"file\")\n}"),
-    ("opaque std type rejected", Some("E3040"), "import \"fs\"\nfn observe(x &fs.File) {}"),
+    ("opaque std return rejected", Some("E3040"), "import \"process\"\nfn main() {\n    x := process.run(\"file\")\n}"),
+    ("opaque std type rejected", Some("E3040"), "import \"process\"\nfn observe(x &process.Process) {}"),
     ("opaque prelude error rejected", Some("E3040"), "fn observe(x &Error) {}"),
     (
         "modeled result loan remains live",

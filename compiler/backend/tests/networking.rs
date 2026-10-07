@@ -156,7 +156,7 @@ fn result_main_reports_errors_and_cleans_up_without_abort() {
     );
     let out = run(&exe);
     assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("network error: invalid address"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("I/O error: invalid address"));
     assert_eq!(balanced(&out), 1);
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
 }
@@ -261,12 +261,12 @@ fn native_error_mapping_dns_and_close_eintr_are_explicit() {
     ] {
         let out = Command::new(&exe).env("TEST_ERRNO", code.to_string()).env("TARN_TRACE_NET", "1").output().unwrap();
         assert_eq!(out.status.code(), Some(1));
-        assert!(String::from_utf8_lossy(&out.stderr).contains(&format!("network error: {label} (native code {code})")));
+        assert!(String::from_utf8_lossy(&out.stderr).contains(&format!("I/O error: {label} (native code {code})")));
         assert_eq!(balanced(&out), 1);
     }
     let out = Command::new(&exe).env("TEST_DNS", "1").env("TARN_TRACE_NET", "1").output().unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("network error: DNS failure"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("I/O error: DNS failure"));
     assert_eq!(balanced(&out), 0);
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
     let src = "import \"io\"\nimport \"net\"\nfn main() Result<void, io.Error> { socket := try net.UdpSocket.bind(&\"127.0.0.1:0\")\n try socket.close()\n return Ok(()) }";

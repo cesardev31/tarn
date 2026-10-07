@@ -22,6 +22,7 @@ const TRUSTED_STDLIB: &[(&str, &str)] = &[
     ("time", include_str!("../../../stdlib/time/time.tarn")),
     ("runtime", include_str!("../../../stdlib/runtime/runtime.tarn")),
     ("net", include_str!("../../../stdlib/net/net.tarn")),
+    ("fs", include_str!("../../../stdlib/fs/fs.tarn")),
 ];
 
 fn trusted_source(name: &str) -> Option<&'static str> {

@@ -1,8 +1,8 @@
-warning[W2003]: unused import `fs`
+warning[W2003]: unused import `path`
  --> tests/resolve/pass/shadowing_warnings.tarn:1:8
   |
-1 | import "fs"
-  |        ^^^^
+1 | import "path"
+  |        ^^^^^^
   |
   = help: remove the import
 
@@ -36,13 +36,13 @@ warning[W2002]: `print` shadows the builtin function `print`
    |
    = help: use a different name
 
-warning[W2002]: `fs` shadows the module `fs`
+warning[W2002]: `path` shadows the module `path`
   --> tests/resolve/pass/shadowing_warnings.tarn:17:5
    |
- 1 | import "fs"
-   |        ---- declared here
-17 |     fs := 1
-   |     ^^
+ 1 | import "path"
+   |        ------ declared here
+17 |     path := 1
+   |     ^^^^
    |
    = help: use a different name
 

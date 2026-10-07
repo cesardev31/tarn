@@ -102,6 +102,8 @@ pub(crate) fn verify(t: &Typed) -> Vec<String> {
                 "WriteZero",
                 "UnexpectedEof",
                 "LimitExceeded",
+                "NotFound", "PermissionDenied", "AlreadyExists", "InvalidInput", "InvalidData",
+                "NotDirectory", "IsDirectory", "DirectoryNotEmpty", "StorageFull",
             ]
     {
         return invalid();

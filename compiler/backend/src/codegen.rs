@@ -363,6 +363,22 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     for (name, params, returns) in [
         ("tarn_rt_net_main_error", vec![types::I32, types::I32], vec![]),
         ("tarn_rt_net_drop", vec![types::I32], vec![]),
+        ("tarn_rt_fs_drop", vec![types::I32], vec![]),
+        ("tarn_rt_fs_dir_drop", vec![types::I64], vec![]),
+        ("tarn_rt_fs_open", vec![types::I64, types::I64, types::I32], vec![]),
+        ("tarn_rt_fs_read", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
+        ("tarn_rt_fs_write", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
+        ("tarn_rt_fs_seek", vec![types::I64, types::I32, types::I64, types::I32], vec![]),
+        ("tarn_rt_fs_file_metadata", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_fs_sync", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_fs_close", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_fs_metadata", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_fs_mkdir", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_fs_remove_file", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_fs_remove_dir", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_fs_rename", vec![types::I64, types::I64, types::I64], vec![]),
+        ("tarn_rt_fs_dir_open", vec![types::I64, types::I64], vec![]),
+        ("tarn_rt_fs_dir_next", vec![types::I64, types::I64, types::I64, types::I64], vec![]),
         ("tarn_rt_net_exec_new", vec![types::I64, types::I64], vec![]),
         ("tarn_rt_net_waker_new", vec![types::I64, types::I64], vec![]),
         ("tarn_rt_net_wake", vec![types::I64, types::I64], vec![]),
@@ -1802,6 +1818,7 @@ impl Cx<'_, '_> {
     fn intrinsic(&mut self, name: &str, args: &[Val], dest: &Ty) -> Result<Val> {
         if let Some(result) = self.string_operation(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.tasks(name, args, dest)? { return Ok(result); }
+        if let Some(result) = self.filesystem(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.networking(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.synchronization(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.vector(name, args, dest)? { return Ok(result); }
@@ -1937,6 +1954,16 @@ impl Cx<'_, '_> {
             self.runtime("tarn_rt_net_poll_drop", &[handle]);
             return Ok(());
         }
+        if matches!(ty, Ty::Adt(id, _) if Some(*id) == self.t.decls.fs_file) {
+            let fd = self.b.ins().load(types::I32, cl::MemFlags::new(), addr, 0);
+            self.runtime("tarn_rt_fs_drop", &[fd]);
+            return Ok(());
+        }
+        if matches!(ty, Ty::Adt(id, _) if Some(*id) == self.t.decls.fs_directory) {
+            let native = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
+            self.runtime("tarn_rt_fs_dir_drop", &[native]);
+            return Ok(());
+        }
         if matches!(ty, Ty::Adt(id, _) if self.t.decls.net_sockets.contains(id)) {
             let fd = self.b.ins().load(types::I32, cl::MemFlags::new(), addr, 0);
             self.runtime("tarn_rt_net_drop", &[fd]);
@@ -2064,3 +2091,6 @@ mod tasks;
 
 #[path = "networking.rs"]
 mod networking;
+
+#[path = "filesystem.rs"]
+mod filesystem;

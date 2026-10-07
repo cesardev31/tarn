@@ -6,6 +6,6 @@ fn main() {
     c := circle.Circle{radius: 1.0}
     print(circle.area(&c))
     print(util.double(2))
-    text := fs.read_text("x")
+    text := fs.read_text(&"x")
     k := circle.Kind.Big
 }

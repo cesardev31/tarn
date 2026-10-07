@@ -1,4 +1,4 @@
-import "fs"
+import "path"
 import "process"
 
 fn main() {

@@ -1,0 +1,255 @@
+// Blocking Linux filesystem, phase 15B. Paths are UTF-8 strings without NUL.
+import "io"
+import "string"
+
+/// Owned regular-file descriptor. Transfer, not Share. Position-changing
+/// operations require &mut self. Close consumes this resource.
+pub struct File { fd i32 }
+struct _Directory { native usize }
+pub copy struct Metadata {
+    pub len u64
+    pub is_file bool
+    pub is_dir bool
+}
+pub copy enum SeekFrom {
+    Start(u64)
+    Current(i64)
+    End(i64)
+}
+pub struct DirEntry {
+    text string
+    location string
+}
+extern "intrinsic" fn _open(path &string, mode i32) io._Raw
+extern "intrinsic" fn _read(fd i32, data &mut []u8) io._Raw
+extern "intrinsic" fn _write(fd i32, data &[]u8) io._Raw
+extern "intrinsic" fn _seek(fd i32, offset i64, origin i32) io._Raw
+extern "intrinsic" fn _metadata(path &string) io._Raw
+extern "intrinsic" fn _file_metadata(fd i32) io._Raw
+extern "intrinsic" fn _sync(fd i32) io._Raw
+extern "intrinsic" fn _close(value File) io._Raw
+extern "intrinsic" fn _mkdir(path &string) io._Raw
+extern "intrinsic" fn _remove_file(path &string) io._Raw
+extern "intrinsic" fn _remove_dir(path &string) io._Raw
+extern "intrinsic" fn _rename(from &string, to &string) io._Raw
+extern "intrinsic" fn _dir_open(path &string) io._Raw
+extern "intrinsic" fn _dir_next(native usize, data &mut []u8) io._Raw
+
+fn _interrupted(raw io._Raw) bool { return raw.domain == 3 && raw.code == 4 }
+fn _info(raw io._Raw) Metadata {
+    return Metadata{len: u64(raw.value), is_file: raw.address[0] == u8(1), is_dir: raw.address[0] == u8(2)}
+}
+fn _opening(path &string, mode i32) Result<File, io.Error> {
+    for {
+        raw := _open(path, mode)
+        if _interrupted(raw) { continue }
+        checked := try io._check(raw)
+        file := File{fd: i32(checked.value)}
+        info := try file.metadata()
+        if info.is_dir { return Err(io._fail(io.ErrorKind.IsDirectory)) }
+        if !info.is_file { return Err(io._fail(io.ErrorKind.InvalidInput)) }
+        return Ok(file)
+    }
+}
+pub fn open(path &string) Result<File, io.Error> { return File.open(path) }
+pub fn File.open(path &string) Result<File, io.Error> { return _opening(path, i32(0)) }
+/// Read/write, create if absent, truncate if present. Permissions respect umask.
+pub fn File.create(path &string) Result<File, io.Error> { return _opening(path, i32(1)) }
+pub fn File.append(path &string) Result<File, io.Error> { return _opening(path, i32(2)) }
+pub fn File.open_read_write(path &string) Result<File, io.Error> { return _opening(path, i32(3)) }
+/// Atomic create-if-absent; existing paths return AlreadyExists.
+pub fn File.create_new(path &string) Result<File, io.Error> { return _opening(path, i32(4)) }
+pub fn File.read(&mut self, data &mut []u8) Result<usize, io.Error> {
+    for {
+        raw := _read(self.fd, data)
+        if _interrupted(raw) { continue }
+        checked := try io._check(raw)
+        return Ok(usize(checked.value))
+    }
+}
+pub fn File.write(&mut self, data &[]u8) Result<usize, io.Error> {
+    for {
+        raw := _write(self.fd, data)
+        if _interrupted(raw) { continue }
+        checked := try io._check(raw)
+        return Ok(usize(checked.value))
+    }
+}
+pub fn File.write_all(&mut self, data &[]u8) Result<void, io.Error> {
+    var offset: usize = 0
+    for offset < data.len() {
+        count := try self.write(&data[offset..])
+        if count == usize(0) { return Err(io._fail(io.ErrorKind.WriteZero)) }
+        offset = offset + count
+    }
+    return Ok(())
+}
+pub fn File.read_exact(&mut self, data &mut []u8) Result<void, io.Error> {
+    var offset: usize = 0
+    for offset < data.len() {
+        count := try self.read(&mut data[offset..])
+        if count == usize(0) { return Err(io._fail(io.ErrorKind.UnexpectedEof)) }
+        offset = offset + count
+    }
+    return Ok(())
+}
+pub fn File.seek(&mut self, position SeekFrom) Result<u64, io.Error> {
+    var offset: i64 = 0
+    var origin: i32 = 0
+    match position {
+        SeekFrom.Start(value) => {
+            if value > u64(9223372036854775807) { return Err(io._fail(io.ErrorKind.InvalidInput)) }
+            offset = i64(value)
+        }
+        SeekFrom.Current(value) => { offset = value
+            origin = 1 }
+        SeekFrom.End(value) => { offset = value
+            origin = 2 }
+    }
+    for {
+        raw := _seek(self.fd, offset, origin)
+        if _interrupted(raw) { continue }
+        checked := try io._check(raw)
+        return Ok(u64(checked.value))
+    }
+}
+pub fn File.metadata(&self) Result<Metadata, io.Error> {
+    for {
+        raw := _file_metadata(self.fd)
+        if _interrupted(raw) { continue }
+        return Ok(_info(try io._check(raw)))
+    }
+}
+/// Request durability explicitly; close alone does not promise persistence.
+pub fn File.sync_all(&mut self) Result<void, io.Error> {
+    for {
+        raw := _sync(self.fd)
+        if _interrupted(raw) { continue }
+        try io._check(raw)
+        return Ok(())
+    }
+}
+pub fn File.close(self) Result<void, io.Error> {
+    try io._check(_close(self))
+    return Ok(())
+}
+fn _buffer(size usize) Vec<u8> {
+    var bytes: Vec<u8> = Vec.new()
+    for bytes.len() < size { bytes.push(u8(0)) }
+    return bytes
+}
+pub fn File.read_all(&mut self) Result<Vec<u8>, io.Error> {
+    var result: Vec<u8> = Vec.new()
+    var buffer = _buffer(usize(4096))
+    for {
+        count := try self.read(buffer.as_mut_slice())
+        if count == usize(0) { return Ok(result) }
+        data := buffer.as_slice()
+        var index: usize = 0
+        for index < count { result.push(data[index])
+            index = index + 1 }
+    }
+}
+pub fn read(path &string) Result<Vec<u8>, io.Error> {
+    var file = try File.open(path)
+    bytes := try file.read_all()
+    try file.close()
+    return Ok(bytes)
+}
+fn _text(data &[]u8) Result<string, io.Error> {
+    match string.from_utf8(data) {
+        Some(text) => { return Ok(text) }
+        None => { return Err(io._fail(io.ErrorKind.InvalidData)) }
+    }
+}
+pub fn read_text(path &string) Result<string, io.Error> {
+    bytes := try read(path)
+    return _text(bytes.as_slice())
+}
+pub fn write(path &string, data &[]u8) Result<void, io.Error> {
+    var file = try File.create(path)
+    try file.write_all(data)
+    try file.close()
+    return Ok(())
+}
+pub fn write_text(path &string, text &string) Result<void, io.Error> { return write(path, text.bytes()) }
+pub fn metadata(path &string) Result<Metadata, io.Error> {
+    for {
+        raw := _metadata(path)
+        if _interrupted(raw) { continue }
+        return Ok(_info(try io._check(raw)))
+    }
+}
+pub fn exists(path &string) Result<bool, io.Error> {
+    match metadata(path) {
+        Ok(info) => { return Ok(true) }
+        Err(error) => {
+            match error.kind {
+                io.ErrorKind.NotFound => { return Ok(false) }
+                io.ErrorKind.NotDirectory => { return Ok(false) }
+                _ => { return Err(error) }
+            }
+        }
+    }
+}
+pub fn create_dir(path &string) Result<void, io.Error> {
+    for {
+        raw := _mkdir(path)
+        if _interrupted(raw) { continue }
+        try io._check(raw)
+        return Ok(())
+    }
+}
+pub fn remove_file(path &string) Result<void, io.Error> {
+    for {
+        raw := _remove_file(path)
+        if _interrupted(raw) { continue }
+        try io._check(raw)
+        return Ok(())
+    }
+}
+pub fn remove_dir(path &string) Result<void, io.Error> {
+    for {
+        raw := _remove_dir(path)
+        if _interrupted(raw) { continue }
+        try io._check(raw)
+        return Ok(())
+    }
+}
+pub fn rename(from &string, to &string) Result<void, io.Error> {
+    for {
+        raw := _rename(from, to)
+        if _interrupted(raw) { continue }
+        try io._check(raw)
+        return Ok(())
+    }
+}
+fn _directory(path &string) Result<_Directory, io.Error> {
+    for {
+        raw := _dir_open(path)
+        if _interrupted(raw) { continue }
+        checked := try io._check(raw)
+        return Ok(_Directory{native: usize(checked.value)})
+    }
+}
+/// Eager, owned entries in OS enumeration order, excluding '.' and '..'.
+/// Non-UTF-8 names return InvalidData; no lossy conversion is performed.
+pub fn read_dir(path &string) Result<Vec<DirEntry>, io.Error> {
+    directory := try _directory(path)
+    var buffer = _buffer(usize(256))
+    var entries: Vec<DirEntry> = Vec.new()
+    for {
+        raw := _dir_next(directory.native, buffer.as_mut_slice())
+        if _interrupted(raw) { continue }
+        checked := try io._check(raw)
+        if checked.value == i64(-1) { return Ok(entries) }
+        data := buffer.as_slice()
+        name := try _text(&data[..usize(checked.value)])
+        if name == "." || name == ".." { continue }
+        location := path + "/" + name
+        entries.push(DirEntry{text: name, location: location})
+    }
+}
+pub fn DirEntry.name(&self) &string { return &self.text }
+pub fn DirEntry.path(&self) &string { return &self.location }
+pub fn DirEntry.metadata(&self) Result<Metadata, io.Error> { return metadata(&self.location) }

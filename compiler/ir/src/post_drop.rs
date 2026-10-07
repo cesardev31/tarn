@@ -130,6 +130,7 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
     }
     let mut errors = crate::verify(&mirror);
     errors.extend(crate::network_abi::verify(t));
+    errors.extend(crate::filesystem_abi::verify(t));
     errors.extend(crate::async_frame::verify(p, t));
     for f in &p.functions {
         let mut err = |msg: String| errors.push(format!("{}: {msg}", f.decl.name));
@@ -208,7 +209,7 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
                     err("missing task intrinsic declarations".into());
                 }
                 if tarn_types::stdlib_intrinsic_operation(name).is_some() && !task {
-                    let valid = t.decls.net_intrinsics.get(name).and_then(|id| t.decls.fns.get(id)).is_some_and(|sig| {
+                    let valid = t.decls.net_intrinsics.get(name).or_else(|| t.decls.fs_intrinsics.get(name)).and_then(|id| t.decls.fns.get(id)).is_some_and(|sig| {
                         sig.abi.as_deref() == Some("intrinsic") && sig.generics.is_empty() && sig.receiver.is_none()
                         && sig.params.len() == args.len() && place_ty(&f.decl, t, dest) == Some(sig.ret.clone())
                         && args.iter().zip(&sig.params).all(|(arg, ty)| match arg {

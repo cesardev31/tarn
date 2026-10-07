@@ -1093,6 +1093,21 @@ Detailed requirements and open choices: [dependency security](docs/dependency-se
 
 ---
 
+## Stable filesystem rules (Phase 15B)
+
+- `stdlib/fs` owns regular files; File is non-Copy, Transfer and not Share.
+  Explicit close consumes ownership even when it reports an error.
+- Verified post-drop closes live files/cursors once. Never retry Linux close,
+  query move checking in the backend, or add runtime ownership registries.
+- File I/O borrows slices and reports partial counts; complete operations and
+  EINTR retries live in Tarn. EOF/errors do not bypass normal destruction.
+- Use io.Error; filesystem error mapping must preserve networking categories.
+  Invalid UTF-8 text/names and NUL paths are explicit errors, not lossy decoding.
+- Directory entries own copied names/paths; borrowed strings retain provenance.
+- fs depends downward on io, with separately validated resource/intrinsic IDs.
+  Path, process and async filesystem are separate phases. See
+  [ADR 0043](docs/adr/0043-blocking-filesystem.md).
+
 ## Stable string rules (Phase 15A)
 
 - Strings own immutable UTF-8 storage; lengths and indices count bytes.

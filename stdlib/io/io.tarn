@@ -14,6 +14,15 @@ pub copy enum ErrorKind {
     WriteZero
     UnexpectedEof
     LimitExceeded
+    NotFound
+    PermissionDenied
+    AlreadyExists
+    InvalidInput
+    InvalidData
+    NotDirectory
+    IsDirectory
+    DirectoryNotEmpty
+    StorageFull
 }
 pub copy struct Error {
     pub kind ErrorKind
@@ -29,6 +38,19 @@ copy struct _Raw {
 fn _error(raw _Raw) Error {
     if raw.domain == 1 { return Error{kind: ErrorKind.DnsFailure, code: raw.code, domain: raw.domain} }
     if raw.domain == 2 { return Error{kind: ErrorKind.InvalidAddress, code: raw.code, domain: raw.domain} }
+    if raw.domain == 3 {
+        var kind = ErrorKind.OtherOs
+        if raw.code == 2 { kind = ErrorKind.NotFound }
+        if raw.code == 1 || raw.code == 13 { kind = ErrorKind.PermissionDenied }
+        if raw.code == 17 { kind = ErrorKind.AlreadyExists }
+        if raw.code == 22 || raw.code == 36 { kind = ErrorKind.InvalidInput }
+        if raw.code == 20 { kind = ErrorKind.NotDirectory }
+        if raw.code == 21 { kind = ErrorKind.IsDirectory }
+        if raw.code == 39 { kind = ErrorKind.DirectoryNotEmpty }
+        if raw.code == 28 || raw.code == 122 { kind = ErrorKind.StorageFull }
+        if raw.code == 11 { kind = ErrorKind.WouldBlock }
+        return Error{kind: kind, code: raw.code, domain: raw.domain}
+    }
     var kind = ErrorKind.OtherOs
     if raw.code == 98 { kind = ErrorKind.AddressInUse }
     if raw.code == 111 { kind = ErrorKind.ConnectionRefused }
@@ -89,3 +111,6 @@ fn _leaf<R>(waker &Waker, progress Progress<R>) Progress<R> {
     return progress
 }
 fn _fail(kind ErrorKind) Error { return Error{kind: kind, code: 0, domain: 0} }
+
+/// Construct an application I/O error without an original native code.
+pub fn Error.new(kind ErrorKind) Error { return Error{kind: kind, code: 0, domain: 0} }

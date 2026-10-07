@@ -48,11 +48,7 @@ fn resolve_fail_suite() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Example depending on filesystem APIs reserved for phase 15B.
-const NEEDS_STDLIB: &[&str] = &["12_try.tarn"];
-
-/// Every example checks without errors (except missing stdlib methods in the
-/// examples listed above); the only warnings are the documented ones.
+/// Every example checks, except explicitly rejected future bootstrap APIs.
 #[test]
 fn examples_resolve() {
     let mut failures = Vec::new();
@@ -70,13 +66,9 @@ fn examples_resolve() {
         for d in &res.diagnostics {
             let line = format!("{} {}", f.file_name().unwrap().to_string_lossy(), d.code);
             if d.severity == tarn_diagnostics::Severity::Error {
-                // Examples that need the standard library (not built yet).
-                if d.code == "E3005" && NEEDS_STDLIB.iter().any(|n| line.starts_with(n)) {
-                    continue;
-                }
                 // Bootstrap examples are now explicitly rejected, rather than
                 // accepted through opaque ownership/provenance assumptions.
-                if d.code == "E3040" && ["12_try.tarn", "23_filesystem.tarn", "24_process.tarn", "25_concurrency.tarn"].iter().any(|n| line.starts_with(n)) {
+                if d.code == "E3040" && ["24_process.tarn", "25_concurrency.tarn"].iter().any(|n| line.starts_with(n)) {
                     continue;
                 }
                 failures.push(d.render(&res.program.sources));

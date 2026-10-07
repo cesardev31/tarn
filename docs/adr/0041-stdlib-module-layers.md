@@ -88,3 +88,9 @@ Programs import the modules they name and use the new paths, for example:
 
 Async programs implicitly load `runtime` (and through it io/time/net), as
 they previously loaded `net`.
+
+## Phase 15B extension
+
+[ADR 0043](0043-blocking-filesystem.md) adds trusted `fs` → `io`. Its text
+helpers import the ordinary `string` module. No sideways privilege is granted
+to net/time/runtime; filesystem intrinsics/resources have a separate catalog.

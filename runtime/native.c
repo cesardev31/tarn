@@ -404,9 +404,9 @@ void tarn_rt_net_timer_read(TarnNetRaw *out, int32_t fd) {
 }
 
 void tarn_rt_net_main_error(uint32_t kind, int32_t code) {
-    static const char *names[] = {"address in use", "connection refused", "connection reset", "broken pipe", "timed out", "would block", "invalid address", "DNS failure", "other OS error", "write made no progress"};
+    static const char *names[] = {"address in use", "connection refused", "connection reset", "broken pipe", "timed out", "would block", "invalid address", "DNS failure", "other OS error", "write made no progress", "unexpected EOF", "limit exceeded", "not found", "permission denied", "already exists", "invalid input", "invalid data", "not a directory", "is a directory", "directory not empty", "storage full"};
     if (kind >= sizeof(names) / sizeof(names[0])) abort();
-    fprintf(stderr, "network error: %s (native code %" PRId32 ")\n", names[kind], code);
+    fprintf(stderr, "I/O error: %s (native code %" PRId32 ")\n", names[kind], code);
 }
 
 /* Phase 12B: no application pointers survive any of these calls. */
@@ -699,4 +699,108 @@ int8_t tarn_rt_async_inbox_pop(TarnExecution *owner, void *out, uint64_t size) {
     if (!owner->inbox) owner->inbox_tail = NULL;
     memcpy(out, entry->bytes, size); free(entry);
     return 1;
+}
+
+/* Phase 15B syscall/ABI bridge. High-level retries and ownership are Tarn.
+ * Domain 3 distinguishes filesystem errno from the networking categories. */
+#include <dirent.h>
+#include <sys/stat.h>
+static void fs_error(TarnNetRaw *out, int code) { out->domain = 3; out->code = code; }
+static void fs_status(TarnNetRaw *out, int64_t value) {
+    net_init(out); out->value = value;
+    if (value < 0) fs_error(out, errno);
+}
+static void fs_trace(const char *event, int fd) {
+    if (getenv("TARN_TRACE_FS")) { flockfile(stderr); fprintf(stderr, "fs:%s:%d\n", event, fd); funlockfile(stderr); }
+}
+static char *fs_path(TarnNetRaw *out, const TarnString *path) {
+    net_init(out);
+    if (memchr(path->bytes, 0, path->len)) { fs_error(out, EINVAL); return NULL; }
+    char *text = malloc(path->len + 1);
+    if (!text) abort();
+    if (path->len) memcpy(text, path->bytes, path->len);
+    text[path->len] = 0;
+    return text;
+}
+void tarn_rt_fs_open(TarnNetRaw *out, const TarnString *path, int32_t mode) {
+    char *text = fs_path(out, path); if (!text) return;
+    int flags;
+    switch (mode) {
+        case 0: flags = O_RDONLY; break;
+        case 1: flags = O_RDWR | O_CREAT | O_TRUNC; break;
+        case 2: flags = O_WRONLY | O_CREAT | O_APPEND; break;
+        case 3: flags = O_RDWR; break;
+        case 4: flags = O_RDWR | O_CREAT | O_EXCL; break;
+        default: free(text); fs_error(out, EINVAL); return;
+    }
+    /* O_NONBLOCK prevents opening a FIFO from blocking before Tarn rejects
+     * non-regular resources. It has no effect on regular-file operations. */
+    fs_status(out, open(text, flags | O_CLOEXEC | O_NONBLOCK, 0666));
+    free(text);
+    if (!out->code) fs_trace("open", (int)out->value);
+}
+void tarn_rt_fs_read(TarnNetRaw *out, int32_t fd, uint8_t *bytes, uint64_t len) {
+    net_init(out); if (!len) return;
+    fs_status(out, read(fd, bytes, len > INT64_MAX ? INT64_MAX : len));
+}
+void tarn_rt_fs_write(TarnNetRaw *out, int32_t fd, const uint8_t *bytes, uint64_t len) {
+    net_init(out); if (!len) return;
+    fs_status(out, write(fd, bytes, len > INT64_MAX ? INT64_MAX : len));
+}
+void tarn_rt_fs_seek(TarnNetRaw *out, int32_t fd, int64_t offset, int32_t origin) { fs_status(out, lseek(fd, offset, origin)); }
+static void fs_info(TarnNetRaw *out, const struct stat *info) {
+    if (info->st_size < 0) { fs_error(out, EOVERFLOW); return; }
+    out->value = info->st_size;
+    out->address.bytes[0] = S_ISREG(info->st_mode) ? 1 : S_ISDIR(info->st_mode) ? 2 : 3;
+}
+void tarn_rt_fs_file_metadata(TarnNetRaw *out, int32_t fd) {
+    struct stat info; fs_status(out, fstat(fd, &info)); if (!out->code) fs_info(out, &info);
+}
+void tarn_rt_fs_metadata(TarnNetRaw *out, const TarnString *path) {
+    char *text = fs_path(out, path); if (!text) return;
+    struct stat info; fs_status(out, stat(text, &info)); free(text); if (!out->code) fs_info(out, &info);
+}
+void tarn_rt_fs_sync(TarnNetRaw *out, int32_t fd) { fs_status(out, fsync(fd)); }
+void tarn_rt_fs_close(TarnNetRaw *out, int32_t fd) {
+    fs_trace("close", fd); fs_status(out, close(fd));
+    if (out->code == EBADF) abort();
+    /* Linux releases a valid descriptor even on EINTR; never retry close. */
+}
+void tarn_rt_fs_drop(int32_t fd) { TarnNetRaw out; tarn_rt_fs_close(&out, fd); }
+void tarn_rt_fs_mkdir(TarnNetRaw *out, const TarnString *path) {
+    char *text = fs_path(out, path); if (!text) return;
+    fs_status(out, mkdir(text, 0777)); free(text);
+}
+void tarn_rt_fs_remove_file(TarnNetRaw *out, const TarnString *path) {
+    char *text = fs_path(out, path); if (!text) return;
+    fs_status(out, unlink(text)); free(text);
+}
+void tarn_rt_fs_remove_dir(TarnNetRaw *out, const TarnString *path) {
+    char *text = fs_path(out, path); if (!text) return;
+    fs_status(out, rmdir(text)); free(text);
+}
+void tarn_rt_fs_rename(TarnNetRaw *out, const TarnString *from, const TarnString *to) {
+    char *a = fs_path(out, from); if (!a) return;
+    char *b = fs_path(out, to); if (!b) { free(a); return; }
+    fs_status(out, rename(a, b)); free(a); free(b);
+}
+void tarn_rt_fs_dir_open(TarnNetRaw *out, const TarnString *path) {
+    char *text = fs_path(out, path); if (!text) return;
+    DIR *directory = opendir(text);
+    if (!directory) fs_error(out, errno);
+    else { out->value = (int64_t)(uintptr_t)directory; fs_trace("dir_open", dirfd(directory)); }
+    free(text);
+}
+void tarn_rt_fs_dir_next(TarnNetRaw *out, DIR *directory, uint8_t *bytes, uint64_t capacity) {
+    net_init(out); errno = 0;
+    struct dirent *entry = readdir(directory);
+    if (!entry) { if (errno) fs_error(out, errno); else out->value = -1; return; }
+    uint64_t len = strlen(entry->d_name);
+    if (len > capacity) { fs_error(out, ENAMETOOLONG); return; }
+    if (len) memcpy(bytes, entry->d_name, len);
+    out->value = (int64_t)len;
+}
+void tarn_rt_fs_dir_drop(DIR *directory) {
+    fs_trace("dir_close", dirfd(directory));
+    if (closedir(directory) < 0 && errno == EBADF) abort();
 }

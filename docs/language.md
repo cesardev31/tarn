@@ -505,3 +505,7 @@ blocking address resolution and explicit Result errors. Socket moves transfer
 close responsibility; I/O uses mutable receivers and sockets have Transfer but
 not Share. Native destruction follows ordinary post-drop IR. See
 [networking](networking.md) and [ADR 0034](adr/0034-blocking-networking.md).
+
+Blocking owned regular files and safe byte/text helpers are documented in
+[the filesystem module](filesystem.md) (Phase 15B). File operations return
+`Result<..., io.Error>` and use ordinary ownership, loans and post-drop.

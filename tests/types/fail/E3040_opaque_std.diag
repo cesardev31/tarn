@@ -1,8 +1,8 @@
 error[E3040]: standard-library API has no ownership/provenance contract
  --> tests/types/fail/E3040_opaque_std.tarn:3:10
   |
-3 |     x := fs.open("file")
-  |          ^^^^^^^ cannot safely type-check this API
+3 |     x := process.run("file")
+  |          ^^^^^^^^^^^ cannot safely type-check this API
   |
   = help: use a module with explicit Tarn declarations
 
