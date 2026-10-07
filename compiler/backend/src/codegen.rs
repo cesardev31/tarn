@@ -363,6 +363,13 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     for (name, params, returns) in [
         ("tarn_rt_net_main_error", vec![types::I32, types::I32], vec![]),
         ("tarn_rt_net_drop", vec![types::I32], vec![]),
+        ("tarn_rt_process_drop", vec![types::I32], vec![]),
+        ("tarn_rt_process_pipe_drop", vec![types::I32], vec![]),
+        ("tarn_rt_process_close", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_process_wait", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_process_kill", vec![types::I64, types::I32], vec![]),
+        ("tarn_rt_process_read", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
+        ("tarn_rt_process_spawn", vec![types::I64, types::I64, types::I64, types::I64, types::I64, types::I8, types::I8], vec![]),
         ("tarn_rt_fs_drop", vec![types::I32], vec![]),
         ("tarn_rt_fs_dir_drop", vec![types::I64], vec![]),
         ("tarn_rt_fs_open", vec![types::I64, types::I64, types::I32], vec![]),
@@ -1819,6 +1826,7 @@ impl Cx<'_, '_> {
         if let Some(result) = self.string_operation(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.tasks(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.filesystem(name, args, dest)? { return Ok(result); }
+        if let Some(result) = self.process(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.networking(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.synchronization(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.vector(name, args, dest)? { return Ok(result); }
@@ -1953,6 +1961,13 @@ impl Cx<'_, '_> {
             let handle = self.b.ins().load(types::I64, cl::MemFlags::new(), addr, 0);
             self.runtime("tarn_rt_net_poll_drop", &[handle]);
             return Ok(());
+        }
+        for (owner, helper) in [(self.t.decls.process_owner, "tarn_rt_process_drop"), (self.t.decls.process_pipe, "tarn_rt_process_pipe_drop")] {
+            if matches!(ty, Ty::Adt(id, _) if Some(*id) == owner) {
+                let handle = self.b.ins().load(types::I32, cl::MemFlags::new(), addr, 0);
+                self.runtime(helper, &[handle]);
+                return Ok(());
+            }
         }
         if matches!(ty, Ty::Adt(id, _) if Some(*id) == self.t.decls.fs_file) {
             let fd = self.b.ins().load(types::I32, cl::MemFlags::new(), addr, 0);
@@ -2094,3 +2109,5 @@ mod networking;
 
 #[path = "filesystem.rs"]
 mod filesystem;
+#[path = "process.rs"]
+mod process;

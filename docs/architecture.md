@@ -22,6 +22,7 @@ Source → Lexer → Parser → AST → Resolve → Types → Typed IR
 | `compiler/backend` | `tarn_backend` | post-drop IR → Cranelift → ELF object/link | initial Linux x86_64 subset (ADR 0027) |
 | `stdlib/net` | — | blocking/nonblocking TCP/UDP, owned sockets, level-triggered epoll and explicit errors (ADRs 0034/0035) | done (12A/12B Linux v0) |
 | `stdlib/fs` | — | owned blocking regular files, directories and explicit io.Error (ADR 0043) | done (15B Linux v0) |
+| `stdlib/process` | — | owned blocking children, dual-pipe capture and io.Error (ADR 0045) | done (15D Linux v0) |
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | — | embedded C runtime: primitive print, strings, panic/abort; libc startup | initial (ADR 0027) |
 | `tools/cli` | `tarn` | the single CLI | started |
@@ -195,3 +196,14 @@ Path capabilities, loans and destruction are entirely structural. No runtime
 or backend ABI changes are needed. Applications pass borrowed path text to fs.
 Explicit lexical normalization is separate from filesystem resolution. See
 [ADR 0044](adr/0044-lexical-owned-paths.md).
+
+## Blocking child processes (Phase 15D)
+
+`stdlib/process` is a trusted layer above io. Tarn owns configuration, child
+completion, capture buffers and two native pipe-reading tasks. Private bridges
+use posix_spawnp, GNU libc spawn actions, read, waitpid and kill. Dedicated
+resolved resource/intrinsic metadata is structurally verified, including
+consuming signatures binding resource identities. Process drop waits; pipe
+drop closes. Backend code executes verified plans without inferring ownership.
+There is no shell interpreter, process registry, detach or async integration.
+See [ADR 0045](adr/0045-blocking-processes.md).

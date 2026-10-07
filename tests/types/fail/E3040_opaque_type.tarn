@@ -1,2 +1,2 @@
-import "process"
-fn observe(x &process.Process) {}
+import "http"
+fn observe(x &http.Process) {}

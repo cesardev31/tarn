@@ -1,3 +1,6 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 /* Tarn internal runtime ABI v0: Linux x86_64, System V C ABI. */
 #define _POSIX_C_SOURCE 200809L
 #include <sys/timerfd.h>
@@ -803,4 +806,117 @@ void tarn_rt_fs_dir_next(TarnNetRaw *out, DIR *directory, uint8_t *bytes, uint64
 void tarn_rt_fs_dir_drop(DIR *directory) {
     fs_trace("dir_close", dirfd(directory));
     if (closedir(directory) < 0 && errno == EBADF) abort();
+}
+
+/* Phase 15D: syscall/ABI bridge. Configuration, capture accumulation and
+ * ownership are Tarn. No runtime owner bit or child registry. */
+#include <spawn.h>
+#include <signal.h>
+#include <sys/wait.h>
+extern char **environ;
+static void process_trace(const char *event, int id) {
+    if (getenv("TARN_TRACE_PROCESS")) { flockfile(stderr); fprintf(stderr, "process:%s:%d\n", event, id); funlockfile(stderr); }
+}
+static void process_error(TarnNetRaw *out, int code) { net_init(out); out->domain = 4; out->code = code; }
+static void process_close(int fd) {
+    process_trace("fd_close", fd);
+    if (close(fd) < 0 && errno == EBADF) abort(); /* Never retry Linux close. */
+}
+static char *process_text(TarnNetRaw *out, const TarnString *value) {
+    if (memchr(value->bytes, 0, value->len)) { process_error(out, EINVAL); return NULL; }
+    char *text = malloc(value->len + 1); if (!text) abort();
+    memcpy(text, value->bytes, value->len); text[value->len] = 0; return text;
+}
+static int process_fd(int fd) {
+    if (fd < 0) return fd;
+    if (fd < 3) {
+        int next = fcntl(fd, F_DUPFD_CLOEXEC, 3), code = errno;
+        (void)close(fd); errno = code; fd = next;
+        if (fd < 0) return -1;
+    }
+    process_trace("fd_open", fd); return fd;
+}
+static int process_pipe(int fds[2]) {
+    int pair[2];
+    if (pipe2(pair, O_CLOEXEC) < 0) return errno;
+    int first = process_fd(pair[0]);
+    if (first < 0) { int code = errno; (void)close(pair[1]); return code; }
+    int second = process_fd(pair[1]);
+    if (second < 0) { int code = errno; process_close(first); return code; }
+    fds[0] = first; fds[1] = second; return 0;
+}
+void tarn_rt_process_spawn(TarnNetRaw *out, const TarnString *program,
+        const TarnString *const *arguments, uint64_t count, const TarnString *directory,
+        uint8_t use_directory, uint8_t capture) {
+    net_init(out);
+    if (!program->len || (use_directory && !directory->len)) { process_error(out, EINVAL); return; }
+    if (count > SIZE_MAX / sizeof(char *) - 2) { process_error(out, E2BIG); return; }
+    char **argv = calloc(count + 2, sizeof(char *)); if (!argv) abort();
+    char *cwd = NULL; int code = 0, pipes[4] = {-1, -1, -1, -1}, input = -1;
+    posix_spawn_file_actions_t actions; posix_spawnattr_t attributes;
+    int actions_ready = 0, attributes_ready = 0; pid_t pid = -1;
+    argv[0] = process_text(out, program); if (!argv[0]) { code = out->code; goto done; }
+    for (uint64_t i = 0; i < count; ++i) {
+        argv[i + 1] = process_text(out, arguments[i]);
+        if (!argv[i + 1]) { code = out->code; goto done; }
+    }
+    if (use_directory) { cwd = process_text(out, directory); if (!cwd) { code = out->code; goto done; } }
+    code = posix_spawn_file_actions_init(&actions); if (code) goto done; actions_ready = 1;
+    code = posix_spawnattr_init(&attributes); if (code) goto done; attributes_ready = 1;
+    sigset_t empty, defaults; sigemptyset(&empty); sigemptyset(&defaults); sigaddset(&defaults, SIGPIPE);
+    code = posix_spawnattr_setsigmask(&attributes, &empty); if (code) goto done;
+    code = posix_spawnattr_setsigdefault(&attributes, &defaults); if (code) goto done;
+    code = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF); if (code) goto done;
+    if (capture) {
+        code = process_pipe(pipes); if (code) goto done;
+        code = process_pipe(pipes + 2); if (code) goto done;
+        input = process_fd(open("/dev/null", O_RDONLY | O_CLOEXEC)); if (input < 0) { code = errno; goto done; }
+        code = posix_spawn_file_actions_adddup2(&actions, input, 0); if (code) goto done;
+        code = posix_spawn_file_actions_adddup2(&actions, pipes[1], 1); if (code) goto done;
+        code = posix_spawn_file_actions_adddup2(&actions, pipes[3], 2); if (code) goto done;
+    }
+    if (use_directory) { code = posix_spawn_file_actions_addchdir_np(&actions, cwd); if (code) goto done; }
+    /* Child never inherits other application/runtime descriptors. GNU libc
+     * closefrom/chdir spawn actions avoid unsafe post-fork Tarn callbacks. */
+    code = posix_spawn_file_actions_addclosefrom_np(&actions, 3); if (code) goto done;
+    code = posix_spawnp(&pid, argv[0], &actions, &attributes, argv, environ);
+    if (!code) {
+        net_init(out); out->value = pid; process_trace("spawn", pid);
+        if (capture) {
+            uint8_t *bytes = (uint8_t *)&out->address;
+            for (int i = 0; i < 4; ++i) { bytes[i] = (uint32_t)pipes[0] >> (i * 8); bytes[4 + i] = (uint32_t)pipes[2] >> (i * 8); }
+            pipes[0] = -1; pipes[2] = -1; /* Acquisition passed to Tarn owners. */
+        }
+    }
+done:
+    if (actions_ready) posix_spawn_file_actions_destroy(&actions);
+    if (attributes_ready) posix_spawnattr_destroy(&attributes);
+    for (int i = 0; i < 4; ++i) if (pipes[i] >= 0) process_close(pipes[i]);
+    if (input >= 0) process_close(input);
+    for (uint64_t i = 0; i < count + 1; ++i) free(argv[i]);
+    free(argv); free(cwd);
+    if (code) process_error(out, code);
+}
+void tarn_rt_process_wait(TarnNetRaw *out, int32_t pid) {
+    process_trace("wait", pid); /* One completion attempt, even on an OS error. */
+    net_init(out); if (pid <= 0) { process_error(out, EINVAL); return; }
+    int status; pid_t result;
+    do { result = waitpid(pid, &status, 0); } while (result < 0 && errno == EINTR);
+    if (result < 0) { process_error(out, errno); return; }
+    process_trace("reap", pid);
+    if (WIFEXITED(status)) { out->value = WEXITSTATUS(status); }
+    else if (WIFSIGNALED(status)) { out->value = WTERMSIG(status); ((uint8_t *)&out->address)[0] = 1; }
+    else abort();
+}
+void tarn_rt_process_drop(int32_t pid) { TarnNetRaw out; tarn_rt_process_wait(&out, pid); }
+void tarn_rt_process_pipe_drop(int32_t fd) { process_close(fd); }
+void tarn_rt_process_close(TarnNetRaw *out, int32_t fd) { net_init(out); process_close(fd); }
+void tarn_rt_process_read(TarnNetRaw *out, int32_t fd, uint8_t *bytes, uint64_t len) {
+    net_init(out); ssize_t result = read(fd, bytes, len); out->value = result;
+    if (result < 0) process_error(out, errno);
+}
+void tarn_rt_process_kill(TarnNetRaw *out, int32_t pid) {
+    net_init(out);
+    if (pid <= 0) { process_error(out, EINVAL); return; }
+    if (kill(pid, SIGKILL) < 0) process_error(out, errno);
 }

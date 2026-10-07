@@ -32,7 +32,7 @@ tested and documented.
 | 15A | Owned UTF-8 string essentials (ADR 0042) | **done; [report](phase-15a-report.md)** |
 | 15B | Owned blocking filesystem (ADR 0043) | **done; [report](phase-15b-report.md)** |
 | 15C | Owned lexical paths (ADR 0044) | **done; [report](phase-15c-report.md)** |
-| 15D | System: process (milestone 5) | planned |
+| 15D | Owned blocking child processes (ADR 0045) | **done; [report](phase-15d-report.md)** |
 | 16 | Async HTTP/1.1 over buffered I/O | planned after 15 |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
 | 19 | Formatter (basic) | |

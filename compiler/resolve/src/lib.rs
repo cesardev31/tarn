@@ -47,8 +47,8 @@ pub struct ModuleInput<'a> {
 /// first. A trusted module may use private items and fields only of the layers
 /// it builds on, never of layers above or beside it; user modules never see
 /// private stdlib items.
-pub const STDLIB_LAYERS: &[&str] = &["io", "time", "net", "runtime", "fs"];
-const STDLIB_BELOW: &[(&str, &[&str])] = &[("io", &[]), ("fs", &["io"]), ("time", &["io"]), ("net", &["io"]), ("runtime", &["io", "time", "net"])];
+pub const STDLIB_LAYERS: &[&str] = &["io", "time", "net", "runtime", "fs", "process"];
+const STDLIB_BELOW: &[(&str, &[&str])] = &[("io", &[]), ("fs", &["io"]), ("process", &["io"]), ("time", &["io"]), ("net", &["io"]), ("runtime", &["io", "time", "net"])];
 
 /// Whether `from` may use a private item or field declared in `to`.
 pub fn internal_visible(from: &ModuleInput, to: &ModuleInput) -> bool {
@@ -344,6 +344,12 @@ mod tests {
         assert!(!crate::internal_visible(&fs, &net) && !crate::internal_visible(&net, &fs));
         assert!(!crate::internal_visible(&runtime, &fs) && !crate::internal_visible(&fs, &runtime));
         assert!(!crate::internal_visible(&module("fs", false), &io));
+        let process = module("process", true);
+        assert!(crate::internal_visible(&process, &io));
+        for sibling in [&fs, &net, &time, &runtime] {
+            assert!(!crate::internal_visible(&process, sibling) && !crate::internal_visible(sibling, &process));
+        }
+        assert!(!crate::internal_visible(&module("process", false), &io));
         // Never upward, sideways, to itself, from user code or into a user module named like a layer.
         assert!(!crate::internal_visible(&io, &net) && !crate::internal_visible(&net, &runtime));
         assert!(!crate::internal_visible(&net, &time) && !crate::internal_visible(&time, &net));

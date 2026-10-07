@@ -1,8 +1,8 @@
 error[E3040]: standard-library type has no ownership/provenance contract
  --> tests/types/fail/E3040_opaque_type.tarn:2:15
   |
-2 | fn observe(x &process.Process) {}
-  |               ^^^^^^^^^^^^^^^ cannot safely type-check this type
+2 | fn observe(x &http.Process) {}
+  |               ^^^^^^^^^^^^ cannot safely type-check this type
   |
   = help: use a module with explicit Tarn declarations
 

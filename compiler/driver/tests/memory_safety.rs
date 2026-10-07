@@ -6,6 +6,17 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("process cannot wait after move", Some("E4001"), "import \"process\"\nfn bad(p process.Process) { moved := p\n p.wait() }"),
+    ("process cannot wait twice", Some("E4001"), "import \"process\"\nfn bad(p process.Process) { p.wait()\n p.wait() }"),
+    ("process cannot move with live loan", Some("E4103"), "import \"process\"\nfn bad(p process.Process) { r := &p\n moved := p\n print(r.id()) }"),
+    ("process cannot overwrite with live loan", Some("E4102"), "import \"process\"\nfn bad(p process.Process, q process.Process) { var child = p\n r := &child\n child = q\n print(r.id()) }"),
+    ("process kill retains exclusive receiver", Some("E4101"), "import \"process\"\nfn bad(p process.Process) { var child = p\n r := &child\n child.kill()\n print(r.id()) }"),
+    ("process shared task requires Share", Some("E3047"), "import \"process\"\nfn bad(p process.Process) { scope { spawn fn() { print(p.id()) } } }"),
+    ("process original unusable after spawn", Some("E4001"), "import \"process\"\nfn bad(p process.Process) { worker := spawn move fn() { p.wait() }\n print(p.id())\n worker.join() }"),
+    ("process transfers and returns from task", None, "import \"process\"\nfn good(p process.Process) { worker := spawn move fn() process.Process { return p }\n returned := worker.join()\n returned.wait() }"),
+    ("command builder consumes owned argument", Some("E4001"), "import \"process\"\nfn main() { value := \"owned\"\n command := process.Command.new(\"/bin/true\").arg(value)\n print(value) }"),
+    ("command can start multiple children", None, "import \"process\"\nfn main() { command := process.Command.new(\"/bin/true\")\n first := command.start()\n second := command.start() }"),
+    ("process output byte view cannot escape owner", Some("E4201"), "import \"process\"\nfn bad(output process.Output) &[]u8 { return output.stdout.as_slice() }"),
     ("path constructor moves text", Some("E4001"), "import \"path\"\nfn main() { text := \"owned\"\n p := path.Path.new(text)\n print(text) }"),
     ("path cannot move with text loan", Some("E4103"), "import \"path\"\nfn main() { p := path.Path.new(\"owned\")\n r := p.as_string()\n moved := p\n print(r) }"),
     ("path cannot overwrite with text loan", Some("E4102"), "import \"path\"\nfn main() { var p = path.Path.new(\"owned\")\n r := p.as_string()\n p = path.Path.new(\"next\")\n print(r) }"),
@@ -101,8 +112,8 @@ const CASES: &[(&str, Option<&str>, &str)] = &[
     ("owned task containing local loan", Some("E4206"), "fn main() { x: i64 := 42\n r := &x\n t := spawn move fn() i64 { return r.abs() }\n t.join() }") ,
     ("task result cannot borrow its environment", Some("E4201"), "fn main() { x := 42\n t := spawn move fn() &i64 { return &x }\n t.join() }") ,
     ("task handle ownership transfer", None, "fn main() { t := spawn move fn() i64 { return 42 }\n u := t\n print(u.join()) }") ,
-    ("opaque std return rejected", Some("E3040"), "import \"process\"\nfn main() {\n    x := process.run(\"file\")\n}"),
-    ("opaque std type rejected", Some("E3040"), "import \"process\"\nfn observe(x &process.Process) {}"),
+    ("opaque std return rejected", Some("E3040"), "import \"http\"\nfn main() {\n    x := http.run(\"file\")\n}"),
+    ("opaque std type rejected", Some("E3040"), "import \"http\"\nfn observe(x &http.Process) {}"),
     ("opaque prelude error rejected", Some("E3040"), "fn observe(x &Error) {}"),
     (
         "modeled result loan remains live",

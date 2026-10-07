@@ -98,6 +98,9 @@ pub struct Decls {
     pub fs_file: Option<SymbolId>,
     pub fs_directory: Option<SymbolId>,
     pub fs_intrinsics: HashMap<String, SymbolId>,
+    pub process_owner: Option<SymbolId>,
+    pub process_pipe: Option<SymbolId>,
+    pub process_intrinsics: HashMap<String, SymbolId>,
     pub net_error: Option<SymbolId>,
     pub net_poll: Option<SymbolId>,
     pub exec_waker: Option<SymbolId>,
@@ -238,13 +241,20 @@ impl<'a> Env<'a> {
                 env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });
             }
         }
+        if let Some((_, process)) = stdlib("process") {
+            env.decls.process_owner = process.get("Process");
+            env.decls.process_pipe = process.get("_Pipe");
+            for id in [env.decls.process_owner, env.decls.process_pipe].into_iter().flatten() {
+                env.decls.native_capabilities.insert(id, crate::NativeCapabilities { transfer: true, share: false });
+            }
+        }
         for module in tarn_resolve::STDLIB_LAYERS {
             let Some((_, scope)) = stdlib(module) else { continue };
             for id in &scope.symbols {
                 let symbol = r.symbol(*id);
                 let async_primitive = Some(*id) == env.decls.exec_async_waker || Some(*id) == env.decls.exec_async_park || env.decls.task_intrinsics.contains(id);
                 if !async_primitive && symbol.name.starts_with("_") && env.decls.fns.get(id).is_some_and(|sig| sig.abi.as_deref() == Some("intrinsic")) {
-                    let catalog = if *module == "fs" { &mut env.decls.fs_intrinsics } else { &mut env.decls.net_intrinsics };
+                    let catalog = if *module == "fs" { &mut env.decls.fs_intrinsics } else if *module == "process" { &mut env.decls.process_intrinsics } else { &mut env.decls.net_intrinsics };
                     catalog.insert(format!("{module}.{}", symbol.name), *id);
                 }
             }

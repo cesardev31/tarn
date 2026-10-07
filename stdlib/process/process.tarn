@@ -1,0 +1,136 @@
+// Blocking Linux child processes. No implicit shell or async process runtime.
+import "io"
+import "string"
+
+pub struct Command {
+    program string
+    arguments Vec<string>
+    directory string
+    use_directory bool
+}
+/// Unique child completion authority. Transfer, not Share; drop waits/reaps.
+pub struct Process { pid i32 }
+struct _Pipe { fd i32 }
+struct _Launch { child Process
+    stdout Option<_Pipe>
+    stderr Option<_Pipe> }
+pub copy enum ExitStatus { Exited(i32)
+    Signaled(i32) }
+pub struct Output { pub status ExitStatus
+    pub stdout Vec<u8>
+    pub stderr Vec<u8> }
+extern "intrinsic" fn _spawn(program &string, arguments &[]string, directory &string, use_directory bool, capture bool) io._Raw
+extern "intrinsic" fn _wait(child Process) io._Raw
+extern "intrinsic" fn _close(pipe _Pipe) io._Raw
+extern "intrinsic" fn _kill(pid i32) io._Raw
+extern "intrinsic" fn _read(fd i32, data &mut []u8) io._Raw
+
+pub fn Command.new(program string) Command {
+    arguments: Vec<string> := Vec.new()
+    return Command{program: program, arguments: arguments, directory: "", use_directory: false}
+}
+pub fn Command.arg(self, value string) Command {
+    var command = self
+    command.arguments.push(value)
+    return command
+}
+pub fn Command.args(self, values &[]string) Command {
+    var command = self
+    for value in values { command.arguments.push(value.clone()) }
+    return command
+}
+pub fn Command.current_dir(self, value string) Command {
+    var command = self
+    command.directory = value
+    command.use_directory = true
+    return command
+}
+fn _descriptor(raw io._Raw, offset usize) i32 {
+    return i32(raw.address[offset]) + i32(raw.address[offset + 1]) * 256 +
+        i32(raw.address[offset + 2]) * 65536 + i32(raw.address[offset + 3]) * 16777216
+}
+fn _launch(command &Command, capture bool) Result<_Launch, io.Error> {
+    raw := try io._check(_spawn(&command.program, command.arguments.as_slice(), &command.directory, command.use_directory, capture))
+    child := Process{pid: i32(raw.value)}
+    if capture {
+        stdout := _Pipe{fd: _descriptor(raw, usize(0))}
+        stderr := _Pipe{fd: _descriptor(raw, usize(4))}
+        return Ok(_Launch{child: child, stdout: Some(stdout), stderr: Some(stderr)})
+    }
+    return Ok(_Launch{child: child, stdout: None, stderr: None})
+}
+pub fn Command.start(&self) Result<Process, io.Error> {
+    launched := try _launch(self, false)
+    return Ok(launched.child)
+}
+pub fn Command.status(&self) Result<ExitStatus, io.Error> {
+    child := try self.start()
+    return child.wait()
+}
+fn _pipe(value Option<_Pipe>) _Pipe {
+    match value { Some(pipe) => { return pipe }
+        None => { panic("internal process capture invariant") } }
+}
+fn _Pipe.read_all(self) Result<Vec<u8>, io.Error> {
+    var output: Vec<u8> = Vec.new()
+    var buffer: Vec<u8> = Vec.new()
+    var index: usize = 0
+    for index < usize(4096) { buffer.push(u8(0))
+        index = index + 1 }
+    for {
+        raw := _read(self.fd, buffer.as_mut_slice())
+        if raw.domain == 4 && raw.code == 4 { continue }
+        checked := try io._check(raw)
+        count := usize(checked.value)
+        if count == usize(0) { _close(self)
+            return Ok(output) }
+        data := buffer.as_slice()
+        for byte in &data[..count] { output.push(byte) }
+    }
+}
+/// Captures bytes; two native readers drain both pipes concurrently. Child
+/// stdin is /dev/null. Output buffers are unbounded and descendants may hold
+/// pipe writers open. This is deliberately blocking, without timeouts.
+pub fn Command.output(&self) Result<Output, io.Error> {
+    launched := try _launch(self, true)
+    child := launched.child
+    stdout := _pipe(launched.stdout)
+    stderr := _pipe(launched.stderr)
+    first := spawn move fn() Result<Vec<u8>, io.Error> { return stdout.read_all() }
+    second := spawn move fn() Result<Vec<u8>, io.Error> { return stderr.read_all() }
+    status := try child.wait()
+    out := try first.join()
+    err := try second.join()
+    return Ok(Output{status: status, stdout: out, stderr: err})
+}
+pub fn Process.id(&self) u32 { return u32(self.pid) }
+/// Consumes completion authority, including on a wait error. EINTR retry is
+/// inside the native consuming bridge, so ownership is never duplicated.
+pub fn Process.wait(self) Result<ExitStatus, io.Error> {
+    raw := try io._check(_wait(self))
+    if raw.address[0] == u8(0) { return Ok(ExitStatus.Exited(i32(raw.value))) }
+    return Ok(ExitStatus.Signaled(i32(raw.value)))
+}
+/// Requests SIGKILL for this child; it still must be waited/reaped.
+pub fn Process.kill(&mut self) Result<void, io.Error> {
+    try io._check(_kill(self.pid))
+    return Ok(())
+}
+pub fn ExitStatus.success(&self) bool {
+    match self { ExitStatus.Exited(code) => { return code == 0 }
+        ExitStatus.Signaled(signal) => { return false } }
+}
+pub fn ExitStatus.code(&self) Option<i32> {
+    match self { ExitStatus.Exited(code) => { return Some(code) }
+        ExitStatus.Signaled(signal) => { return None } }
+}
+pub fn ExitStatus.signal(&self) Option<i32> {
+    match self { ExitStatus.Exited(code) => { return None }
+        ExitStatus.Signaled(signal) => { return Some(signal) } }
+}
+fn _text(data &[]u8) Result<string, io.Error> {
+    match string.from_utf8(data) { Some(text) => { return Ok(text) }
+        None => { return Err(io.Error.new(io.ErrorKind.InvalidData)) } }
+}
+pub fn Output.stdout_text(&self) Result<string, io.Error> { return _text(self.stdout.as_slice()) }
+pub fn Output.stderr_text(&self) Result<string, io.Error> { return _text(self.stderr.as_slice()) }

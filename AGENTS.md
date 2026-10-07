@@ -1093,6 +1093,19 @@ Detailed requirements and open choices: [dependency security](docs/dependency-se
 
 ---
 
+## Stable process rules (Phase 15D)
+
+- Child completion is owned: Process is non-Copy, Transfer and not Share.
+  Wait consumes; destruction waits/reaps. Never detach or implicitly kill.
+- Command arguments are separate strings, never implicit shell input.
+  Configuration affects the child, not parent globals. NUL is rejected.
+- Capture stdout/stderr concurrently; sequential pipe draining can deadlock.
+  Buffers are bytes; text conversion validates UTF-8 without loss.
+- Verified resource catalogs bind private shapes, capabilities and consuming
+  signatures. Native ABI helpers never infer ownership or maintain owner bits.
+- EINTR retry for consuming wait stays within its native bridge; Linux close
+  is never retried. See [ADR 0045](docs/adr/0045-blocking-processes.md).
+
 ## Stable path rules (Phase 15C)
 
 - Path is an ordinary owned string wrapper; provenance and structural
@@ -1116,7 +1129,7 @@ Detailed requirements and open choices: [dependency security](docs/dependency-se
   Invalid UTF-8 text/names and NUL paths are explicit errors, not lossy decoding.
 - Directory entries own copied names/paths; borrowed strings retain provenance.
 - fs depends downward on io, with separately validated resource/intrinsic IDs.
-  Process and async filesystem remain separate phases. See
+  Async filesystem remains a separate phase. See
   [ADR 0043](docs/adr/0043-blocking-filesystem.md).
 
 ## Stable string rules (Phase 15A)

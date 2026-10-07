@@ -1,4 +1,4 @@
-import "process"
+import "http"
 fn main() {
-    f := process.run("file")
+    f := http.run("file")
 }

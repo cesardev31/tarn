@@ -38,6 +38,16 @@ copy struct _Raw {
 fn _error(raw _Raw) Error {
     if raw.domain == 1 { return Error{kind: ErrorKind.DnsFailure, code: raw.code, domain: raw.domain} }
     if raw.domain == 2 { return Error{kind: ErrorKind.InvalidAddress, code: raw.code, domain: raw.domain} }
+    if raw.domain == 4 {
+        var kind = ErrorKind.OtherOs
+        if raw.code == 2 { kind = ErrorKind.NotFound }
+        if raw.code == 1 || raw.code == 13 { kind = ErrorKind.PermissionDenied }
+        if raw.code == 22 || raw.code == 36 { kind = ErrorKind.InvalidInput }
+        if raw.code == 8 { kind = ErrorKind.InvalidData }
+        if raw.code == 7 { kind = ErrorKind.LimitExceeded }
+        if raw.code == 20 { kind = ErrorKind.NotDirectory }
+        return Error{kind: kind, code: raw.code, domain: raw.domain}
+    }
     if raw.domain == 3 {
         var kind = ErrorKind.OtherOs
         if raw.code == 2 { kind = ErrorKind.NotFound }

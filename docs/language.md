@@ -513,3 +513,7 @@ Blocking owned regular files and safe byte/text helpers are documented in
 Owned lexical POSIX paths are documented in [the path module](path.md)
 (Phase 15C). Manipulation never performs filesystem I/O or implicitly cancels
 `..`; borrowed text and owned components use ordinary provenance.
+
+Blocking child execution is documented in [the process module](process.md)
+(Phase 15D). Command configuration owns its text; Process is a non-Copy,
+Transfer owner whose consuming wait or verified destruction reaps the child.
