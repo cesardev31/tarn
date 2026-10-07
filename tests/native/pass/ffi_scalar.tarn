@@ -1,0 +1,22 @@
+// Phase 18A: native calls to libc/libm with System V scalar arguments,
+// including narrow signed integers, mixed float/integer registers and void.
+extern "C" fn getpid() i32
+extern "C" fn abs(x i32) i32
+extern "C" fn labs(x i64) i64
+extern "C" fn toupper(c i32) i32
+extern "C" fn pow(x f64, y f64) f64
+extern "C" fn fmaf(x f32, y f32, z f32) f32
+extern "C" fn ldexp(x f64, e i32) f64
+extern "C" fn srand(seed u32)
+fn main() {
+    unsafe {
+        print(getpid() > 0)
+        print(abs(-42))
+        print(labs(-9000000000))
+        print(toupper(97))
+        print(pow(2.0, 10.0))
+        print(fmaf(2.0, 3.0, 1.0))
+        print(ldexp(1.5, 4))
+        srand(7)
+    }
+}

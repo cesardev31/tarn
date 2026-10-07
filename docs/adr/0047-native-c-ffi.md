@@ -1,6 +1,6 @@
 # ADR 0047: minimal native C FFI
 
-Status: proposed. Not implemented. Detailed stages, gates and tests:
+Status: proposed; stage 18A (native scalar calls) implemented. Detailed stages, gates and tests:
 [Phase 18 plan](../phase-18-plan.md).
 
 ## Context
@@ -24,10 +24,14 @@ magic surface (contrary to ADR 0020).
 
 1. **Scalar C ABI first.** Native calls to user `extern "C"` functions support
    exactly: `bool`, all fixed-width integers, `usize`/`isize`, `f32`/`f64`,
-   `void` results and raw pointers. Tarn references, slices, strings, ADTs,
-   closures, `any I` and arrays remain rejected at the boundary with a new
-   frontend diagnostic, not a backend failure. Variadic C functions are
-   rejected. System V x86_64 only.
+   `void` results and (after 18B) raw pointers. Narrow integers and bool are
+   sign/zero-extended by the caller. Variadic C functions are not expressible.
+   System V x86_64 only. Other boundary types fail the **native build** with a
+   message naming the function and type. The frontend keeps accepting them,
+   because ADR 0031 uses bodyless `extern "C"` declarations with reference
+   types to express and test provenance contracts without execution. A
+   frontend error would invalidate that accepted decision and its tests for no
+   safety gain, since such calls already require `unsafe` (decided in Phase 18A).
 2. **Raw pointers `*T` and `*mut T`.** Copy, Transfer-less and Share-less,
    never carry loans and never extend provenance. Creating one from a borrow
    (`data.as_ptr()`, `value.as_mut_ptr()`) is safe; dereferencing, offsetting

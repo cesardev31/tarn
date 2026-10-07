@@ -99,4 +99,11 @@ Design: [ADR 0048](adr/0048-application-ergonomics.md). Plan:
 
 ## Final validation
 
-Recorded below after the full `cargo test --workspace --no-fail-fast` run.
+`cargo test --workspace --no-fail-fast`: 221 passed, 0 failed, 1 ignored (the
+existing benchmark), no build warnings. Baseline was 219.
+
+Two resolution fixtures (`unused_import`, `shadowing_warnings`) used `json`
+as a placeholder module name; now that it is real they would dump the whole
+module into their goldens. They use the still-unimplemented `collections`
+instead, with unchanged warnings apart from the name. The `imports` golden
+grew by the new `string` declarations.

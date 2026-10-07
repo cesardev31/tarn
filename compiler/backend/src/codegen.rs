@@ -166,6 +166,43 @@ fn environment(t: &Typed, f: &ir::Function) -> Result<(u32, Vec<(u32, Ty)>)> {
     }
     Ok((offset.max(1), fields))
 }
+/// `extern "C"` (ADR 0047): System V x86_64 scalars only. Narrow integers and
+/// bool are extended by the caller as C compilers expect.
+fn c_type(ty: &Ty) -> Option<cl::AbiParam> {
+    let ext = |t, signed: bool| if signed { cl::AbiParam::new(t).sext() } else { cl::AbiParam::new(t).uext() };
+    Some(match ty {
+        Ty::Bool => ext(types::I8, false),
+        Ty::Int(i) => {
+            let signed = matches!(i, IntTy::I8 | IntTy::I16 | IntTy::I32 | IntTy::I64 | IntTy::Isize);
+            match int_bits(*i) {
+                8 => ext(types::I8, signed),
+                16 => ext(types::I16, signed),
+                32 => ext(types::I32, signed),
+                _ => cl::AbiParam::new(types::I64),
+            }
+        }
+        Ty::Float(FloatTy::F32) => cl::AbiParam::new(types::F32),
+        Ty::Float(_) => cl::AbiParam::new(types::F64),
+        _ => return None,
+    })
+}
+fn c_signature_types(f: &ir::Function) -> Result<(Vec<cl::AbiParam>, Option<cl::AbiParam>)> {
+    let unsupported = |ty: &Ty| Error::unsupported(format!("extern \"C\" fn {}: type {ty:?} has no C ABI in v0 (scalars only)", c_symbol(f)));
+    let params = f.params().map(|l| c_type(&f.local(l).ty).ok_or_else(|| unsupported(&f.local(l).ty))).collect::<Result<_>>()?;
+    let ret = if f.ret == Ty::Void { None } else { Some(c_type(&f.ret).ok_or_else(|| unsupported(&f.ret))?) };
+    Ok((params, ret))
+}
+fn c_signature(module: &ObjectModule, f: &ir::Function) -> Result<cl::Signature> {
+    let (params, ret) = c_signature_types(f)?;
+    let mut sig = module.make_signature();
+    sig.params = params;
+    sig.returns.extend(ret);
+    Ok(sig)
+}
+/// Monomorphization suffixes instance names; C symbols are the source name.
+fn c_symbol(f: &ir::Function) -> &str {
+    f.name.split("::").next().unwrap_or(&f.name)
+}
 fn closure_signature(module: &ObjectModule, t: &Typed, f: &ir::Function) -> Result<cl::Signature> {
     let mut sig = signature(module, t, f)?;
     if frame(f).is_some() {
@@ -299,7 +336,9 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     // closure bodies and referenced function values.
     let reachable: HashSet<_> = p.functions.iter().map(|f| f.decl.id).collect();
     for f in &p.functions {
-        if f.blocks.is_empty() {
+        if f.decl.kind == FnKind::Extern {
+            c_signature_types(&f.decl)?;
+        } else if f.blocks.is_empty() {
             return Err(Error::unsupported(format!("function {} has no native body", f.decl.name)));
         }
     }
@@ -315,8 +354,15 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     ordered.sort();
     for id in &ordered {
         let f = &p.functions[id.0 as usize].decl;
-        let sig = signature(&module, t, f)?;
-        let fid = module.declare_function(&format!("tarn_fn_{}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?;
+        let fid = if f.kind == FnKind::Extern {
+            // The C symbol itself, resolved by the system linker.
+            let sig = c_signature(&module, f)?;
+            let name = c_symbol(f);
+            module.declare_function(name, Linkage::Import, &sig).map_err(|e| Error::unsupported(format!("extern \"C\" fn {name}: {e}")))?
+        } else {
+            let sig = signature(&module, t, f)?;
+            module.declare_function(&format!("tarn_fn_{}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?
+        };
         ids.insert(*id, fid);
     }
     let mut tables = Vec::<(tarn_resolve::SymbolId, Ty, Vec<FunctionId>, DataId)>::new();
@@ -490,6 +536,9 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     let glue = RefCell::new(Vec::new());
     for id in ordered {
         let f = &p.functions[id.0 as usize];
+        if f.decl.kind == FnKind::Extern {
+            continue;
+        }
         let mut ctx = module.make_context();
         ctx.func.signature = signature(&module, t, &f.decl)?;
         let mut fb = FunctionBuilderContext::new();

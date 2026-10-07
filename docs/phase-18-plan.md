@@ -33,12 +33,13 @@ module. Do not start Phase 19 work.
 
 ## 3. Stages
 
-### 18A: scalar extern calls
+### 18A: scalar extern calls (done)
 
 - Declare each reachable `extern "C"` function as an imported Cranelift
   symbol with System V scalar signature.
-- New frontend diagnostic for unsupported boundary types (reference, slice,
-  string, ADT, array, closure, `any`), reported on the declaration.
+- Unsupported boundary types (reference, slice, string, ADT, array, closure,
+  `any`) fail the native build naming function and type; the frontend keeps
+  accepting them for ADR 0031 contract checks (ADR 0047 decision 1).
 - Reject variadic declarations (syntax has none; keep it that way).
 - Tests: `getpid`, `abs`, `labs`, `sqrt` from libc/libm; mixed int/float
   argument registers; `void` results; E3031 still required.
@@ -87,8 +88,8 @@ pointers in its public API.
 
 ## 4. Diagnostics
 
-Allocate new codes in the E30xx range (boundary types, opaque type misuse,
-pointer deref outside unsafe reuses E3031 wording style) and a driver code for
+Allocate new codes in the E30xx range (opaque type misuse, pointer deref
+outside unsafe reuses E3031 wording style) and a driver code for
 link failures. Document each in `docs/errors.md`; never reuse codes.
 
 ## 5. Report
