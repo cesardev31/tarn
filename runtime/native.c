@@ -939,3 +939,18 @@ void tarn_rt_process_kill(TarnNetRaw *out, int32_t pid) {
     if (pid <= 0) { process_error(out, EINVAL); return; }
     if (kill(pid, SIGKILL) < 0) process_error(out, errno);
 }
+
+/* Private Phase-19 harness ABI; ordinary Tarn programs gain no argv API. */
+#include <sys/prctl.h>
+int32_t tarn_rt_test_select(int argc, char **argv) {
+    /* Disable core collection after exec: piped Linux core handlers otherwise
+     * delay abort completion and can turn a panic into a spurious timeout. */
+    if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0) abort();
+    if (argc != 2 || !argv[1][0]) abort();
+    uint64_t value = 0;
+    for (const unsigned char *p = (unsigned char *)argv[1]; *p; ++p) {
+        if (*p < '0' || *p > '9' || value > ((uint64_t)INT32_MAX - (uint64_t)(*p - '0')) / 10) abort();
+        value = value * 10 + (*p - '0');
+    }
+    return (int32_t)value;
+}

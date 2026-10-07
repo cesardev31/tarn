@@ -1,8 +1,8 @@
 # Phase 19 plan: integrated CLI
 
-Status: 19A complete; 19C in progress (`check --watch` implemented).
-19B has not started; 19D remains deferred while outputs live beside sources. An ADR is required before 19B
-(test discovery conventions) because they become part of the language contract.
+Status: 19A, 19B and 19C implemented. 19D is explicitly deferred under its
+output-placement condition: build outputs still live beside sources.
+Test conventions are settled in [ADR 0049](adr/0049-integrated-test-runner.md).
 Baseline: Phase 18.
 
 ## 1. Goal and scope
@@ -12,11 +12,13 @@ test, and iterate on change, without shell scripts or a second tool. It
 must stay machine-friendly (stable exit codes, `--json`) as AGENTS.md
 requires for coding agents.
 
-Current state after 19A:
+Current state after Phase 19:
 
 - Working: `check [--json]`, `resolve`, `types`, `ir`, `ast`, `lex`,
   `build [-o] [--link] [--json]`, `run [--link] [--json]`, `version`.
-- Stubbed with exit 2: `test`, `fmt`, `clean`, `cache`.
+- Working: `test [--filter] [--timeout] [--json] [--link]`, and
+  `check/run/test --watch`.
+- Stubbed with exit 2: `fmt`, `clean`, `cache`.
 - Shared internal argument validation; source entries default to `main.tarn`.
 
 Included: consistent argument handling, a project entry convention, `tarn
@@ -164,6 +166,29 @@ First 19C delivery:
   recreation, source-set refresh, initially missing entry recovery, JSON output,
   debounce batching and exclusion of embedded stdlib sources.
 
-Next: native `run --watch` child restart and termination semantics. `test --watch`
-requires the 19B runner first; neither command accepts `--watch` yet. 19D stays
-stubbed because build outputs still live beside their sources.
+Completed 19B and remaining 19C:
+
+- ADR 0049 fixes test discovery, ordinary module visibility, process isolation,
+  one build, argv selection and a configurable per-test timeout (10000 ms by
+  default). No assertion module or external Rust dependency was introduced.
+- The driver generates normal source harnesses in test-owning modules. Original
+  application functions remain intact; a distinct verified entry reaches the
+  existing monomorphization and post-drop backend pipeline.
+- `tarn test` supports filters, JSON Lines, repeated link grants, panic/Err
+  reporting, timeout, concurrent pipe draining and aggregate exit status.
+- `run --watch` preserves the old process on compile/link failure, then uses
+  SIGTERM, a two-second grace period, SIGKILL and reaping on replacement.
+  Session shutdown cleans up owned process groups and temporary artifacts.
+- `test --watch` reruns on source changes and sibling test-file additions or
+  removals, and recovers from discovery/compilation/test failures.
+- Tarn-written string/JSON behavior tests live in `tests/stdlib`; run them with
+  `tarn test tests/stdlib`. CLI tests prove one native build for multiple tests,
+  isolation after panic/Err, a hanging-test timeout, stream-draining safety,
+  watch recovery and forced process replacement.
+
+19D decision: keep `clean` stubbed, exactly as the plan permits. There is no
+CLI-owned target directory or artifact inventory; deleting beside-source
+outputs by guessing would violate the stage's safety requirement.
+
+User guide: [integrated CLI](cli.md). Completed validation and deliberate
+boundaries are recorded in the [Phase 19 report](phase-19-report.md).

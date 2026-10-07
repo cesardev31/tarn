@@ -81,4 +81,5 @@ User guide: [C interop](ffi.md).
 
 ## Final validation
 
-Recorded after the full `cargo test --workspace --no-fail-fast` run.
+`cargo test --workspace --no-fail-fast`: 222 passed, 0 failed, 1 ignored (the
+existing benchmark), no build warnings.

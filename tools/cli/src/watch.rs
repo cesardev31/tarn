@@ -51,6 +51,7 @@ impl Sources {
 }
 
 pub fn check(entry: &Path, json: bool) -> ExitCode {
+    super::process::install_handlers();
     let mut sources = Sources::default();
     sources.replace([entry.to_path_buf()]);
     let mut changed = BTreeSet::from([entry.to_path_buf()]);
@@ -111,11 +112,203 @@ pub fn check(entry: &Path, json: bool) -> ExitCode {
         let _ = std::io::stdout().flush();
         loop {
             std::thread::sleep(INTERVAL);
+            if super::process::stopping() {
+                return ExitCode::SUCCESS;
+            }
             if let Some(paths) = sources.poll() {
                 changed = paths;
                 break;
             }
         }
+    }
+}
+
+fn header(changed: &BTreeSet<PathBuf>, action: &str) {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    eprintln!(
+        "[watch {seconds}] {action} after changes: {}",
+        changed
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+fn refresh(sources: &mut Sources, paths: Vec<PathBuf>, entry: &Path, failed: bool) {
+    let mut paths: BTreeSet<_> = paths.into_iter().collect();
+    paths.insert(entry.to_path_buf());
+    if failed {
+        paths.extend(sources.observed.keys().cloned());
+    }
+    sources.observed.retain(|p, _| paths.contains(p));
+    for path in paths {
+        sources
+            .observed
+            .entry(path.clone())
+            .or_insert_with(|| stamp(&path));
+    }
+}
+fn wait(
+    sources: &mut Sources,
+    entry: &Path,
+    tests: bool,
+    siblings: &mut Vec<PathBuf>,
+    child: &mut Option<std::process::Child>,
+) -> Option<BTreeSet<PathBuf>> {
+    loop {
+        if super::process::stopping() {
+            return None;
+        }
+        std::thread::sleep(INTERVAL);
+        if let Some(process) = child.as_mut() {
+            if let Ok(Some(status)) = process.try_wait() {
+                super::process::send(process, 9);
+                eprintln!("[watch] program exited: {status}");
+                child.take();
+            }
+        }
+        if tests {
+            if let Ok(current) = tarn_driver::testing::test_files(entry) {
+                if current != *siblings {
+                    sources
+                        .pending
+                        .extend(current.iter().chain(siblings.iter()).cloned());
+                    *siblings = current;
+                    // A discovery change also needs a stable polling interval.
+                    continue;
+                }
+            }
+        }
+        if let Some(changed) = sources.poll() {
+            return Some(changed);
+        }
+    }
+}
+
+fn build_failed(has_child: bool) {
+    eprintln!(
+        "[watch] build failed; {}",
+        if has_child {
+            "previous program retained"
+        } else {
+            "waiting for source changes"
+        }
+    );
+}
+
+pub fn run(args: &[String]) -> ExitCode {
+    super::process::install_handlers();
+    let entry = Path::new(&args[0]);
+    let json = args.iter().any(|a| a == "--json");
+    let mut libraries = Vec::new();
+    let mut rest = args[1..].iter();
+    while let Some(arg) = rest.next() {
+        if arg == "--link" {
+            libraries.push(rest.next().unwrap().clone());
+        }
+    }
+    let scratch = match super::process::Scratch::new() {
+        Ok(scratch) => scratch,
+        Err(error) => {
+            super::native_error(json, "output", &error.to_string());
+            return ExitCode::from(1);
+        }
+    };
+    let mut child: Option<std::process::Child> = None;
+    let mut generation = 0;
+    let mut sources = Sources::default();
+    sources.replace([entry.to_path_buf()]);
+    let mut changed = BTreeSet::from([entry.to_path_buf()]);
+    loop {
+        header(&changed, "building");
+        match tarn_driver::check(entry) {
+            Ok(result) => {
+                refresh(
+                    &mut sources,
+                    result.program.disk_sources.clone(),
+                    entry,
+                    result.has_errors(),
+                );
+                for diagnostic in &result.diagnostics {
+                    if json {
+                        println!("{}", diagnostic.to_json(&result.program.sources));
+                    } else {
+                        eprint!("{}", diagnostic.render(&result.program.sources));
+                    }
+                }
+                if !result.has_errors() {
+                    generation += 1;
+                    let output = scratch.0.join(format!("run-{generation}"));
+                    match tarn_backend::build_linked(
+                        result.drops.as_ref().unwrap(),
+                        result.typed.as_ref().unwrap(),
+                        &output,
+                        &libraries,
+                    ) {
+                        Ok(()) => {
+                            let _ = std::io::stdout().flush();
+                            if let Some(mut previous) = child.take() {
+                                super::process::terminate(&mut previous, Duration::from_secs(2));
+                            }
+                            if !super::process::stopping() {
+                                match super::process::command(&output).spawn() {
+                                    Ok(process) => {
+                                        child = Some(process);
+                                        eprintln!("[watch] program started");
+                                    }
+                                    Err(error) => {
+                                        super::native_error(json, "execute", &error.to_string())
+                                    }
+                                }
+                            }
+                            // Linux keeps a running executable mapped after unlink.
+                            let _ = std::fs::remove_file(&output);
+                        }
+                        Err(error) => {
+                            super::native_error(json, "native", &error.to_string());
+                            build_failed(child.is_some());
+                        }
+                    }
+                } else {
+                    build_failed(child.is_some());
+                }
+            }
+            Err(error) => {
+                super::native_error(json, "load", &error);
+                build_failed(child.is_some());
+            }
+        }
+        let _ = std::io::stdout().flush();
+        let Some(paths) = wait(&mut sources, entry, false, &mut Vec::new(), &mut child) else {
+            break;
+        };
+        changed = paths;
+    }
+    if let Some(mut child) = child {
+        super::process::terminate(&mut child, Duration::from_secs(2));
+    }
+    ExitCode::SUCCESS
+}
+
+pub fn test(entry: &Path, options: &super::testing::Options) -> ExitCode {
+    super::process::install_handlers();
+    let mut sources = Sources::default();
+    sources.replace([entry.to_path_buf()]);
+    let mut siblings = tarn_driver::testing::test_files(entry).unwrap_or_default();
+    let mut changed = BTreeSet::from([entry.to_path_buf()]);
+    loop {
+        header(&changed, "testing");
+        super::testing::run_with_sources(entry, options, |paths, failed| {
+            refresh(&mut sources, paths.to_vec(), entry, failed);
+        });
+        let _ = std::io::stdout().flush();
+        let Some(paths) = wait(&mut sources, entry, true, &mut siblings, &mut None) else {
+            return ExitCode::SUCCESS;
+        };
+        changed = paths;
     }
 }
 

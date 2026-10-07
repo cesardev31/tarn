@@ -1,0 +1,260 @@
+//! Discovery, one-build dispatch and abort/timeout isolation through the public CLI.
+use std::process::Command;
+
+#[test]
+fn reports_all_outcomes_filters_and_private_module_tests() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-tests-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.tarn");
+    std::fs::write(&entry, "fn main() { panic(\"application main must not run\") }\nfn test_ok() {}\nfn test_err() Result<void, string> { return Err(\"error value\") }\nfn test_panic() { panic(\"panic value\") }\nfn test_hang() { for {} }\n").unwrap();
+    std::fs::write(dir.join("side_test.tarn"), "fn private_value() i32 { return 42 }\nfn test_private() { if private_value() != 42 { panic(\"wrong\") } }\n").unwrap();
+    let cli = env!("CARGO_BIN_EXE_tarn");
+    // Count the real native link invocations: all selected tests share one build.
+    use std::os::unix::fs::PermissionsExt;
+    let count = dir.join("link-count");
+    let wrapper = dir.join("cc");
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf x >> '{}'\nexec /usr/bin/cc \"$@\"\n",
+            count.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let search = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let output = Command::new(cli)
+        .env("PATH", search)
+        .arg("test")
+        .arg(&dir)
+        .args(["--timeout", "200", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        std::fs::read(&count).unwrap(),
+        b"x",
+        "compile/link exactly once"
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(1), "{stdout}");
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(stdout.lines().count(), 6, "{stdout}");
+    assert!(stdout.contains("\"status\":\"timeout\""));
+    assert_eq!(
+        stdout.matches("\"status\":\"FAILED\"").count(),
+        2,
+        "{stdout}"
+    );
+    assert!(stdout.contains("error value"));
+    assert!(stdout.contains("panic value"));
+    assert_eq!(stdout.matches("\"signal\":6").count(), 2);
+    assert!(stdout.contains("side_test.test_private"));
+    assert!(stdout.contains("\"passed\":2,\"failed\":3"));
+    let output = Command::new(cli)
+        .arg("test")
+        .arg(&entry)
+        .args(["--filter", "private"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+    let output = Command::new(cli)
+        .arg("test")
+        .arg(&entry)
+        .args(["--filter", "no_match"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("0 passed; 0 failed"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn rejects_signatures_and_keeps_ordinary_visibility() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-test-signatures-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.tarn");
+    for signature in [
+        "fn test_bad(value i32) {}",
+        "fn test_bad() i32 { return 1 }",
+        "fn test_bad<T>() {}",
+        "unsafe fn test_bad() {}",
+    ] {
+        std::fs::write(&entry, format!("fn main() {{}}\n{signature}\n")).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
+            .arg("test")
+            .arg(&entry)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{signature}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("test `main.test_bad`"));
+    }
+    std::fs::write(&entry, "fn main() {}\nfn secret() i32 { return 1 }\n").unwrap();
+    std::fs::write(
+        dir.join("other_test.tarn"),
+        "import \"main\"\nfn test_private() { print(main.secret()) }\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
+        .arg("test")
+        .arg(&entry)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("private"));
+    for args in [
+        vec!["--timeout", "0"],
+        vec!["--timeout", "bad"],
+        vec!["--timeout"],
+        vec!["--filter"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
+            .arg("test")
+            .args(args)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2));
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn drains_both_streams_without_deadlock() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-test-pipes-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.tarn");
+    std::fs::write(&entry, "import \"ffi\"\nextern \"C\" fn write(fd i32, bytes *u8, count usize) isize\nfn test_pipes() {\n for i in 0..3000 {\n print(\"stdout filling a pipe with several hundred kilobytes of output\")\n text := \"stderr filling a pipe with several hundred kilobytes of output\\n\"\n unsafe { written := write(2, ffi.slice(text.bytes()), text.len()) }\n }\n}\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
+        .arg("test")
+        .arg(&entry)
+        .args(["--json", "--timeout", "5000"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("stdout filling"));
+    assert!(stdout.contains("stderr filling"));
+    assert!(stdout.contains("\"status\":\"ok\""));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn stdlib_behaviors_are_tested_in_tarn() {
+    let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/stdlib");
+    let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
+        .arg("test")
+        .arg(entry)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("5 passed; 0 failed"));
+}
+
+#[test]
+fn reports_enum_variants_and_owned_struct_fields() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-test-errors-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.tarn");
+    std::fs::write(&entry, "enum TestError {\n Broken(string)\n Other\n}\nstruct TestFailure { message string }\nfn test_enum() Result<void, TestError> { return Err(TestError.Broken(\"enum payload\")) }\nfn test_struct() Result<void, TestFailure> { return Err(TestFailure{message: \"owned field value\"}) }\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
+        .arg("test")
+        .arg(&entry)
+        .arg("--json")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(1), "{stdout}");
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("TestError.Broken"), "{stdout}");
+    assert!(stdout.contains("enum payload"), "{stdout}");
+    assert!(stdout.contains("owned field value"), "{stdout}");
+    assert!(stdout.contains("\"passed\":0,\"failed\":2"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn preserves_invalid_utf8_output_as_bytes() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-test-binary-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.tarn");
+    std::fs::write(&entry, "import \"ffi\"\nextern \"C\" fn write(fd i32, data *u8, count usize) isize\nfn test_bytes() {\n bytes := [3]u8{0, 255, 10}\n unsafe { written := write(1, ffi.slice(&bytes), 3) }\n}\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
+        .arg("test")
+        .arg(&entry)
+        .arg("--json")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("\"stdout\":null"), "{stdout}");
+    assert!(stdout.contains("\"stdout_bytes\":[0, 255, 10]"), "{stdout}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn generated_imports_do_not_heal_unterminated_source() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-test-source-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.tarn");
+    std::fs::write(&entry, "fn test_bad() { print(\"unterminated").unwrap();
+    std::fs::write(dir.join("side_test.tarn"), "fn test_side() {}\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
+        .arg("test")
+        .arg(&entry)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("unterminated string"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("test_summary"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn application_shadowing_cannot_turn_error_into_success() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-test-shadow-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.tarn");
+    std::fs::write(&entry, "fn panic(message string) {}\nfn print(value i32) {}\nfn test_application_names() { panic(\"ordinary user function\")\n print(7) }\nfn test_failure() Result<void, string> { return Err(\"must fail\") }\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
+        .arg("test")
+        .arg(&entry)
+        .arg("--json")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("must fail"), "{stdout}");
+    assert!(stdout.contains("\"passed\":1,\"failed\":1"), "{stdout}");
+    std::fs::remove_dir_all(dir).unwrap();
+}

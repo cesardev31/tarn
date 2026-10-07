@@ -1,0 +1,3 @@
+// Phase 19B acceptance: ordinary Tarn tests for embedded application modules.
+// Run: tarn test tests/stdlib
+fn main() {}

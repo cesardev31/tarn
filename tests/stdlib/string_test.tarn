@@ -1,0 +1,20 @@
+import "string"
+
+fn test_trim_and_split() {
+    trimmed := string.trim(&"  hello  ")
+    if trimmed != "hello" { panic("trim changed the text") }
+    pieces := string.split(&"one,two,three", &",")
+    if pieces.len() != 3 { panic("split must return three owned elements") }
+    if !string.contains(&trimmed, &"ell") { panic("substring lookup failed") }
+}
+
+fn test_integer_parsing() {
+    match string.parse_i64(&"-42") {
+        Some(value) => { if value != -42 { panic("signed parse returned the wrong number") } }
+        None => { panic("signed parse rejected a valid number") }
+    }
+    match string.parse_u64(&"18446744073709551616") {
+        Some(_) => { panic("integer overflow must be rejected") }
+        None => {}
+    }
+}

@@ -4,6 +4,8 @@
 //! `import "a/b"` loads `<root>/a/b.tarn` if it exists. Imports that are not
 //! local files are left to the resolver (standard modules or E2007).
 
+pub mod testing;
+
 use std::path::{Path, PathBuf};
 use tarn_ast::{ItemKind, Module};
 use tarn_diagnostics::{Diagnostic, Severity, SourceMap};
@@ -191,7 +193,11 @@ pub fn check_editor_with_overlays(entry: &Path, overlays: &std::collections::Has
     check_loaded(load_editor_sources(entry, overlays, true)?)
 }
 
-fn check_loaded((program, mut diagnostics): (Program, Vec<Diagnostic>)) -> Result<CheckResult, String> {
+fn check_loaded(loaded: (Program, Vec<Diagnostic>)) -> Result<CheckResult, String> {
+    check_loaded_with_bindings(loaded, &std::collections::HashMap::new())
+}
+
+fn check_loaded_with_bindings((program, mut diagnostics): (Program, Vec<Diagnostic>), generated_starts: &std::collections::HashMap<PathBuf, usize>) -> Result<CheckResult, String> {
     let mut resolved = None;
     let mut typed = None;
     let mut ir = None;
@@ -201,7 +207,8 @@ fn check_loaded((program, mut diagnostics): (Program, Vec<Diagnostic>)) -> Resul
     let errors = |ds: &[Diagnostic]| ds.iter().any(|d| d.severity == Severity::Error);
     if !errors(&diagnostics) {
         let inputs: Vec<ModuleInput> = program.modules.iter().map(|(n, m)| ModuleInput { name: n.clone(), ast: m, trusted_stdlib: program.trusted_modules.contains(n) }).collect();
-        let (r, d) = tarn_resolve::resolve(&inputs);
+        let (mut r, d) = tarn_resolve::resolve(&inputs);
+        testing::bind_generated_prelude(&program, &mut r, generated_starts);
         diagnostics.extend(d);
         // Types only on name-clean programs, for the same reason as above.
         if !errors(&diagnostics) {

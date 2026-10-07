@@ -326,9 +326,17 @@ pub(crate) fn verify_dynamic(p: &post::Program, t: &Typed) -> Result<()> {
     Ok(())
 }
 pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
-    let main = p.functions.iter().find(|f| f.decl.name == "main").ok_or_else(|| Error::unsupported("program requires fn main()"))?;
+    emit_entry(p, t, false)
+}
+
+pub fn emit_entry(p: &post::Program, t: &Typed, test: bool) -> Result<Vec<u8>> {
+    let main = if test { p.functions.first() } else { p.functions.iter().find(|f| f.decl.name == "main") }.ok_or_else(|| Error::unsupported("program requires fn main()"))?;
     let result_main = matches!(&main.decl.ret, Ty::Adt(id, args) if Some(*id) == t.decls.result && args.len() == 2 && args[0] == Ty::Void && matches!(&args[1], Ty::Adt(e, ts) if Some(*e) == t.decls.net_error && ts.is_empty()));
-    if main.decl.param_count != 0 || (main.decl.ret != Ty::Void && !result_main) {
+    if test {
+        if main.decl.param_count != 1 || main.decl.ret != Ty::Void || main.decl.locals.get(1).map(|l| &l.ty) != Some(&Ty::Int(tarn_types::IntTy::I32)) {
+            return Err(Error::bug("test entry must accept one i32 and return void"));
+        }
+    } else if main.decl.param_count != 0 || (main.decl.ret != Ty::Void && !result_main) {
         return Err(Error::unsupported("entry must be fn main() or fn main() Result<void, net.Error>"));
     }
     // Only reachable functions are code-generated. Unsupported unused stdlib
@@ -675,6 +683,17 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     // libc startup calls the C main shim; internal Tarn main returns void or Result<void, net.Error>.
     let mut sig = module.make_signature();
     sig.returns.push(cl::AbiParam::new(types::I32));
+    if test {
+        sig.params.push(cl::AbiParam::new(types::I32));
+        sig.params.push(cl::AbiParam::new(types::I64));
+    }
+    let selector = if test {
+        let mut sig = module.make_signature();
+        sig.params.push(cl::AbiParam::new(types::I32));
+        sig.params.push(cl::AbiParam::new(types::I64));
+        sig.returns.push(cl::AbiParam::new(types::I32));
+        Some(module.declare_function("tarn_rt_test_select", Linkage::Import, &sig).map_err(|e| Error::bug(e.to_string()))?)
+    } else { None };
     let entry = module.declare_function("main", Linkage::Export, &sig).map_err(|e| Error::bug(e.to_string()))?;
     let mut ctx = module.make_context();
     ctx.func.signature = sig;
@@ -682,6 +701,7 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
     {
         let mut b = FunctionBuilder::new(&mut ctx.func, &mut fb);
         let block = b.create_block();
+        if test { b.append_block_params_for_function_params(block); }
         b.switch_to_block(block);
         let target = module.declare_func_in_func(ids[&main.decl.id], b.func);
         if result_main {
@@ -706,6 +726,12 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
             let one = b.ins().iconst(types::I32, 1);
             b.ins().return_(&[one]);
             b.switch_to_block(success);
+        } else if let Some(selector) = selector {
+            let params = b.block_params(block).to_vec();
+            let selector = module.declare_func_in_func(selector, b.func);
+            let call = b.ins().call(selector, &params);
+            let selected = b.inst_results(call)[0];
+            b.ins().call(target, &[selected]);
         } else { b.ins().call(target, &[]); }
         let zero = b.ins().iconst(types::I32, 0);
         b.ins().return_(&[zero]);

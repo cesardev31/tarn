@@ -77,8 +77,12 @@ fn concrete_inner(ty: &Ty, depth: usize, nodes: &mut usize) -> Result<()> {
 }
 pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
     let main = p.functions.iter().find(|f| f.decl.name == "main").ok_or_else(|| Error::unsupported("program requires fn main()"))?;
+    specialize_entry(p, t, main.decl.id)
+}
+
+pub fn specialize_entry(p: &post::Program, t: &Typed, entry: FunctionId) -> Result<post::Program> {
     let mut cx = Instances { source: p, keys: Vec::new(), functions: Vec::new() };
-    cx.intern(main.decl.id, Vec::new())?;
+    cx.intern(entry, Vec::new())?;
     let mut i = 0;
     while i < cx.keys.len() {
         let key = cx.keys[i].clone();

@@ -41,6 +41,10 @@ pub fn verify_dynamic(p: &post_drop::Program, t: &Typed) -> Result<()> {
 }
 
 pub fn emit_object(p: &post_drop::Program, t: &Typed) -> Result<Vec<u8>> {
+    emit_entry_object(p, t, None)
+}
+
+fn emit_entry_object(p: &post_drop::Program, t: &Typed, entry: Option<tarn_ir::FunctionId>) -> Result<Vec<u8>> {
     if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         return Err(Error::unsupported("target must be Linux x86_64"));
     }
@@ -48,12 +52,13 @@ pub fn emit_object(p: &post_drop::Program, t: &Typed) -> Result<Vec<u8>> {
     if !bugs.is_empty() {
         return Err(Error::bug(bugs.join("\n")));
     }
-    let concrete = inline::inline(mono::specialize(p, t)?, t);
+    let specialized = if let Some(entry) = entry { mono::specialize_entry(p, t, entry)? } else { mono::specialize(p, t)? };
+    let concrete = inline::inline(specialized, t);
     let bugs = post_drop::verify(&concrete, t);
     if !bugs.is_empty() {
         return Err(Error::bug(bugs.join("\n")));
     }
-    codegen::emit(&concrete, t)
+    if entry.is_some() { codegen::emit_entry(&concrete, t, true) } else { codegen::emit(&concrete, t) }
 }
 
 /// Build to the requested executable path. Object/runtime intermediates live in
@@ -71,10 +76,19 @@ pub fn valid_library(name: &str) -> bool {
 
 /// `build` plus system libraries granted with `tarn build --link`.
 pub fn build_linked(p: &post_drop::Program, t: &Typed, output: &Path, libraries: &[String]) -> Result<()> {
+    build_entry(p, t, output, libraries, None)
+}
+
+/// Build a frontend-generated test entry with its private argv adapter.
+pub fn build_tests(p: &post_drop::Program, t: &Typed, output: &Path, libraries: &[String], entry: tarn_ir::FunctionId) -> Result<()> {
+    build_entry(p, t, output, libraries, Some(entry))
+}
+
+fn build_entry(p: &post_drop::Program, t: &Typed, output: &Path, libraries: &[String], entry: Option<tarn_ir::FunctionId>) -> Result<()> {
     if let Some(bad) = libraries.iter().find(|l| !valid_library(l)) {
         return Err(Error { message: format!("invalid library `{bad}`: use a name such as `sqlite3` or an exact file such as `:libsqlite3.so.0`") });
     }
-    let bytes = emit_object(p, t)?;
+    let bytes = emit_entry_object(p, t, entry)?;
     let scratch = Scratch::new()?;
     let object = scratch.0.join("program.o");
     let runtime = scratch.0.join("runtime.c");

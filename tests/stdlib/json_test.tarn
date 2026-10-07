@@ -1,0 +1,31 @@
+import "json"
+
+fn test_object_fields() Result<void, json.Error> {
+    document := try json.parse(&"{\"name\":\"Tarn\",\"count\":19}")
+    match document.text(&"name") {
+        Some(name) => { if name != "Tarn" { panic("wrong JSON text") } }
+        None => { panic("JSON text member is missing") }
+    }
+    match document.u64(&"count") {
+        Some(count) => { if count != 19 { panic("wrong JSON integer") } }
+        None => { panic("JSON integer member is missing") }
+    }
+    return Ok(())
+}
+
+fn test_invalid_json() {
+    match json.parse(&"{\"broken\":}") {
+        Ok(_) => { panic("invalid JSON must be rejected") }
+        Err(_) => {}
+    }
+}
+
+fn test_writer() {
+    var writer = json.Writer.new()
+    writer.begin_object()
+    writer.key(&"count")
+    writer.u64(19)
+    writer.end_object()
+    text := writer.finish()
+    if text != "{\"count\":19}" { panic("wrong encoded JSON") }
+}

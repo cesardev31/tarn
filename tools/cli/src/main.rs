@@ -2,6 +2,8 @@
 
 mod args;
 mod watch;
+mod process;
+mod testing;
 
 use std::process::ExitCode;
 use tarn_diagnostics::SourceMap;
@@ -19,15 +21,17 @@ usage:
     tarn build [entry] [-o path] [--link lib]... [--json]
                                      emit a Linux x86_64 executable; each
                                      --link grants a system C library
-    tarn run [entry] [--link lib]... [--json]
+    tarn run [entry] [--link lib]... [--json] [--watch]
                                      build temporarily and execute
+    tarn test [entry] [--filter text] [--timeout milliseconds] [--json] [--watch]
+                                     run isolated tests (also accepts --link)
     tarn version                     print the compiler version
 
 Entry defaults to ./main.tarn; directories select <dir>/main.tarn.
 Exit codes: 0 success, 1 compilation/link failure, 2 usage error.
 run propagates the program exit code.
 
-planned: test, fmt, clean, cache
+planned: fmt, clean, cache
 ";
 
 fn main() -> ExitCode {
@@ -47,7 +51,13 @@ fn main() -> ExitCode {
         Some("types") => cmd_types(&args[1..]),
         Some("ir") => cmd_ir(&args[1..]),
         Some("build") => cmd_native(&args[1..], false),
+        Some("run") if args.iter().any(|a| a == "--watch") => watch::run(&args[1..]),
         Some("run") => cmd_native(&args[1..], true),
+        Some("test") => {
+            let options = testing::Options::parse(&args[1..]);
+            if args.iter().any(|a| a == "--watch") { watch::test(std::path::Path::new(&args[1]), &options) }
+            else { process::install_handlers(); testing::run(std::path::Path::new(&args[1]), &options).0 }
+        },
         Some("version" | "--version" | "-V") => {
             println!("tarn {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -56,7 +66,7 @@ fn main() -> ExitCode {
             print!("{USAGE}");
             ExitCode::SUCCESS
         }
-        Some(cmd @ ("test" | "fmt" | "clean" | "cache")) => {
+        Some(cmd @ ("fmt" | "clean" | "cache")) => {
             eprintln!("error: `tarn {cmd}` is not implemented yet (see docs/roadmap.md)");
             ExitCode::from(2)
         }
