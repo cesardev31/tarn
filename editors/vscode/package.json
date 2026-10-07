@@ -104,15 +104,21 @@
         "tarn.serverPath": {
           "type": "string",
           "default": "",
-          "description": "Path to tarn-lsp. Empty searches the local checkout, workspace targets, then PATH."
+          "description": "Path to tarn-lsp. Relative paths resolve against the workspace. Empty searches workspace/extension checkout targets, then PATH. Changes restart the server."
         },
         "tarn.lsp.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable Tarn language server. Disable to keep only syntax highlighting and icons. Reload the window after enabling."
+          "description": "Enable compiler diagnostics, navigation and formatting. Changes take effect immediately; highlighting and snippets remain available when disabled."
         }
       }
-    }
+    },
+    "snippets": [
+      {
+        "language": "tarn",
+        "path": "./snippets/tarn.json"
+      }
+    ]
   },
   "icon": "icons/tarn.png",
   "main": "./extension.js",
@@ -121,5 +127,8 @@
   ],
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
+  },
+  "scripts": {
+    "test": "node tests/run.cjs"
   }
 }

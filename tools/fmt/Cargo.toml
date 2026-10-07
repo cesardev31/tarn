@@ -1,0 +1,11 @@
+[package]
+name = "tarn_fmt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tarn_diagnostics = { path = "../../compiler/diagnostics" }
+tarn_lexer = { path = "../../compiler/lexer" }
+tarn_ast = { path = "../../compiler/ast" }
+tarn_parser = { path = "../../compiler/parser" }

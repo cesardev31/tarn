@@ -28,8 +28,8 @@ Source → Lexer → Parser → AST → Resolve → Types → Typed IR
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | — | embedded C runtime: primitive print, strings, panic/abort; libc startup | initial (ADR 0027) |
 | `tools/cli` | `tarn` | the single CLI | started |
-| `tools/fmt` | `tarn_fmt` | canonical formatter | planned |
-| `tools/lsp` | `tarn-lsp` | stdio LSP: diagnostics, hover, definition, unsaved buffers | initial |
+| `tools/fmt` | `tarn_fmt` | canonical whitespace over real lexer/parser with token/AST preservation checks (ADR 0050) | done (basic) |
+| `tools/lsp` | `tarn-lsp` | stdio LSP: diagnostics, hover, definition, shared formatting, unsaved buffers | done within documented editor subset |
 
 Rules:
 

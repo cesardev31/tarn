@@ -1,0 +1,8 @@
+{
+  "Function": { "prefix": "fn", "body": ["fn ${1:name}(${2}) ${3:void} {", "    $0", "}"], "description": "Declare a Tarn function" },
+  "Test": { "prefix": "test", "body": ["fn test_${1:behavior}() {", "    $0", "}"], "description": "Declare a test discovered by tarn test" },
+  "Struct": { "prefix": "struct", "body": ["struct ${1:Name} {", "    ${2:field} ${3:string}", "}"], "description": "Declare an owned struct" },
+  "Enum": { "prefix": "enum", "body": ["enum ${1:Name} {", "    ${2:First}", "    ${3:Second}", "}"], "description": "Declare enum variants on separate lines" },
+  "For": { "prefix": "for", "body": ["for ${1:condition} {", "    $0", "}"], "description": "Loop while a condition holds" },
+  "Match": { "prefix": "match", "body": ["match ${1:result} {", "    Ok(${2:value}) => {", "        $0", "    }", "    Err(${3:error}) => {}", "}"], "description": "Handle a Result explicitly" }
+}

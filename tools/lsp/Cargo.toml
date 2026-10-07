@@ -10,3 +10,5 @@ url = "2"
 tarn_driver = { path = "../../compiler/driver" }
 tarn_diagnostics = { path = "../../compiler/diagnostics" }
 tarn_resolve = { path = "../../compiler/resolve" }
+
+tarn_fmt = { path = "../fmt" }

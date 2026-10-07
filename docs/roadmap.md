@@ -37,8 +37,8 @@ tested and documented.
 | 17 | Application ergonomics: string.Builder, json, http.serve and response helpers (ADR 0048) | **done**: [plan](phase-17-plan.md), [report](phase-17-report.md) |
 | 18 | Minimal native C FFI: scalar extern calls, raw pointers, `--link`, SQLite acceptance (ADR 0047) | **done within documented v0 limits**: [plan](phase-18-plan.md), [report](phase-18-report.md) |
 | 19 | CLI: command surface, `test`, `--watch`, `clean` | implemented (19A/B/C); `clean` explicitly deferred; [plan](phase-19-plan.md), [ADR](adr/0049-integrated-test-runner.md) |
-| 20 | Formatter (basic) | |
-| 21 | VS Code extension (TextMate) | **started**: language + highlighting |
+| 20 | Formatter (basic) | **implemented**: [plan](phase-20-plan.md), [ADR 0050](adr/0050-conservative-source-formatting.md) |
+| 21 | VS Code extension (TextMate) | **implemented**: [plan](phase-21-plan.md), highlighting, snippets, compiler LSP and shared formatting |
 
 ## Milestones
 

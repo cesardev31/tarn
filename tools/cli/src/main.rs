@@ -4,6 +4,7 @@ mod args;
 mod watch;
 mod process;
 mod testing;
+mod formatting;
 
 use std::process::ExitCode;
 use tarn_diagnostics::SourceMap;
@@ -25,13 +26,16 @@ usage:
                                      build temporarily and execute
     tarn test [entry] [--filter text] [--timeout milliseconds] [--json] [--watch]
                                      run isolated tests (also accepts --link)
+    tarn fmt [file.tarn | directory] [--check]
+                                     format sources recursively (default: .)
+    tarn fmt --stdin                 format stdin to stdout
     tarn version                     print the compiler version
 
 Entry defaults to ./main.tarn; directories select <dir>/main.tarn.
 Exit codes: 0 success, 1 compilation/link failure, 2 usage error.
 run propagates the program exit code.
 
-planned: fmt, clean, cache
+planned: clean, cache
 ";
 
 fn main() -> ExitCode {
@@ -66,7 +70,8 @@ fn main() -> ExitCode {
             print!("{USAGE}");
             ExitCode::SUCCESS
         }
-        Some(cmd @ ("fmt" | "clean" | "cache")) => {
+        Some("fmt") => formatting::run(&args[1..]),
+        Some(cmd @ ("clean" | "cache")) => {
             eprintln!("error: `tarn {cmd}` is not implemented yet (see docs/roadmap.md)");
             ExitCode::from(2)
         }

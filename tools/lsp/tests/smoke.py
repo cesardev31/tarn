@@ -108,3 +108,30 @@ with tempfile.TemporaryDirectory(prefix='tarn async lsp ') as directory:
     assert responses[5]['result']['contents']['value'] == 'value: i32', responses[5]
     assert entry.read_text() == 'fn main() {}\n'
 print('PASS: async source types, definition, context diagnostics and source-level ownership across await')
+
+# Formatting uses the unsaved buffer and leaves disk and server buffers unchanged.
+with tempfile.TemporaryDirectory(prefix='tarn format lsp ') as directory:
+    entry = Path(directory) / 'main.tarn'
+    entry.write_text('fn main() {}\n')
+    uri = entry.as_uri()
+    source = 'fn main(){print("😀")} // keep ñ'
+    formatted = 'fn main() { print("😀") }  // keep ñ\n'
+    formatting = lambda ident: {'id': ident, 'method': 'textDocument/formatting', 'params': {'textDocument': {'uri': uri}, 'options': {'tabSize': 8, 'insertSpaces': False}}}
+    out = exchange([
+        {'id': 1, 'method': 'initialize', 'params': {}}, opened(uri, source),
+        formatting(2), formatting(3), changed(uri, formatted, 2), formatting(4),
+        changed(uri, 'fn main() {', 3), formatting(5),
+        {'method': 'textDocument/didClose', 'params': {'textDocument': {'uri': uri}}}, formatting(6),
+        {'id': 7, 'method': 'shutdown'}, {'method': 'exit'},
+    ])
+    responses = {m['id']: m for m in out if 'id' in m}
+    assert responses[1]['result']['capabilities']['documentFormattingProvider'] is True
+    edit = responses[2]['result'][0]
+    assert edit['newText'] == formatted, edit
+    assert edit['range'] == {'start': {'line': 0, 'character': 0}, 'end': {'line': 0, 'character': len(source.encode('utf-16-le')) // 2}}, edit
+    assert responses[3]['result'] == responses[2]['result'], 'format request must not change buffer state'
+    assert responses[4]['result'] == [], responses[4]
+    assert responses[5]['error']['code'] == -32803, responses[5]
+    assert responses[6]['error']['code'] == -32803, responses[6]
+    assert entry.read_text() == 'fn main() {}\n'
+print('PASS: unsaved formatting, UTF-16 full-document edits, idempotence, invalid/closed buffer refusal, unchanged disk')

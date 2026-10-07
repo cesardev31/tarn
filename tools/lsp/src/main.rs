@@ -1,4 +1,4 @@
-//! Initial stdio LSP: full-buffer synchronization, diagnostics, hover, definition.
+//! Stdio LSP: full-buffer synchronization, compiler diagnostics/navigation and shared formatting.
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -113,6 +113,16 @@ impl Server {
         }
         Ok(())
     }
+    fn format_document(&self, params: &Value) -> Result<Value, (i32, &'static str)> {
+        let file = params["textDocument"]["uri"].as_str().and_then(path).ok_or((-32602, "formatting requires a file URI"))?;
+        let text = self.buffers.get(&file).ok_or((-32803, "formatting requires an open document"))?;
+        let formatted = tarn_fmt::format(text).map_err(|error| (-32803, match error {
+            tarn_fmt::FormatError::Syntax(_) => "cannot format a document with syntax errors",
+            tarn_fmt::FormatError::Invariant => "formatter could not preserve document syntax",
+        }))?;
+        if formatted == *text { return Ok(json!([])); }
+        Ok(json!([{"range":{"start":{"line":0,"character":0},"end":position(text,text.len() as u32)},"newText":formatted}]))
+    }
     fn symbol(&self, params: &Value, definition: bool) -> Option<Value> {
         let file = path(params["textDocument"]["uri"].as_str()?)?;
         let result = tarn_driver::check_editor_with_overlays(&file, &self.buffers).ok()?;
@@ -181,11 +191,20 @@ impl Server {
             }
             let result = match method {
                 "initialize" => {
-                    json!({"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"hoverProvider":true,"definitionProvider":true},"serverInfo":{"name":"tarn-lsp","version":env!("CARGO_PKG_VERSION")}})
+                    json!({"capabilities":{"positionEncoding":"utf-16","textDocumentSync":{"openClose":true,"change":1,"save":{"includeText":false}},"hoverProvider":true,"definitionProvider":true,"documentFormattingProvider":true},"serverInfo":{"name":"tarn-lsp","version":env!("CARGO_PKG_VERSION")}})
                 }
                 "shutdown" => {
                     self.shutdown = true;
                     Value::Null
+                }
+                "textDocument/formatting" => {
+                    match self.format_document(p) {
+                        Ok(edits) => edits,
+                        Err((code, message)) => {
+                            send(out, json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}}))?;
+                            return Ok(true);
+                        }
+                    }
                 }
                 "textDocument/hover" => self.symbol(p, false).unwrap_or(Value::Null),
                 "textDocument/definition" => self.symbol(p, true).unwrap_or(Value::Null),

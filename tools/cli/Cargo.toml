@@ -19,3 +19,5 @@ tarn_types = { path = "../../compiler/types" }
 tarn_ir = { path = "../../compiler/ir" }
 
 tarn_backend = { path = "../../compiler/backend" }
+
+tarn_fmt = { path = "../fmt" }

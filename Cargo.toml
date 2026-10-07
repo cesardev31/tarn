@@ -12,6 +12,7 @@ members = [
     "compiler/driver",
     "compiler/backend",
     "tools/cli",
+    "tools/fmt",
     "tools/lsp",
 ]
 

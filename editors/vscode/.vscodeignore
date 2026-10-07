@@ -1,0 +1,6 @@
+tests/**
+**/*.test.js
+node_modules/**/{test,tests,example,examples}/**
+node_modules/**/*.map
+package-lock.json
+icons/make_icons.py

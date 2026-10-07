@@ -88,3 +88,10 @@ records. CLI failures without source spans are `command_error` objects with
 `fmt` belongs to Phase 20. `cache` and package commands are outside Phase 19.
 `clean` remains a stub because build outputs live beside sources and the CLI
 has no safe artifact inventory. It must never guess which files to delete.
+
+## Formatting
+
+`tarn fmt [file.tarn | directory] [--check]` formats recursively, defaulting
+to `.`. `tarn fmt --stdin` formats a buffer to stdout. This command selects
+source trees, rather than the `main.tarn` entry convention of compiler commands.
+See [formatting](formatting.md) for selection, style and failure behavior.

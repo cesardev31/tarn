@@ -4,6 +4,7 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
     let Some(command) = args.first() else {
         return Ok(args);
     };
+    if command == "fmt" { return formatter_args(args); }
     let native = matches!(command.as_str(), "build" | "run" | "test");
     let source = native
         || matches!(
@@ -72,4 +73,26 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
     let mut normalized = vec![command.clone(), path.to_string_lossy().into_owned()];
     normalized.extend(options);
     Ok(normalized)
+}
+
+fn formatter_args(args: Vec<String>) -> Result<Vec<String>, String> {
+    let usage = "usage: tarn fmt [file.tarn | directory] [--check] | tarn fmt --stdin";
+    let fail = |message: &str| format!("{message}\n\n{usage}");
+    let mut path = None;
+    let mut check = false;
+    let mut stdin = false;
+    for arg in &args[1..] {
+        match arg.as_str() {
+            "--check" if !check => check = true,
+            "--stdin" if !stdin => stdin = true,
+            _ if arg.starts_with('-') => return Err(fail("unknown or repeated formatter option")),
+            _ if path.is_none() => path = Some(arg.clone()),
+            _ => return Err(fail("unexpected formatter argument")),
+        }
+    }
+    if stdin && (check || path.is_some()) { return Err(fail("--stdin cannot be combined with a path or --check")); }
+    if stdin { return Ok(vec!["fmt".into(), "--stdin".into()]); }
+    let mut result = vec!["fmt".into(), path.unwrap_or_else(|| ".".into())];
+    if check { result.push("--check".into()); }
+    Ok(result)
 }
