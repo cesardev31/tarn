@@ -33,7 +33,7 @@ tested and documented.
 | 15B | Owned blocking filesystem (ADR 0043) | **done; [report](phase-15b-report.md)** |
 | 15C | Owned lexical paths (ADR 0044) | **done; [report](phase-15c-report.md)** |
 | 15D | Owned blocking child processes (ADR 0045) | **done; [report](phase-15d-report.md)** |
-| 16 | Bounded async HTTP/1.1 server over buffered I/O | **plan defined; not implemented**: [16A–F plan](phase-16-plan.md), [proposed ADR 0046](adr/0046-bounded-async-http.md) |
+| 16 | Bounded async HTTP/1.1 server over buffered I/O | **done within documented server subset**: [16A–F plan](phase-16-plan.md), [report](phase-16-report.md), [ADR 0046](adr/0046-bounded-async-http.md) |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
 | 19 | Formatter (basic) | |
 | 20 | VS Code extension (TextMate) | **started**: language + highlighting |

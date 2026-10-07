@@ -1145,6 +1145,23 @@ Detailed requirements and open choices: [dependency security](docs/dependency-se
 - High-level text functions belong in `stdlib/string`; primitive methods
   remain in core. See [ADR 0042](docs/adr/0042-string-essentials.md).
 
+## Stable HTTP rules (Phase 16)
+
+- HTTP lives in ordinary Tarn stdlib/http; module names never confer intrinsic
+  authority. Keep protocol parsing/encoding/state out of the native runtime.
+- Connection owns its TcpStream and buffers. Protocol state is not resource
+  liveness. Drop closes and discards output; response completion requires flush.
+- Requests/headers/bodies are bounded owned data. Views borrow owners; trailers
+  stay separate and cannot override routing/framing/authentication headers.
+- Reject ambiguous framing and never reuse failed input. Preflight all outbound
+  fields before transmission; never send another response after partial failure.
+- Deadlines cover whole stages, not individual bytes. Local timeout abandonment
+  uses ordinary loans and verified frame destruction; no detached loser.
+- Generic manual pollers can return borrows of their own storage. Do not consume
+  them while returning such results or weaken provenance to make a timeout fit.
+- HTTP errors use explicit Result handling; no implicit io conversion, special
+  HTTP main ABI or capability inference. See [ADR 0046](docs/adr/0046-bounded-async-http.md).
+
 ## Tests
 
 Tests are part of the language specification.

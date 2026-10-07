@@ -123,3 +123,37 @@ fn main() Result<void, io.Error> {
     balanced(&out);
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "1");
 }
+
+#[test]
+fn local_operation_timeout_preserves_and_releases_borrowed_storage() {
+    let (out, _) = run(&compile(r#"import "io"
+import "time"
+import "runtime"
+struct Counter { value i32 }
+async fn change(value &mut Counter, delay u64) Result<void, io.Error> {
+    try await time.sleep(time.Duration.milliseconds(delay))
+    value.value = 7
+    return Ok(())
+}
+async fn ready() Result<void, io.Error> { return Ok(()) }
+async fn app(owner &runtime.Execution) Result<void, io.Error> {
+    var value = Counter{value: 1}
+    if !(try await runtime.run_timeout(runtime.Operation.new(owner, change(&mut value, u64(0))), time.Duration.milliseconds(u64(1000)))) { panic("completion lost") }
+    print(value.value)
+    value.value = 2
+    if try await runtime.run_timeout(runtime.Operation.new(owner, change(&mut value, u64(10000))), time.Duration.milliseconds(u64(5))) { panic("timeout lost") }
+    print(value.value)
+    if !(try await runtime.run_timeout(runtime.Operation.new(owner, ready()), time.Duration.milliseconds(u64(0)))) { panic("tie lost") }
+    print(9)
+    return Ok(())
+}
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var op = runtime.Operation.new(&execution, app(&execution))
+    try try execution.block_on(&mut op)
+    return Ok(())
+}
+"#, "borrowed-timeout"));
+    balanced(&out);
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "7\n2\n9\n");
+}

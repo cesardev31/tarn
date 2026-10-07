@@ -6,6 +6,22 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("HTTP header view cannot escape owner", Some("E4201"), "import \"http\"\nfn bad(h http.Header) &[]u8 { return h.value() }"),
+    ("HTTP header cannot move while borrowed", Some("E4103"), "import \"http\"\nfn bad(h http.Header) { view := h.value()\n moved := h\n print(view.len()) }"),
+    ("HTTP request body cannot escape owner", Some("E4201"), "import \"http\"\nfn bad(r http.Request) &[]u8 { return r.body() }"),
+    ("HTTP request body prevents consumption", Some("E4103"), "import \"http\"\nfn bad(r http.Request) { bytes := r.body()\n moved := r.into_body()\n print(bytes.len()) }"),
+    ("HTTP request cannot overwrite while borrowed", Some("E4102"), "import \"http\"\nfn bad(a http.Request, b http.Request) { var r = a\n view := r.method()\n r = b\n print(view) }"),
+    ("HTTP request view cannot survive drop", Some("E4105"), "import \"http\"\nfn bad(r http.Request) { var view: &[]u8\n { owned := r\n view = owned.body() }\n print(view.len()) }"),
+    ("HTTP response builder consumes owner", Some("E4001"), "import \"http\"\nfn bad(r http.Response) { moved := r.close_connection()\n print(r.status()) }"),
+    ("HTTP connection cannot close twice", Some("E4001"), "import \"http\"\nfn bad(c http.Connection) { c.close()\n c.close() }"),
+    ("HTTP connection does not grant Share", Some("E3047"), "import \"http\"\nfn bad(c http.Connection) { scope { spawn fn() { loan := &c } } }"),
+    ("HTTP connection transfers to native task", None, "import \"http\"\nfn good(c http.Connection) { task := spawn move fn() { c.close() }\n task.join() }"),
+    ("HTTP owned request supports shared workers", None, "import \"http\"\nfn good(r http.Request) { scope { spawn fn() { print(r.body().len()) } } }"),
+    ("HTTP pending read retains exclusive connection", Some("E4101"), "import \"http\"\nimport \"runtime\"\nasync fn bad(c http.Connection, owner &runtime.Execution, r http.Response) { var conn = c\n reading := conn.read_request(owner)\n writing := conn.write_response(owner, r)\n await reading\n await writing }"),
+    ("HTTP borrowed connection cannot spawn async task", Some("E4209"), "import \"http\"\nimport \"runtime\"\nfn bad(c http.Connection, owner &runtime.Execution) { var conn = c\n task := owner.spawn_async(conn.read_request(owner)) }"),
+    ("HTTP owned connection supports async task", None, "import \"http\"\nimport \"runtime\"\nasync fn use_conn(c http.Connection, owner &runtime.Execution) { var conn = c\n await conn.read_request(owner) }\nfn good(c http.Connection, owner &runtime.Execution) { task := owner.spawn_async(use_conn(c, owner)) }"),
+    ("HTTP abandoned operation releases connection loan", None, "import \"http\"\nimport \"runtime\"\nfn good(c http.Connection, owner &runtime.Execution) { var conn = c\n operation := runtime.Operation.new(owner, conn.read_request(owner))\n operation.finish()\n conn.close() }"),
+    ("HTTP stream storage remains private", Some("E3014"), "import \"http\"\nfn bad(c http.Connection) { var conn = c\n conn.stream.close() }"),
     ("process cannot wait after move", Some("E4001"), "import \"process\"\nfn bad(p process.Process) { moved := p\n p.wait() }"),
     ("process cannot wait twice", Some("E4001"), "import \"process\"\nfn bad(p process.Process) { p.wait()\n p.wait() }"),
     ("process cannot move with live loan", Some("E4103"), "import \"process\"\nfn bad(p process.Process) { r := &p\n moved := p\n print(r.id()) }"),
@@ -112,8 +128,8 @@ const CASES: &[(&str, Option<&str>, &str)] = &[
     ("owned task containing local loan", Some("E4206"), "fn main() { x: i64 := 42\n r := &x\n t := spawn move fn() i64 { return r.abs() }\n t.join() }") ,
     ("task result cannot borrow its environment", Some("E4201"), "fn main() { x := 42\n t := spawn move fn() &i64 { return &x }\n t.join() }") ,
     ("task handle ownership transfer", None, "fn main() { t := spawn move fn() i64 { return 42 }\n u := t\n print(u.join()) }") ,
-    ("opaque std return rejected", Some("E3040"), "import \"http\"\nfn main() {\n    x := http.run(\"file\")\n}"),
-    ("opaque std type rejected", Some("E3040"), "import \"http\"\nfn observe(x &http.Process) {}"),
+    ("opaque std return rejected", Some("E3040"), "import \"tls\"\nfn main() {\n    x := tls.run(\"file\")\n}"),
+    ("opaque std type rejected", Some("E3040"), "import \"tls\"\nfn observe(x &tls.Process) {}"),
     ("opaque prelude error rejected", Some("E3040"), "fn observe(x &Error) {}"),
     (
         "modeled result loan remains live",

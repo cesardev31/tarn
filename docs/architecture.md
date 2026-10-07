@@ -207,3 +207,17 @@ consuming signatures binding resource identities. Process drop waits; pipe
 drop closes. Backend code executes verified plans without inferring ownership.
 There is no shell interpreter, process registry, detach or async integration.
 See [ADR 0045](adr/0045-blocking-processes.md).
+
+## Bounded HTTP/1.1 (Phase 16)
+
+`stdlib/http` is an ordinary bundled Tarn module, with local override and editor
+source support but no native privilege. It owns bounded request/response/header
+bytes and a Connection containing TcpStream plus both existing net buffers.
+Protocol states govern transaction ordering, never descriptor liveness. Parsing,
+framing, preflight, deadlines and response encoding remain in Tarn; runtime/backend
+execute only existing I/O, timers, wake operations and verified post-drop.
+The concrete-result runtime.run_timeout consumes a local Operation and writes
+stage data through ordinary caller loans. No generic result can escape a destroyed
+manual poller. Native test tracing observes frames/buffers/wakers/task allocations
+without providing an ownership registry. See [HTTP](http.md) and
+[ADR 0046](adr/0046-bounded-async-http.md).

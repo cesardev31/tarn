@@ -1,9 +1,10 @@
 # Phase 16 implementation plan: bounded async HTTP/1.1
 
-Status: defined proposal; implementation has not started.
+Status: complete within the documented server subset; all six stage gates passed.
+Final API: [HTTP](http.md). Implementation evidence: [report](phase-16-report.md).
 Design decisions: [ADR 0046](adr/0046-bounded-async-http.md).
 Baseline: Phase 15D, commit `f262308`, 204 workspace tests passed, no warnings,
-one existing benchmark ignored. This document does not claim HTTP tests passed.
+one existing benchmark ignored. Final Phase 16 validation is recorded in the report.
 
 ## 1. Goal and scope
 
@@ -49,13 +50,15 @@ Use owned connection tasks and local direct awaits for request handlers.
 Do not add scoped async tasks or a lifetime checker for HTTP. Keep buffers in
 net until a future generic async I/O phase justifies moving them.
 
-Add one prerequisite in runtime, written in Tarn: a consuming
-`Operation<R>.run_timeout(duration)` returning `Result<Option<R>, io.Error>`.
-It polls the operation and timer with existing Wakers/parent links. Completion
-wins ties, as with AsyncTask.join_timeout. Timeout destroys the owned operation
-through existing abandonment/drop paths; it never leaves a detached operation.
-The operation may hold ordinary loans of caller storage. Consuming completion
-must release them before the caller accesses that storage again.
+The implementation gate resolved a concrete issue with the initially proposed
+`Operation<R>.run_timeout`: an arbitrary manual poller may return a borrow of
+its own storage. Consuming it cannot safely return every possible R under the
+current generic model. The final prerequisite is ordinary Tarn
+`runtime.run_timeout(operation Operation<Result<void, io.Error>>, duration)`
+returning `Result<bool, io.Error>` (true completed, false timed out). Stages
+write owned results through ordinary borrowed caller output slots. This avoids
+new capability bounds or changes to provenance; native tests prove loan release,
+completion priority and abandonment. Timer errors remain io.Error.
 
 This helper is the first implementation gate. Prove loan preservation/release,
 frame cleanup and timer/Waker deregistration before using it in HTTP. Fix only
@@ -72,7 +75,7 @@ net, time and runtime APIs. Do not grant http intrinsic/private stdlib access.
 Recognize the official source in editor analysis without granting native trust.
 Core and the native HTTP ABI remain unchanged: there is no native HTTP ABI.
 
-Planned public shapes (method spelling will be checked against current syntax):
+Implemented public shapes (exact method spellings are documented in HTTP):
 
 | Type | Ownership and application API |
 |---|---|
@@ -84,7 +87,7 @@ Planned public shapes (method spelling will be checked against current syntax):
 | Timeouts | Copy header/body/write Durations, validated as finite positive spans. |
 | Error | Copy enum distinguishing I/O, protocol, limits, timeout stage, invalid configuration/response/text and invalid connection state. |
 
-Core connection contracts:
+Core connection contracts (implemented):
 
 - `Connection.new(stream, limits, timeouts) -> Result<Connection, Error>`:
   consumes the stream, validates configuration and enables nonblocking mode;
@@ -96,7 +99,7 @@ Core connection contracts:
   `Result<void, Error>`. Consumes the response; validates it before emitting
   bytes and flushes explicitly within its write deadline.
 - `reject(&mut self, owner &Execution, status u16)` async:
-  one empty final error response with Connection: close. Only permitted before
+  one empty final error response (status 400–599) with Connection: close. Only permitted before
   response transmission has begun, including after a request-reading failure.
 - `close(self) -> Result<void, Error>`: consumes and closes the stream;
   buffered bytes are discarded, never implicitly flushed.
@@ -158,7 +161,8 @@ Determine framing once from the validated head, before allocation/body reads.
   (even identical values), overflow and lengths above configured limits.
 - Both Transfer-Encoding and Content-Length: reject 400 and close.
 - Transfer-Encoding: one field and a single case-insensitive chunked coding
-  without parameters. Repeated chunked is invalid; other coding combinations
+  without parameters. Coding parameters/malformed coding syntax are rejected
+  with 400 in the v0 subset. Repeated chunked is invalid; other coding combinations
   are unsupported (501), with no fallback to length or close-delimited input.
 - Chunk sizes: checked hexadecimal parsing, exact CRLF after each chunk and
   terminal zero chunk. Bound metadata and chunk count as well as decoded bytes.
@@ -232,9 +236,9 @@ Defaults, adjustable within checked configuration:
 | Entire response write + flush deadline | 10 seconds |
 
 Deadlines are monotonic, per whole stage, not reset for each byte/chunk. Reuse
-consuming Operation.run_timeout; all pending loans/frames are released on timeout
-before marking the connection failed. No detached timeout loser. A zero or
-unrepresentable duration is invalid configuration, not an infinite timeout.
+consuming runtime.run_timeout; all pending loans/frames are released on timeout
+before marking the connection failed. No detached timeout loser. Duration spans outside 1–4294967295 milliseconds are invalid configuration,
+not an infinite timeout.
 Handler CPU time/application awaits are not preempted by these I/O deadlines.
 The server example uses bounded handlers; this is not CPU preemption or rate
 limiting. Admission caps active connection tasks; when full, await an existing
@@ -272,7 +276,7 @@ allocation/task failures are not made fallible by this phase.
 
 | Stage | Deliverable | Gate before proceeding |
 |---|---|---|
-| 16A | ADR/API skeleton, timeout prerequisite, owned types and module/editor loading | Native timeout success/tie/expiry/abandonment and loan rejection/release tests; no new trust or syntax. |
+| 16A | ADR/API skeleton, timeout prerequisite, owned types and module/editor loading | Native concrete-result timeout success/tie/expiry/abandonment and loan rejection/release tests; no new trust or syntax. |
 | 16B | Pure head codec and bounded async head reading | Complete valid/invalid head corpus; byte fragmentation and clean/partial EOF; strict Host/Expect/framing decisions. |
 | 16C | Length/chunked body decoding and trailers | Deterministic binary payloads, extension/trailer boundaries, overflow/limits, leftover bytes preserved for a following request. |
 | 16D | Response encoder and Connection transaction state | Exact independent wire oracle for ordinary/HEAD/204/304/205 replies, reserved-header rejection, partial-write/flush behavior and close decisions. |

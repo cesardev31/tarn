@@ -1,0 +1,33 @@
+import "http"
+import "runtime"
+import "io"
+import "time"
+async fn app(owner &runtime.Execution) Result<void, io.Error> {
+    var body = Vec.new()
+    body.push(u8(0))
+    body.push(u8(255))
+    var response: http.Response
+    match http.Response.bytes(u16(200), body) {
+        Ok(value) => { response = value }
+        Err(error) => { panic("response constructor") }
+    }
+    moved := response.close_connection()
+    print(moved.status())
+    var header: http.Header
+    match http.Header.text(&"X-Name", &" owned ") {
+        Ok(value) => { header = value }
+        Err(error) => { panic("header constructor") }
+    }
+    cloned := header.clone()
+    print(cloned.name())
+    print(cloned.value().len())
+    operation := runtime.Operation.new(owner, time.sleep(time.Duration.milliseconds(u64(10000))))
+    print(try await runtime.run_timeout(operation, time.Duration.milliseconds(u64(1))))
+    return Ok(())
+}
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var operation = runtime.Operation.new(&execution, app(&execution))
+    try try execution.block_on(&mut operation)
+    return Ok(())
+}

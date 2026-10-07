@@ -517,3 +517,13 @@ Owned lexical POSIX paths are documented in [the path module](path.md)
 Blocking child execution is documented in [the process module](process.md)
 (Phase 15D). Command configuration owns its text; Process is a non-Copy,
 Transfer owner whose consuming wait or verified destruction reaps the child.
+
+### Bounded async HTTP
+
+`import "http"` supplies an ordinary server-side HTTP/1.1 module. Owned
+Connection/Request/Response/Header use the existing move, loan, capability and
+post-drop model; no HTTP syntax or native contracts are added. Complete bounded
+binary bodies, sequential keep-alive, strict framing and stage deadlines are
+specified in [HTTP](http.md) and [ADR 0046](adr/0046-bounded-async-http.md).
+See [the native server example](../examples/http_server.tarn). This phase adds no
+implicit try conversion or HTTP-specific main ABI.

@@ -1,0 +1,81 @@
+// Bounded HTTP/1.1 example: one cooperative task per owned connection.
+import "http"
+import "net"
+import "io"
+import "runtime"
+fn reply(request http.Request) Result<http.Response, http.Error> {
+    if request.target() == &"/health" {
+        if request.method() == &"GET" || request.method() == &"HEAD" { return http.Response.text(u16(200), &"ok\n") }
+        return (try http.Response.bytes(u16(405), Vec.new())).header(try http.Header.text(&"allow", &"GET, HEAD"))
+    }
+    if request.target() == &"/echo" {
+        if request.method() == &"POST" { return http.Response.bytes(u16(200), request.into_body()) }
+        return (try http.Response.bytes(u16(405), Vec.new())).header(try http.Header.text(&"allow", &"POST"))
+    }
+    return http.Response.bytes(u16(404), Vec.new())
+}
+async fn handle(stream net.TcpStream, owner &runtime.Execution) {
+    var conn: http.Connection
+    match http.Connection.new(stream, http.Limits.defaults(), http.Timeouts.defaults()) {
+        Ok(value) => { conn = value }
+        Err(error) => { return }
+    }
+    for {
+        var request: http.Request
+        received := await conn.read_request(owner)
+        match received {
+            Ok(result) => match result {
+                Some(value) => { request = value }
+                None => { return }
+            }
+            Err(error) => {
+                match error { http.Error.Io(original) => { return }
+                    _ => {} }
+                await conn.reject(owner, error.status())
+                return
+            }
+        }
+        var response: http.Response
+        match reply(request) {
+            Ok(value) => { response = value }
+            Err(error) => {
+                await conn.reject(owner, u16(500))
+                return
+            }
+        }
+        match await conn.write_response(owner, response) {
+            Ok(value) => {}
+            Err(error) => { return }
+        }
+    }
+}
+// limit == 0 runs normally; finite limits make native tests terminate without
+// signals or detached tasks. Admission awaits an owned handle when at capacity.
+async fn serve(listener net.TcpListener, owner &runtime.Execution, limit usize, capacity usize) Result<void, io.Error> {
+    var socket = listener
+    var tasks: Vec<runtime.AsyncTask<void>> = Vec.new()
+    var accepted = usize(0)
+    for limit == usize(0) || accepted < limit {
+        if tasks.len() == capacity {
+            match tasks.pop() { Some(task) => { await task.join() }
+                None => {} }
+        }
+        stream := try await socket.accept_async()
+        tasks.push(owner.spawn_async(handle(stream, owner)))
+        accepted = accepted + usize(1)
+    }
+    for {
+        match tasks.pop() { Some(task) => { await task.join() }
+            None => { break } }
+    }
+    return Ok(())
+}
+fn main() Result<void, io.Error> {
+    var listener = try net.TcpListener.bind(&"127.0.0.1:8080")
+    print((try listener.local_addr()).port())
+    try listener.set_nonblocking(true)
+    execution := try runtime.Execution.new()
+    var operation = runtime.Operation.new(&execution, serve(listener, &execution, usize(0), usize(128)))
+    try try execution.block_on(&mut operation)
+    return Ok(())
+}

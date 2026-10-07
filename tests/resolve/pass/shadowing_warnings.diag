@@ -1,7 +1,7 @@
-warning[W2003]: unused import `http`
+warning[W2003]: unused import `json`
  --> tests/resolve/pass/shadowing_warnings.tarn:1:8
   |
-1 | import "http"
+1 | import "json"
   |        ^^^^^^
   |
   = help: remove the import
@@ -36,12 +36,12 @@ warning[W2002]: `print` shadows the builtin function `print`
    |
    = help: use a different name
 
-warning[W2002]: `http` shadows the module `http`
+warning[W2002]: `json` shadows the module `json`
   --> tests/resolve/pass/shadowing_warnings.tarn:17:5
    |
- 1 | import "http"
+ 1 | import "json"
    |        ------ declared here
-17 |     http := 1
+17 |     json := 1
    |     ^^^^
    |
    = help: use a different name

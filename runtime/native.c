@@ -11,6 +11,15 @@
 #include <inttypes.h>
 #include <math.h>
 
+/* Opt-in allocation observations for compiler tests; no ownership decisions. */
+static void exec_trace(const char *kind, const char *event, uintptr_t storage) {
+    if (storage && getenv("TARN_TRACE_EXEC")) {
+        flockfile(stderr);
+        fprintf(stderr, "exec:%s:%s:%" PRIxPTR "\n", kind, event, storage);
+        funlockfile(stderr);
+    }
+}
+
 typedef struct { uint64_t len; unsigned char bytes[]; } TarnString;
 /* Owned string pointers are unique. Literals allocate; moves transfer ownership. */
 TarnString *tarn_rt_string(const unsigned char *data, uint64_t len) {
@@ -84,16 +93,19 @@ double tarn_rt_rem_f64(double a, double b) { return fmod(a, b); }
 void *tarn_rt_env_alloc(uint64_t size) {
     void *p = malloc((size_t)size);
     if (!p) abort();
+    exec_trace("storage", "alloc", (uintptr_t)p);
     return p;
 }
-void tarn_rt_env_free(void *p) { free(p); }
+void tarn_rt_env_free(void *p) { exec_trace("storage", "free", (uintptr_t)p); free(p); }
 /* Vec storage: reallocate to `count` elements of `size` bytes. Overflow and
  * exhaustion abort. Element ownership and destruction stay in compiled code. */
 void *tarn_rt_vec_grow(void *data, uint64_t count, uint64_t size) {
     if (size != 0 && count > UINT64_MAX / size) abort();
     uint64_t bytes = count * size;
+    exec_trace("storage", "free", (uintptr_t)data);
     void *p = realloc(data, bytes ? (size_t)bytes : 1);
     if (!p) abort();
+    exec_trace("storage", "alloc", (uintptr_t)p);
     return p;
 }
 void tarn_rt_env_drop(void *p) {
@@ -568,6 +580,7 @@ void tarn_rt_net_exec_new(TarnNetRaw *out, TarnPoll *poll) {
 }
 void tarn_rt_net_waker_new(uintptr_t *out, TarnExecution *owner) {
     TarnWake *wake = calloc(1, sizeof(*wake)); if (!wake) tarn_rt_fault();
+    exec_trace("waker", "alloc", (uintptr_t)wake);
     wake->identity = net_identity(); wake->owner = owner; wake->fd = -1;
     wake->queued = 1; wake->next = owner->head; owner->head = wake;
     *out = (uintptr_t)wake;
@@ -629,7 +642,7 @@ void tarn_rt_net_waker_drop(TarnWake *wake) {
     TarnWake **link = &wake->owner->head;
     while (*link && *link != wake) link = &(*link)->next;
     if (!*link) tarn_rt_fault();
-    *link = wake->next; free(wake);
+    *link = wake->next; exec_trace("waker", "free", (uintptr_t)wake); free(wake);
 }
 void tarn_rt_net_exec_drop(TarnExecution *owner) {
     if (owner->head) tarn_rt_fault(); /* Ordinary loans must keep Execution alive. */
@@ -650,6 +663,7 @@ TarnAsyncTask *tarn_rt_async_task_new(TarnExecution *owner, uint64_t size) {
     TarnAsyncTask *task = calloc(1, sizeof(TarnAsyncTask) + (size ? size : 1));
     if (!task) abort();
     task->owner = owner; task->refs = 2;
+    exec_trace("task", "alloc", (uintptr_t)task);
     return task;
 }
 void *tarn_rt_async_task_result(TarnAsyncTask *task) { return task->result; }
@@ -673,7 +687,7 @@ void tarn_rt_async_task_wait(TarnNetRaw *out, TarnAsyncTask *task, TarnWake *wak
 int8_t tarn_rt_async_task_abandoned(TarnAsyncTask *task) { return (int8_t)task->abandoned; }
 void tarn_rt_async_task_release(TarnAsyncTask *task) {
     if (task->refs == 0) tarn_rt_fault();
-    if (--task->refs == 0) free(task);
+    if (--task->refs == 0) { exec_trace("task", "free", (uintptr_t)task); free(task); }
 }
 /* Handle destruction: 1 when compiled code must destroy an untaken result.
  * Otherwise a pending task is marked abandoned for structured destruction. */

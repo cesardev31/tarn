@@ -289,3 +289,33 @@ pub async fn AsyncTask<R>.join_timeout(self, duration time.Duration) Result<Opti
         io._async_park()
     }
 }
+// Consume a local operation with a whole-operation deadline. Unlike spawning,
+// this preserves ordinary loans of caller storage. The losing operation/timer
+// is destroyed by verified frame cleanup, never detached. Completion wins ties.
+pub async fn run_timeout(input Operation<Result<void, io.Error>>, duration time.Duration) Result<bool, io.Error> {
+    var operation = input
+    var timer = try time.Timer.after(duration)
+    for {
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<void, io.Error>> { return operation.poll_with(waker) }) {
+            io.Progress.Ready(value) => {
+                var released = false
+                io._with_waker(fn(waker &io.Waker) bool {
+                    released = true
+                    io._disarm(waker)
+                    return released
+                })
+                try value
+                return Ok(true)
+            }
+            io.Progress.Pending => {}
+        }
+        match io._with_waker(fn(waker &io.Waker) io.Progress<Result<void, io.Error>> { return io._leaf(waker, time.poll_timer(waker, &mut timer)) }) {
+            io.Progress.Ready(result) => {
+                try result
+                return Ok(false)
+            }
+            io.Progress.Pending => {}
+        }
+        io._async_park()
+    }
+}

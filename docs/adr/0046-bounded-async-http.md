@@ -1,6 +1,7 @@
 # ADR 0046: bounded async HTTP/1.1 server foundation
 
-Status: proposed; the design is defined, implementation/evidence are pending.
+Status: accepted. Phase 16 matches the documented bounded server subset;
+[implementation evidence](../phase-16-report.md).
 Detailed stages, API, limits, error policies and tests:
 [Phase 16 plan](../phase-16-plan.md).
 
@@ -8,10 +9,10 @@ Detailed stages, API, limits, error policies and tests:
 
 Phases 11–15 supply owned native tasks/resources, nonblocking TCP, source async,
 Execution/AsyncTask, timers, TCP-specific buffered I/O and owned UTF-8 utilities.
-There is no implemented HTTP library. Scoped async loans and generic async I/O
+The phase begins without an HTTP library. Scoped async loans and generic async I/O
 remain deferred; HTTP must fit the existing ownership and module architecture.
 
-## Proposed decisions
+## Decisions
 
 1. Implement server-side HTTP/1.1 request decoding and response encoding in
    ordinary `stdlib/http`, using only public lower-layer APIs. No native HTTP
@@ -35,8 +36,9 @@ remain deferred; HTTP must fit the existing ownership and module architecture.
    transaction metadata independently of application requests. Explicit flush
    completes a response; destruction discards output and closes normally.
 7. Use monotonic absolute deadlines per complete head/body/write stage. Add
-   only a consuming Operation.run_timeout helper over existing poll/Timer/Waker
-   semantics. Completion wins ties; timeout abandons through verified frame
+   only consuming runtime.run_timeout for Operation<Result<void, io.Error>> over
+   existing poll/Timer/Waker semantics, with owned stage results in caller output
+   slots. Completion wins ties; timeout abandons through verified frame
    destruction. No spawned task borrows a local Connection, no detached loser,
    scoped async feature, scheduler redesign or general cancellation API.
 8. Use structured http.Error with explicit io conversion. Normal peer errors
@@ -61,10 +63,12 @@ other HTTP components. Strict rejection is the v0 policy; this is a documented
 subset, not blanket RFC conformance. Incoming chunking is included because it
 is a basic HTTP/1.1 framing mechanism, not a compression/framework feature.
 
-Spawning per-stage tasks borrowing Connection contradicts E4209. A consuming
-local Operation timeout must be proved with existing loans/abandonment first.
-If that cannot be expressed soundly, report the concrete blocker instead of
-weakening borrowing. Generic async interfaces and scoped tasks are unnecessary
+Spawning per-stage tasks borrowing Connection contradicts E4209. The originally
+proposed generic consuming timeout is unsafe for arbitrary
+manual poller results that may borrow poller storage. The concrete void-result
+helper and ordinary output loans avoid that contradiction without weakening
+provenance. Native tests prove local completion/expiry release and abandonment.
+Future timeout generalization must preserve those borrowing guarantees. Generic async interfaces and scoped tasks are unnecessary
 for a TCP-only server with owned connection handlers.
 
 A client, router, streaming bodies and TLS would expand the phase substantially.
@@ -72,10 +76,18 @@ Separate them until a safe interoperable protocol core is tested. Head deadlines
 include idle waiting; body/write deadlines cover whole stages. No CPU preemption
 or handler-timeout promise is implied by I/O deadlines.
 
-## Acceptance gate
+## Acceptance evidence
 
-Do not accept this ADR based on documentation alone. The Phase 16 subset,
-timeout prerequisite, protocol/error/state rules, owned resource behavior,
-adversarial loopback tests, cleanup traces, memory-safety contracts and complete
-regression/mutation suites must match the plan. Record any justified scope/API
-adjustment before acceptance. Stop after Phase 16.
+`cargo test --workspace --locked -j4`: 219 passed, no warnings, one existing
+benchmark ignored. Native HTTP byte oracles, adversarial loopback/fragmentation,
+1000 concurrent echoes, stage timeouts/backpressure, exact cleanup ledgers,
+canonical ownership/capability cases and both mutation suites pass. Prior Phase
+11–15 regression suites remain green. Existing curl also verifies the server on
+loopback without an internet or package dependency.
+
+The generic timeout proposal was narrowed deliberately to concrete void-result
+operations and borrowed caller output slots, with native proof of loan release,
+completion priority and abandonment. No capability/lifetime safety was weakened.
+The accepted API, defaults, error/EOF/reset policy, authority subset and ownership
+model are documented in [HTTP](../http.md). This accepts the specified server
+subset, not every HTTP/1.1 feature or a client/framework. Stop after Phase 16.
