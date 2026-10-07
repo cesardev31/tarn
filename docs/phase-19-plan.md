@@ -1,7 +1,8 @@
 # Phase 19 plan: integrated CLI
 
-Status: proposed; no stage started. An ADR is required before 19B (test
-discovery conventions) because they become part of the language contract.
+Status: 19A complete. Stages 19B and 19C have not started; 19D remains
+deferred while outputs live beside sources. An ADR is required before 19B
+(test discovery conventions) because they become part of the language contract.
 Baseline: Phase 18.
 
 ## 1. Goal and scope
@@ -11,12 +12,12 @@ test, and iterate on change, without shell scripts or a second tool. It
 must stay machine-friendly (stable exit codes, `--json`) as AGENTS.md
 requires for coding agents.
 
-Current state:
+Current state after 19A:
 
 - Working: `check [--json]`, `resolve`, `types`, `ir`, `ast`, `lex`,
-  `build [-o] [--link]`, `run [--link]`, `version`.
+  `build [-o] [--link] [--json]`, `run [--link] [--json]`, `version`.
 - Stubbed with exit 2: `test`, `fmt`, `clean`, `cache`.
-- Argument parsing is hand-written per command with inconsistent errors.
+- Shared internal argument validation; source entries default to `main.tarn`.
 
 Included: consistent argument handling, a project entry convention, `tarn
 test`, `--watch`, JSON output for native commands, `clean`.
@@ -119,3 +120,30 @@ planned content-addressed store exists, and keep the stub.
 
 19A first (unblocks the rest), then 19C (small, high daily value), then 19B
 (largest; needs the ADR), then 19D only if a build directory exists.
+
+## 5. Implementation progress
+
+Completed 19A:
+
+- Shared internal argument validation for all commands; unknown options, extra
+  positional arguments and missing flag values exit 2 with command usage.
+- Source commands default to `main.tarn` and accept directories. Options may
+  precede the entry; native commands preserve repeated `--link` grants.
+- `run -- ...` explicitly rejects program arguments until their API is designed.
+- Exit codes are described in CLI help. Existing output placement is preserved.
+- Public CLI regressions cover usage errors, entry discovery and option ordering.
+
+- Native `build --json` / `run --json` preserve frontend diagnostic JSON Lines.
+  Failures without source spans emit one object on stdout with `kind` equal to
+  `command_error`, a `stage` (`load`, `internal`, `output`, `native`, or `execute`),
+  and an escaped `message`. `native` covers backend and linker errors.
+- Successful builds emit no JSON record. `run` inherits the program's stdout
+  and stderr unchanged and propagates its exit status; program output is not
+  wrapped in JSON. Usage errors remain text on stderr with exit 2.
+- Validation: `cargo test -p tarn` passes command-surface, native JSON, build/run,
+  and link regressions. The JSON gate covers compiler diagnostics, escaped
+  messages, source-overwrite protection, unsupported backend operations,
+  missing libraries and unresolved symbols.
+
+Next: 19C watch support, then the ADR and implementation for 19B. 19D stays
+stubbed because build outputs still live beside their sources.

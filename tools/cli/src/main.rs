@@ -1,5 +1,7 @@
 //! `tarn` — the single official CLI.
 
+mod args;
+
 use std::process::ExitCode;
 use tarn_diagnostics::SourceMap;
 
@@ -7,24 +9,35 @@ const USAGE: &str = "\
 tarn — the Tarn language toolchain
 
 usage:
-    tarn lex <file.tarn> [--json]    print the token stream (debugging)
-    tarn ast <file.tarn>             parse and print the syntax tree
-    tarn check <file.tarn> [--json]  lex, parse and resolve names; report diagnostics
-    tarn resolve <file.tarn>         print what every name resolves to
-    tarn types <file.tarn>           print the type of every local and parameter
-    tarn ir <file.tarn>              print typed IR; --drops prints executable drops
-    tarn build <file.tarn> [-o path] [--link lib]...
+    tarn lex [entry] [--json]    print the token stream (debugging)
+    tarn ast [entry]             parse and print the syntax tree
+    tarn check [entry] [--json]  lex, parse and resolve names; report diagnostics
+    tarn resolve [entry]         print what every name resolves to
+    tarn types [entry]           print the type of every local and parameter
+    tarn ir [entry]              print typed IR; --drops prints executable drops
+    tarn build [entry] [-o path] [--link lib]... [--json]
                                      emit a Linux x86_64 executable; each
                                      --link grants a system C library
-    tarn run <file.tarn> [--link lib]...
+    tarn run [entry] [--link lib]... [--json]
                                      build temporarily and execute
     tarn version                     print the compiler version
 
-planned: build, run, test, check, fmt, clean, cache
+Entry defaults to ./main.tarn; directories select <dir>/main.tarn.
+Exit codes: 0 success, 1 compilation/link failure, 2 usage error.
+run propagates the program exit code.
+
+planned: test, fmt, clean, cache
 ";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = match args::normalize(args) {
+        Ok(args) => args,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::from(2);
+        }
+    };
     match args.first().map(String::as_str) {
         Some("lex") => cmd_lex(&args[1..]),
         Some("ast") => cmd_ast(&args[1..]),
@@ -216,37 +229,50 @@ fn cmd_native(args: &[String], run: bool) -> ExitCode {
         eprintln!("error: usage: tarn {} file.tarn{} [--link library]...", if run { "run" } else { "build" }, if run { "" } else { " [-o path]" });
         return ExitCode::from(2);
     };
+    // Arguments have already been validated by the shared parser.
+    let json = args.iter().any(|arg| arg == "--json");
     let mut explicit = None;
     let mut libraries = Vec::new();
     let mut rest = args[1..].iter();
     while let Some(arg) = rest.next() {
-        match (arg.as_str(), rest.next()) {
-            ("-o", Some(out)) if !run && explicit.is_none() => explicit = Some(std::path::PathBuf::from(out)),
-            ("--link", Some(library)) if tarn_backend::valid_library(library) => libraries.push(library.clone()),
-            ("--link", Some(library)) => {
-                eprintln!("error: invalid library `{library}`: use a name such as `sqlite3` or an exact file such as `:libsqlite3.so.0`");
-                return ExitCode::from(2);
-            }
-            _ => { eprintln!("error: invalid native command arguments"); return ExitCode::from(2); }
+        match arg.as_str() {
+            "-o" => explicit = rest.next().map(std::path::PathBuf::from),
+            "--link" => libraries.push(rest.next().expect("validated library").clone()),
+            "--json" => {},
+            _ => unreachable!("validated native option"),
         }
     }
     let res = match tarn_driver::check(std::path::Path::new(path)) {
-        Ok(r) => r, Err(e) => { eprintln!("error: {e}"); return ExitCode::from(1); }
+        Ok(r) => r, Err(e) => { native_error(json, "load", &e.to_string()); return ExitCode::from(1); }
     };
-    for d in &res.diagnostics { eprint!("{}", d.render(&res.program.sources)); }
+    for d in &res.diagnostics {
+        if json { println!("{}", d.to_json(&res.program.sources)); }
+        else { eprint!("{}", d.render(&res.program.sources)); }
+    }
     if res.has_errors() { return ExitCode::from(1); }
-    let (Some(p), Some(t)) = (&res.drops, &res.typed) else { eprintln!("error: compiler bug: missing post-drop IR"); return ExitCode::from(1); };
+    let (Some(p), Some(t)) = (&res.drops, &res.typed) else { native_error(json, "internal", "compiler bug: missing post-drop IR"); return ExitCode::from(1); };
     let output = if run { std::env::temp_dir().join(format!("tarn-run-{}", std::process::id())) }
         else { explicit.unwrap_or_else(|| std::path::Path::new(path).with_extension("")) };
     if std::path::Path::new(path).canonicalize().ok() == output.canonicalize().ok() && output.exists() {
-        eprintln!("error: output would overwrite the source file"); return ExitCode::from(1);
+        native_error(json, "output", "output would overwrite the source file"); return ExitCode::from(1);
     }
-    if let Err(e) = tarn_backend::build_linked(p, t, &output, &libraries) { eprintln!("error: {e}"); return ExitCode::from(1); }
+    if let Err(e) = tarn_backend::build_linked(p, t, &output, &libraries) { native_error(json, "native", &e.to_string()); return ExitCode::from(1); }
     if !run { return ExitCode::SUCCESS; }
     let status = std::process::Command::new(&output).status();
     let _ = std::fs::remove_file(&output);
     match status {
         Ok(s) => { use std::os::unix::process::ExitStatusExt; ExitCode::from(s.code().unwrap_or_else(|| 128 + s.signal().unwrap_or(1)).clamp(0,255) as u8) }
-        Err(e) => { eprintln!("error: cannot run executable: {e}"); ExitCode::from(1) }
+        Err(e) => { native_error(json, "execute", &format!("cannot run executable: {e}")); ExitCode::from(1) }
+    }
+}
+
+/// CLI failures without source spans use a separate, stable JSON Lines record.
+fn native_error(json: bool, stage: &str, message: &str) {
+    if json {
+        let mut encoded = String::new();
+        json_str(&mut encoded, message);
+        println!("{{\"kind\":\"command_error\",\"stage\":\"{stage}\",\"message\":{encoded}}}");
+    } else {
+        eprintln!("error: {message}");
     }
 }
