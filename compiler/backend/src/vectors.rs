@@ -197,7 +197,9 @@ impl Cx<'_, '_> {
             self.b.ins().brif(more, body, &[], exit, &[]);
             self.b.switch_to_block(body);
             let at = self.vec_element(data, i, &elem)?;
-            self.drop_at(at, &elem)?;
+            let glue = self.element_glue(&elem)?;
+            let target = self.module.declare_func_in_func(glue, self.b.func);
+            self.b.ins().call(target, &[at]);
             let next = self.b.ins().iadd_imm(i, 1);
             self.b.ins().jump(header, &[next.into()]);
             self.b.switch_to_block(exit);

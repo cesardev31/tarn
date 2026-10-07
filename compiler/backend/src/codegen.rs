@@ -12,6 +12,7 @@ use cranelift_codegen::{
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 use cranelift_object::{ObjectBuilder, ObjectModule};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use tarn_ir::{self as ir, post_drop as post, *};
 use tarn_types::{FloatTy, IntTy, Ty, Typed};
@@ -484,6 +485,9 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
             runtime.insert(name, id);
         }
     }
+    // Vector element destruction functions, declared on demand by drop_vector
+    // and defined after ordinary functions (see Cx::element_glue).
+    let glue = RefCell::new(Vec::new());
     for id in ordered {
         let f = &p.functions[id.0 as usize];
         let mut ctx = module.make_context();
@@ -505,6 +509,7 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
                 runtime: &runtime,
                 task_adapters: &task_adapters,
                 tables: &tables,
+                glue: &glue,
                 locals: Vec::new(),
                 flags: Vec::new(),
                 blocks: Vec::new(),
@@ -571,6 +576,51 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         }
         cranelift_codegen::verify_function(&ctx.func, module.isa()).map_err(|e| Error::bug(e.to_string()))?;
         module.define_function(*thunk, &mut ctx).map_err(|e| Error::bug(e.to_string()))?;
+    }
+    // Each glue function may declare further glue for nested vectors; a type
+    // reached again through itself reuses its declared function instead of
+    // expanding forever (`enum Value { List(Vec<Value>) }`).
+    let mut defined = 0;
+    while defined < glue.borrow().len() {
+        let (ty, id) = glue.borrow()[defined].clone();
+        defined += 1;
+        let mut ctx = module.make_context();
+        ctx.func.signature.params.push(cl::AbiParam::new(types::I64));
+        let mut fb = FunctionBuilderContext::new();
+        {
+            let mut b = FunctionBuilder::new(&mut ctx.func, &mut fb);
+            let entry = b.create_block();
+            b.append_block_params_for_function_params(entry);
+            b.switch_to_block(entry);
+            let addr = b.block_params(entry)[0];
+            // Destruction reads no per-function state; `main` only fills Cx.
+            let mut cx = Cx {
+                b,
+                module: &mut module,
+                p,
+                t,
+                f: main,
+                ids: &ids,
+                thunks: &thunks,
+                frame_drops: &frame_drops,
+                env: None,
+                environments: HashMap::new(),
+                runtime: &runtime,
+                task_adapters: &task_adapters,
+                tables: &tables,
+                glue: &glue,
+                locals: Vec::new(),
+                flags: Vec::new(),
+                blocks: Vec::new(),
+                sret: None,
+            };
+            cx.drop_at(addr, &ty)?;
+            cx.b.ins().return_(&[]);
+            cx.b.seal_all_blocks();
+            cx.b.finalize();
+        }
+        cranelift_codegen::verify_function(&ctx.func, module.isa()).map_err(|e| Error::bug(e.to_string()))?;
+        module.define_function(id, &mut ctx).map_err(|e| Error::bug(e.to_string()))?;
     }
     // libc startup calls the C main shim; internal Tarn main returns void or Result<void, net.Error>.
     let mut sig = module.make_signature();
@@ -714,6 +764,8 @@ struct Cx<'a, 'b> {
     runtime: &'b HashMap<String, FuncId>,
     task_adapters: &'b HashMap<FunctionId, (FuncId, FuncId)>,
     tables: &'b [(tarn_resolve::SymbolId, Ty, Vec<FunctionId>, DataId)],
+    /// Declared vector element destruction functions, by element type.
+    glue: &'b RefCell<Vec<(Ty, FuncId)>>,
     locals: Vec<Slot>,
     flags: Vec<Flag>,
     blocks: Vec<cl::Block>,
@@ -831,6 +883,20 @@ impl Cx<'_, '_> {
             self.b.ins().iconst(ty, 0)
         }
     }
+    /// Out-of-line destruction of one `ty` at an address. Vector elements use
+    /// it so recursive element types become runtime recursion, not unbounded
+    /// inline expansion.
+    fn element_glue(&mut self, ty: &Ty) -> Result<FuncId> {
+        if let Some((_, id)) = self.glue.borrow().iter().find(|(t, _)| t == ty) {
+            return Ok(*id);
+        }
+        let mut sig = self.module.make_signature();
+        sig.params.push(cl::AbiParam::new(types::I64));
+        let n = self.glue.borrow().len();
+        let id = self.module.declare_function(&format!("tarn_drop_glue_{n}"), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?;
+        self.glue.borrow_mut().push((ty.clone(), id));
+        Ok(id)
+    }
     fn runtime(&mut self, name: &str, args: &[cl::Value]) -> Vec<cl::Value> {
         let target = self.module.declare_func_in_func(self.runtime[name], self.b.func);
         let call = self.b.ins().call(target, args);
@@ -928,7 +994,11 @@ impl Cx<'_, '_> {
     }
     fn write(&mut self, p: &Place, v: Val) -> Result<()> {
         let ty = self.place_ty(p)?;
-        if ty != v.ty {
+        // A capture-free closure literal typed `mut fn` (ADR 0048) is emitted
+        // as a shared function item; the code/null-environment pair is
+        // identical, so only the invocation mode differs.
+        let adopted = matches!((&ty, &v.ty), (Ty::Fn(tarn_types::CallMode::Mutable, ps, r), Ty::Fn(tarn_types::CallMode::Shared, qs, s)) if ps == qs && r == s);
+        if ty != v.ty && !adopted {
             return Err(Error::bug(format!("assignment ABI mismatch {ty:?} <- {:?}", v.ty)));
         }
         let l = layout::layout(self.t, &ty)?;

@@ -1,0 +1,142 @@
+// Phase 17 acceptance program: a JSON CRUD over http.serve (ADR 0048).
+// Same source as the external tarn-crud evaluation application.
+// Items CRUD over HTTP, persisted as a JSON array in items.json.
+import "http"
+import "json"
+import "fs"
+import "io"
+import "string"
+
+struct Item {
+    id u64
+    name string
+}
+
+impl json.Encode for Item {
+    fn encode(&self, out &mut json.Writer) {
+        out.begin_object()
+        out.field_u64(&"id", self.id)
+        out.field_string(&"name", &self.name)
+        out.end_object()
+    }
+}
+
+struct Store {
+    path string
+    items Vec<Item>
+    next u64
+}
+
+fn Store.load(path &string) Store {
+    var store = Store{path: path.clone(), items: Vec.new(), next: 1}
+    match fs.read(path) {
+        Ok(data) => match json.parse_bytes(data.as_slice()) {
+            Ok(document) => {
+                for value in document.into_list().as_slice() {
+                    match value.u64(&"id") {
+                        Some(id) => match value.text(&"name") {
+                            Some(name) => {
+                                store.items.push(Item{id: id, name: name})
+                                if id >= store.next { store.next = id + 1 }
+                            }
+                            None => {}
+                        }
+                        None => {}
+                    }
+                }
+            }
+            Err(error) => {}
+        }
+        Err(error) => {}
+    }
+    return store
+}
+
+fn Store.save(&self) Result<void, io.Error> {
+    return fs.write_text(&self.path, &json.encode_list(self.items.as_slice()))
+}
+
+fn Store.find(&self, id u64) Option<usize> {
+    var index: usize = 0
+    for index < self.items.len() {
+        if self.items.get(index).id == id { return Some(index) }
+        index = index + 1
+    }
+    return None
+}
+
+// The request body must be {"name": "..."} with a non-empty name.
+fn name_of(request &http.Request) Option<string> {
+    match json.parse_bytes(request.body()) {
+        Ok(body) => match body.text(&"name") {
+            Some(name) => {
+                if string.trim(&name).is_empty() { return None }
+                return Some(name)
+            }
+            None => { return None }
+        }
+        Err(error) => { return None }
+    }
+}
+
+// Persist, then answer with `response`; a failed write becomes a 500.
+fn saved(store &Store, response Result<http.Response, http.Error>) Result<http.Response, http.Error> {
+    match store.save() {
+        Ok(done) => { return response }
+        Err(error) => { return Err(http.Error.Io(error)) }
+    }
+}
+
+fn items(store &mut Store, request &http.Request) Result<http.Response, http.Error> {
+    if request.method() == &"GET" { return http.Response.json(200, json.encode_list(store.items.as_slice())) }
+    if request.method() != &"POST" { return http.Response.method_not_allowed(&"GET, POST") }
+    match name_of(request) {
+        Some(name) => {
+            item := Item{id: store.next, name: name}
+            store.next = store.next + 1
+            body := json.encode(&item)
+            store.items.push(item)
+            return saved(store, http.Response.json(201, body))
+        }
+        None => { return http.Response.text(400, &"expected {\"name\": \"...\"}\n") }
+    }
+}
+
+fn by_id(store &mut Store, request &http.Request, id u64) Result<http.Response, http.Error> {
+    var index: usize = 0
+    match store.find(id) {
+        Some(found) => { index = found }
+        None => { return http.Response.text(404, &"item not found\n") }
+    }
+    method := request.method()
+    if method == &"GET" { return http.Response.json(200, json.encode(store.items.get(index))) }
+    if method == &"DELETE" {
+        removed := store.items.swap_remove(index)
+        return saved(store, http.Response.empty(204))
+    }
+    if method != &"PUT" { return http.Response.method_not_allowed(&"GET, PUT, DELETE") }
+    match name_of(request) {
+        Some(name) => { store.items.get_mut(index).name = name }
+        None => { return http.Response.text(400, &"expected {\"name\": \"...\"}\n") }
+    }
+    return saved(store, http.Response.json(200, json.encode(store.items.get(index))))
+}
+
+fn route(store &mut Store, request &http.Request) Result<http.Response, http.Error> {
+    if request.target() == &"/items" { return items(store, request) }
+    match string.strip_prefix(request.target(), &"/items/") {
+        Some(rest) => match string.parse_u64(&rest) {
+            Some(id) => { return by_id(store, request, id) }
+            None => {}
+        }
+        None => {}
+    }
+    return http.Response.text(404, &"not found\n")
+}
+
+fn main() Result<void, io.Error> {
+    var store = Store.load(&"items.json")
+    return http.serve(&"127.0.0.1:8080", fn(request &http.Request) Result<http.Response, http.Error> {
+        return route(&mut store, request)
+    })
+}

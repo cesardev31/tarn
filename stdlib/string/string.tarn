@@ -201,3 +201,30 @@ pub fn from_i64(value i64) string {
     digits := from_u64(magnitude)
     return "-" + digits
 }
+
+/// Owned remainder after an exact byte prefix; None when it does not match.
+pub fn strip_prefix(value &string, prefix &string) Option<string> {
+    if !starts_with(value, prefix) { return None }
+    return Some(copy_range(value, prefix.len(), value.len()))
+}
+
+/// Linear-time owned text accumulation. Only complete strings are appended,
+/// so the result is valid UTF-8 by construction; `+` copies both operands
+/// and is quadratic when repeated.
+pub struct Builder {
+    data Vec<u8>
+}
+pub fn Builder.new() Builder { return Builder{data: Vec.new()} }
+pub fn Builder.push(&mut self, text &string) {
+    for byte in text.bytes() { self.data.push(byte) }
+}
+pub fn Builder.push_u64(&mut self, value u64) { self.push(&from_u64(value)) }
+pub fn Builder.push_i64(&mut self, value i64) { self.push(&from_i64(value)) }
+/// Byte length accumulated so far.
+pub fn Builder.len(&self) usize { return self.data.len() }
+pub fn Builder.finish(self) string {
+    match from_utf8(self.data.as_slice()) {
+        Some(text) => { return text }
+        None => { panic("internal string builder invariant") }
+    }
+}

@@ -213,6 +213,17 @@ pub fn Response.close_connection(self) Response {
     return out
 }
 pub fn Response.status(&self) u16 { return self._status }
+/// Already-encoded JSON text (for example from json.encode) with
+/// content-type application/json. http does not depend on the json module.
+pub fn Response.json(status u16, body string) Result<Response, Error> {
+    return (try Response.bytes(status, _copy(body.bytes()))).header(try Header.text(&"content-type", &"application/json"))
+}
+/// No body, such as 204 or an error status without detail.
+pub fn Response.empty(status u16) Result<Response, Error> { return Response.bytes(status, Vec.new()) }
+/// 405 with the required Allow header, e.g. `&"GET, POST"`.
+pub fn Response.method_not_allowed(allow &string) Result<Response, Error> {
+    return (try Response.empty(405)).header(try Header.text(&"allow", allow))
+}
 
 // Strict authority validation never performs DNS. IPv6 compression is lexical.
 fn _ipv4(data &[]u8) bool {
@@ -748,4 +759,61 @@ pub async fn Connection.reject(&mut self, owner &runtime.Execution, status u16) 
 pub fn Connection.close(self) Result<void, Error> {
     match self.stream.close() { Ok(value) => { return Ok(()) }
         Err(e) => { return Err(Error.Io(e)) } }
+}
+
+/// Serve `address` until a listener error, calling `handler` once per request.
+///
+/// Connections are handled one at a time on a private Execution owned by this
+/// call, so the handler may mutably borrow application state without
+/// synchronization. Each response closes its connection: a sequential server
+/// must not let one idle keep-alive client delay every other client. A handler
+/// Err is answered with its status (500 for I/O and construction errors).
+/// Use Connection directly for concurrent tasks or keep-alive control.
+pub fn serve(address &string, handler mut fn(&Request) Result<Response, Error>) Result<void, io.Error> {
+    var listener = try net.TcpListener.bind(address)
+    try listener.set_nonblocking(true)
+    var callback = handler
+    execution := try runtime.Execution.new()
+    var operation = runtime.Operation.new(&execution, _serve(listener, &execution, &mut callback))
+    try try execution.block_on(&mut operation)
+    return Ok(())
+}
+async fn _serve(listener net.TcpListener, owner &runtime.Execution, handler &mut mut fn(&Request) Result<Response, Error>) Result<void, io.Error> {
+    var socket = listener
+    for {
+        stream := try await socket.accept_async()
+        match Connection.new(stream, Limits.defaults(), Timeouts.defaults()) {
+            Ok(connection) => { await _answer(connection, owner, handler) }
+            Err(error) => {}
+        }
+    }
+}
+/// One request and its response; protocol failures are rejected and transport
+/// failures end the connection without a response.
+async fn _answer(connection Connection, owner &runtime.Execution, handler &mut mut fn(&Request) Result<Response, Error>) {
+    var conn = connection
+    var request: Request
+    received := await conn.read_request(owner)
+    match received {
+        Ok(result) => match result {
+            Some(value) => { request = value }
+            None => { return }
+        }
+        Err(error) => {
+            match error {
+                Error.Io(original) => { return }
+                _ => {}
+            }
+            await conn.reject(owner, error.status())
+            return
+        }
+    }
+    match handler(&request) {
+        Ok(response) => { await conn.write_response(owner, response.close_connection()) }
+        Err(error) => {
+            var status = error.status()
+            if status < 400 { status = 500 }
+            await conn.reject(owner, status)
+        }
+    }
 }

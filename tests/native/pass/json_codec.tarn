@@ -1,0 +1,98 @@
+// Phase 17: json.Writer escaping, Encode lists and strict RFC 8259 parsing.
+import "json"
+struct Item {
+    id u64
+    name string
+}
+impl json.Encode for Item {
+    fn encode(&self, out &mut json.Writer) {
+        out.begin_object()
+        out.field_u64(&"id", self.id)
+        out.field_string(&"name", &self.name)
+        out.field_bool(&"ok", self.id > 1)
+        out.end_object()
+    }
+}
+fn show(text &string) {
+    match json.parse(text) {
+        Ok(value) => {
+            var out = json.Writer.new()
+            write(&value, &mut out)
+            print(out.finish())
+        }
+        Err(error) => { print(error.offset) }
+    }
+}
+fn write(value &json.Value, out &mut json.Writer) {
+    match value {
+        json.Value.Null => { out.null() }
+        json.Value.Bool(b) => { out.bool(b) }
+        json.Value.Number(n) => { out.string(&("#" + n)) }
+        json.Value.Text(t) => { out.string(t) }
+        json.Value.List(items) => {
+            out.begin_array()
+            for item in items.as_slice() { write(item, out) }
+            out.end_array()
+        }
+        json.Value.Object(members) => {
+            out.begin_object()
+            for m in members.as_slice() {
+                out.key(&m.key)
+                write(&m.value, out)
+            }
+            out.end_object()
+        }
+    }
+}
+fn main() {
+    var items: Vec<Item> = Vec.new()
+    print(json.encode_list(items.as_slice()))
+    items.push(Item{id: 1, name: "q\"b\\s/\n\r\t\u{8}\u{c}\u{1}\u{1f}ñ😀"})
+    items.push(Item{id: 2, name: ""})
+    print(json.encode_list(items.as_slice()))
+    show(&" { \"a\" : [ 1 , -0 , 2.50 , 1e3 , -1.5E-2 ] , \"b\" : { } , \"c\" : [ ] , \"d\" : null , \"e\" : false } ")
+    show(&"\"\\u00f1\\ud83d\\ude00\\/\\b\\f\\n\\r\\t\\\"\\\\\"")
+    show(&"{\"k\": 1, \"k\": 2}")
+    // Invalid documents report the byte offset of the first problem.
+    show(&"")
+    show(&"[1,]")
+    show(&"{\"a\" 1}")
+    show(&"01")
+    show(&"1.")
+    show(&"-")
+    show(&"tru")
+    show(&"\"\\ud800\"")
+    show(&"\"\\udc00\"")
+    show(&"\"\\x\"")
+    show(&"\"a\u{1}\"")
+    show(&"[1] 2")
+    show(&"\"open")
+    var deep = ""
+    var n = 0
+    for n < 200 {
+        deep = deep + &"["
+        n = n + 1
+    }
+    show(&deep)
+    match json.parse(&"{\"id\": 18446744073709551615, \"neg\": -9223372036854775808, \"f\": 1.5, \"t\": \"x\", \"b\": true}") {
+        Ok(v) => {
+            match v.u64(&"id") { Some(x) => { print(x) }
+                None => { print("none") } }
+            match v.i64(&"neg") { Some(x) => { print(x) }
+                None => { print("none") } }
+            match v.u64(&"f") { Some(x) => { print(x) }
+                None => { print("fraction is not integral") } }
+            match v.text(&"b") { Some(x) => { print(x) }
+                None => { print("b is not text") } }
+            match v.bool(&"b") { Some(x) => { print(x) }
+                None => {} }
+            match v.text(&"missing") { Some(x) => { print(x) }
+                None => { print("missing") } }
+        }
+        Err(e) => { print(e.offset) }
+    }
+    match json.parse_bytes(&[3]u8{34, 255, 34}) {
+        Ok(v) => { print("accepted invalid UTF-8") }
+        Err(e) => { print(e.offset) }
+    }
+}

@@ -20,6 +20,10 @@ fn main() Result<void, io.Error> {
 }
 ```
 
+TCP listeners set SO_REUSEADDR before binding (Phase 17, ADR 0048): a restarted
+server can rebind over connections it closed that remain in TIME_WAIT, while a
+second active listener on the same address is still rejected.
+
 The binding must be `var` for a mutable receiver. String arguments are borrowed
 explicitly, and successful `Result` returns use `Ok(())`. Repeated array literals
 are not part of the current syntax; examples use explicit initializers. Passing

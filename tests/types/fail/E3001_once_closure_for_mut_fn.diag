@@ -1,0 +1,6 @@
+error[E3001]: expected `mut fn() string`, found `once fn() string`
+  --> tests/types/fail/E3001_once_closure_for_mut_fn.tarn:10:11
+   |
+10 |     twice(move fn() string { return owned })
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is `once fn() string`
+

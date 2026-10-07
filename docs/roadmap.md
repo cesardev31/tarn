@@ -34,9 +34,11 @@ tested and documented.
 | 15C | Owned lexical paths (ADR 0044) | **done; [report](phase-15c-report.md)** |
 | 15D | Owned blocking child processes (ADR 0045) | **done; [report](phase-15d-report.md)** |
 | 16 | Bounded async HTTP/1.1 server over buffered I/O | **done within documented server subset**: [16A–F plan](phase-16-plan.md), [report](phase-16-report.md), [ADR 0046](adr/0046-bounded-async-http.md) |
-| 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
-| 19 | Formatter (basic) | |
-| 20 | VS Code extension (TextMate) | **started**: language + highlighting |
+| 17 | Application ergonomics: string.Builder, json, http.serve and response helpers (ADR 0048) | **done**: [plan](phase-17-plan.md), [report](phase-17-report.md) |
+| 18 | Minimal native C FFI: scalar extern calls, raw pointers, `--link`, SQLite acceptance (ADR 0047) | **proposed**: [plan](phase-18-plan.md) |
+| 19 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
+| 20 | Formatter (basic) | |
+| 21 | VS Code extension (TextMate) | **started**: language + highlighting |
 
 ## Milestones
 

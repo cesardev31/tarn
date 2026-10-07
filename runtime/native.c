@@ -356,6 +356,11 @@ void tarn_rt_net_socket(TarnNetRaw *out, const TarnNetAddr *address, uint8_t udp
 void tarn_rt_net_bind(TarnNetRaw *out, int32_t fd, const TarnNetAddr *address) {
     net_init(out); struct sockaddr_storage sa; socklen_t len;
     if (net_native(address, &sa, &len) < 0) { out->code = errno; return; }
+    /* TCP listeners reuse addresses held in TIME_WAIT by connections the
+       server closed; Linux still rejects a second active listener. */
+    int type = 0, one = 1; socklen_t size = sizeof(type);
+    if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &size) == 0 && type == SOCK_STREAM)
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     net_status(out, bind(fd, (struct sockaddr *)&sa, len));
 }
 void tarn_rt_net_listen(TarnNetRaw *out, int32_t fd) { net_init(out); net_status(out, listen(fd, SOMAXCONN)); }

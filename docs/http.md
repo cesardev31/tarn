@@ -12,7 +12,8 @@ Runnable application: [http_server.tarn](../examples/http_server.tarn).
 | Connection | new(stream, limits, timeouts), async read_request(owner), async write_response(owner, response), async reject(owner, status), consuming close() |
 | Request | method(), target(), headers(), body(), trailers(), header(name), consuming into_body() |
 | Header | new(name, bytes), text(name, text), name(), value(), value_text(), clone() |
-| Response | bytes(status, owned_bytes), text(status, borrowed_text), consuming header(header), consuming close_connection(), status() |
+| Response | bytes(status, owned_bytes), text(status, borrowed_text), json(status, owned_text), empty(status), method_not_allowed(allow), consuming header(header), consuming close_connection(), status() |
+| serve | serve(address, handler) Result<void, io.Error>: sequential, one request per connection |
 | Limits / Timeouts | defaults(); public Copy configuration fields |
 | Error | Io, Protocol, Limit, Timeout, InvalidConfig, InvalidResponse, InvalidText, InvalidState; status() |
 
@@ -65,6 +66,33 @@ This fragment belongs in an async function returning Result<void, http.Error>.
 There is no implicit io/http error conversion or new special main ABI. The
 example explicitly handles HTTP errors inside connection tasks and retains the
 existing Result<void, io.Error> entry point.
+
+## Serving with a handler (Phase 17)
+
+For small applications, `http.serve(address, handler)` runs the accept/read/
+reject/write loop. The handler is `mut fn(&Request) Result<Response, Error>`, so
+it may mutably capture application state:
+
+```tarn
+fn main() Result<void, io.Error> {
+    var store = Store.load(&"items.json")
+    return http.serve(&"127.0.0.1:8080", fn(request &http.Request) Result<http.Response, http.Error> {
+        return route(&mut store, request)
+    })
+}
+```
+
+serve owns a private Execution for the duration of the call, not a hidden global
+executor. It serves one connection at a time; each response carries
+`Connection: close` so an idle keep-alive client cannot stall others. A handler
+`Err` is answered once with `error.status()` (500 below 400). Protocol failures
+are rejected exactly as with Connection. For concurrency or keep-alive control,
+use Connection with owned tasks as above. Complete program:
+[http_crud.tarn](../examples/http_crud.tarn).
+
+Response helpers: `Response.json(status, body string)` (content-type
+application/json; http does not depend on [json](json.md)), `Response.empty(status)`
+and `Response.method_not_allowed(allow &string)` (405 with Allow).
 
 ## Ownership and connection state
 

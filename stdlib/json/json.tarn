@@ -1,0 +1,511 @@
+// JSON text encoding and strict parsing (RFC 8259) in ordinary Tarn (ADR 0048).
+// There is no reflection or derive: types opt in by implementing Encode and
+// writing their fields explicitly. Parsed documents are owned Value trees.
+import "string"
+
+/// A type that writes itself as one JSON value.
+pub interface Encode {
+    fn encode(&self, out &mut Writer)
+}
+
+/// Streaming JSON writer. Separators are inserted automatically; the caller
+/// is responsible for balanced begin/end calls and for one key per object
+/// value. An unbalanced document is a program bug, not detected here.
+pub struct Writer {
+    text string.Builder
+    comma bool
+}
+pub fn Writer.new() Writer { return Writer{text: string.Builder.new(), comma: false} }
+fn Writer.separate(&mut self) {
+    if self.comma { self.text.push(&",") }
+    self.comma = true
+}
+pub fn Writer.begin_object(&mut self) {
+    self.separate()
+    self.text.push(&"{")
+    self.comma = false
+}
+pub fn Writer.end_object(&mut self) {
+    self.text.push(&"}")
+    self.comma = true
+}
+pub fn Writer.begin_array(&mut self) {
+    self.separate()
+    self.text.push(&"[")
+    self.comma = false
+}
+pub fn Writer.end_array(&mut self) {
+    self.text.push(&"]")
+    self.comma = true
+}
+/// Object member name; the next written value belongs to it.
+pub fn Writer.key(&mut self, name &string) {
+    self.separate()
+    self.quoted(name)
+    self.text.push(&":")
+    self.comma = false
+}
+pub fn Writer.string(&mut self, value &string) {
+    self.separate()
+    self.quoted(value)
+}
+pub fn Writer.u64(&mut self, value u64) {
+    self.separate()
+    self.text.push_u64(value)
+}
+pub fn Writer.i64(&mut self, value i64) {
+    self.separate()
+    self.text.push_i64(value)
+}
+pub fn Writer.bool(&mut self, value bool) {
+    self.separate()
+    if value { self.text.push(&"true") } else { self.text.push(&"false") }
+}
+pub fn Writer.null(&mut self) {
+    self.separate()
+    self.text.push(&"null")
+}
+pub fn Writer.value<T: Encode>(&mut self, value &T) { value.encode(self) }
+pub fn Writer.list<T: Encode>(&mut self, items &[]T) {
+    self.begin_array()
+    for item in items { item.encode(self) }
+    self.end_array()
+}
+pub fn Writer.field_string(&mut self, name &string, value &string) {
+    self.key(name)
+    self.string(value)
+}
+pub fn Writer.field_u64(&mut self, name &string, value u64) {
+    self.key(name)
+    self.u64(value)
+}
+pub fn Writer.field_i64(&mut self, name &string, value i64) {
+    self.key(name)
+    self.i64(value)
+}
+pub fn Writer.field_bool(&mut self, name &string, value bool) {
+    self.key(name)
+    self.bool(value)
+}
+pub fn Writer.finish(self) string { return self.text.finish() }
+
+/// Quote and escape: `"` and `\` are escaped, control characters use their
+/// short escapes or \u00XX. Other UTF-8 is written unchanged.
+fn Writer.quoted(&mut self, value &string) {
+    self.text.push(&"\"")
+    data := value.bytes()
+    var start: usize = 0
+    var index: usize = 0
+    for index < data.len() {
+        byte := data[index]
+        if byte == 34 || byte == 92 || byte < 32 {
+            // Escaped bytes are ASCII, so both slice bounds are scalar boundaries.
+            match string.slice(value, start, index) {
+                Some(run) => { self.text.push(&run) }
+                None => { panic("internal json escape boundary") }
+            }
+            self.text.push(&escape(byte))
+            start = index + 1
+        }
+        index = index + 1
+    }
+    match string.slice(value, start, data.len()) {
+        Some(run) => { self.text.push(&run) }
+        None => { panic("internal json escape boundary") }
+    }
+    self.text.push(&"\"")
+}
+fn escape(byte u8) string {
+    if byte == 34 { return "\\\"" }
+    if byte == 92 { return "\\\\" }
+    if byte == 10 { return "\\n" }
+    if byte == 13 { return "\\r" }
+    if byte == 9 { return "\\t" }
+    if byte == 8 { return "\\b" }
+    if byte == 12 { return "\\f" }
+    digits := "0123456789abcdef"
+    high := usize(byte / 16)
+    low := usize(byte % 16)
+    match string.slice(&digits, high, high + 1) {
+        Some(h) => match string.slice(&digits, low, low + 1) {
+            Some(l) => { return "\\u00" + &h + &l }
+            None => {}
+        }
+        None => {}
+    }
+    panic("internal json hex digit")
+}
+
+/// One value as compact JSON text.
+pub fn encode<T: Encode>(value &T) string {
+    var out = Writer.new()
+    out.value(value)
+    return out.finish()
+}
+/// A JSON array of the items, in order.
+pub fn encode_list<T: Encode>(items &[]T) string {
+    var out = Writer.new()
+    out.list(items)
+    return out.finish()
+}
+
+/// A parsed JSON value. Numbers keep their validated source text so that no
+/// precision is lost; convert with as_u64/as_i64. Objects keep members in
+/// source order, including duplicate names; lookups use the first match.
+pub enum Value {
+    Null
+    Bool(bool)
+    Number(string)
+    Text(string)
+    List(Vec<Value>)
+    Object(Vec<Member>)
+}
+pub struct Member {
+    pub key string
+    pub value Value
+}
+/// Byte offset of the first invalid input.
+pub copy struct Error {
+    pub offset usize
+}
+
+pub fn Value.clone(&self) Value {
+    match self {
+        Value.Null => { return Value.Null }
+        Value.Bool(b) => { return Value.Bool(b) }
+        Value.Number(n) => { return Value.Number(n.clone()) }
+        Value.Text(t) => { return Value.Text(t.clone()) }
+        Value.List(items) => {
+            var cloned: Vec<Value> = Vec.new()
+            for item in items.as_slice() { cloned.push(item.clone()) }
+            return Value.List(cloned)
+        }
+        Value.Object(members) => {
+            var cloned: Vec<Member> = Vec.new()
+            for m in members.as_slice() { cloned.push(Member{key: m.key.clone(), value: m.value.clone()}) }
+            return Value.Object(cloned)
+        }
+    }
+}
+pub fn Value.is_null(&self) bool {
+    match self {
+        Value.Null => { return true }
+        _ => { return false }
+    }
+}
+pub fn Value.as_text(&self) Option<string> {
+    match self {
+        Value.Text(t) => { return Some(t.clone()) }
+        _ => { return None }
+    }
+}
+pub fn Value.as_bool(&self) Option<bool> {
+    match self {
+        Value.Bool(b) => { return Some(b) }
+        _ => { return None }
+    }
+}
+/// Integral numbers within range; fractions and exponents are None.
+pub fn Value.as_u64(&self) Option<u64> {
+    match self {
+        Value.Number(n) => { return string.parse_u64(n) }
+        _ => { return None }
+    }
+}
+pub fn Value.as_i64(&self) Option<i64> {
+    match self {
+        Value.Number(n) => { return string.parse_i64(n) }
+        _ => { return None }
+    }
+}
+/// Owned copy of the first member named `key` of an object.
+pub fn Value.get(&self, key &string) Option<Value> {
+    match self {
+        Value.Object(members) => {
+            for m in members.as_slice() {
+                if &m.key == key { return Some(m.value.clone()) }
+            }
+            return None
+        }
+        _ => { return None }
+    }
+}
+pub fn Value.text(&self, key &string) Option<string> {
+    match self.get(key) {
+        Some(value) => { return value.as_text() }
+        None => { return None }
+    }
+}
+pub fn Value.u64(&self, key &string) Option<u64> {
+    match self.get(key) {
+        Some(value) => { return value.as_u64() }
+        None => { return None }
+    }
+}
+pub fn Value.i64(&self, key &string) Option<i64> {
+    match self.get(key) {
+        Some(value) => { return value.as_i64() }
+        None => { return None }
+    }
+}
+pub fn Value.bool(&self, key &string) Option<bool> {
+    match self.get(key) {
+        Some(value) => { return value.as_bool() }
+        None => { return None }
+    }
+}
+/// The elements of an array, moved out; empty for any other value.
+pub fn Value.into_list(self) Vec<Value> {
+    match self {
+        Value.List(items) => { return items }
+        _ => { return Vec.new() }
+    }
+}
+
+/// Nesting beyond this depth is rejected instead of exhausting the stack.
+fn max_depth() usize { return 128 }
+
+/// Strict RFC 8259 parsing of exactly one value surrounded by optional
+/// whitespace.
+pub fn parse(text &string) Result<Value, Error> { return parse_bytes(text.bytes()) }
+/// Parse bytes (for example an HTTP body). Invalid UTF-8 inside a string
+/// fails at that string's offset.
+pub fn parse_bytes(data &[]u8) Result<Value, Error> {
+    var owned: Vec<u8> = Vec.new()
+    for byte in data { owned.push(byte) }
+    var parser = Parser{data: owned, pos: 0}
+    value := try parser.value(0)
+    parser.space()
+    if parser.pos != parser.data.len() { return Err(Error{offset: parser.pos}) }
+    return Ok(value)
+}
+
+/// Owns a copy of the input: ordinary structs cannot store a borrowed slice.
+struct Parser {
+    data Vec<u8>
+    pos usize
+}
+fn Parser.fail(&self) Result<Value, Error> { return Err(Error{offset: self.pos}) }
+fn Parser.at_end(&self) bool { return self.pos >= self.data.len() }
+fn Parser.peek(&self) u8 { return self.data.at(self.pos) }
+fn Parser.space(&mut self) {
+    for !self.at_end() {
+        byte := self.peek()
+        if byte != 32 && byte != 9 && byte != 10 && byte != 13 { return }
+        self.pos = self.pos + 1
+    }
+}
+/// Consume an exact ASCII word such as `true`.
+fn Parser.word(&mut self, word &string) bool {
+    for byte in word.bytes() {
+        if self.at_end() || self.peek() != byte { return false }
+        self.pos = self.pos + 1
+    }
+    return true
+}
+fn Parser.value(&mut self, depth usize) Result<Value, Error> {
+    self.space()
+    if self.at_end() || depth > max_depth() { return self.fail() }
+    byte := self.peek()
+    if byte == 123 { return self.object(depth) }
+    if byte == 91 { return self.list(depth) }
+    if byte == 34 {
+        match self.text() {
+            Ok(text) => { return Ok(Value.Text(text)) }
+            Err(error) => { return Err(error) }
+        }
+    }
+    if byte == 116 {
+        if self.word(&"true") { return Ok(Value.Bool(true)) }
+        return self.fail()
+    }
+    if byte == 102 {
+        if self.word(&"false") { return Ok(Value.Bool(false)) }
+        return self.fail()
+    }
+    if byte == 110 {
+        if self.word(&"null") { return Ok(Value.Null) }
+        return self.fail()
+    }
+    return self.number()
+}
+fn Parser.object(&mut self, depth usize) Result<Value, Error> {
+    self.pos = self.pos + 1
+    var members: Vec<Member> = Vec.new()
+    self.space()
+    if !self.at_end() && self.peek() == 125 {
+        self.pos = self.pos + 1
+        return Ok(Value.Object(members))
+    }
+    for {
+        self.space()
+        if self.at_end() || self.peek() != 34 { return self.fail() }
+        key := try self.text()
+        self.space()
+        if self.at_end() || self.peek() != 58 { return self.fail() }
+        self.pos = self.pos + 1
+        value := try self.value(depth + 1)
+        members.push(Member{key: key, value: value})
+        self.space()
+        if self.at_end() { return self.fail() }
+        byte := self.peek()
+        self.pos = self.pos + 1
+        if byte == 125 { return Ok(Value.Object(members)) }
+        if byte != 44 {
+            self.pos = self.pos - 1
+            return self.fail()
+        }
+    }
+}
+fn Parser.list(&mut self, depth usize) Result<Value, Error> {
+    self.pos = self.pos + 1
+    var items: Vec<Value> = Vec.new()
+    self.space()
+    if !self.at_end() && self.peek() == 93 {
+        self.pos = self.pos + 1
+        return Ok(Value.List(items))
+    }
+    for {
+        items.push(try self.value(depth + 1))
+        self.space()
+        if self.at_end() { return self.fail() }
+        byte := self.peek()
+        self.pos = self.pos + 1
+        if byte == 93 { return Ok(Value.List(items)) }
+        if byte != 44 {
+            self.pos = self.pos - 1
+            return self.fail()
+        }
+    }
+}
+fn digit(byte u8) bool { return byte >= 48 && byte <= 57 }
+fn Parser.digits(&mut self) bool {
+    if self.at_end() || !digit(self.peek()) { return false }
+    for !self.at_end() && digit(self.peek()) { self.pos = self.pos + 1 }
+    return true
+}
+/// -? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?
+fn Parser.number(&mut self) Result<Value, Error> {
+    start := self.pos
+    if self.peek() == 45 { self.pos = self.pos + 1 }
+    if self.at_end() { return self.fail() }
+    if self.peek() == 48 {
+        self.pos = self.pos + 1
+    } else if !self.digits() {
+        return self.fail()
+    }
+    if !self.at_end() && self.peek() == 46 {
+        self.pos = self.pos + 1
+        if !self.digits() { return self.fail() }
+    }
+    if !self.at_end() && (self.peek() == 101 || self.peek() == 69) {
+        self.pos = self.pos + 1
+        if !self.at_end() && (self.peek() == 43 || self.peek() == 45) { self.pos = self.pos + 1 }
+        if !self.digits() { return self.fail() }
+    }
+    match string.from_utf8(&self.data.as_slice()[start..self.pos]) {
+        Some(text) => { return Ok(Value.Number(text)) }
+        None => { return self.fail() }
+    }
+}
+fn hex(byte u8) Option<u32> {
+    if byte >= 48 && byte <= 57 { return Some(u32(byte - 48)) }
+    if byte >= 97 && byte <= 102 { return Some(u32(byte - 87)) }
+    if byte >= 65 && byte <= 70 { return Some(u32(byte - 55)) }
+    return None
+}
+/// Four hex digits after `\u`.
+fn Parser.unit(&mut self) Option<u32> {
+    var code: u32 = 0
+    var n = 0
+    for n < 4 {
+        if self.at_end() { return None }
+        match hex(self.peek()) {
+            Some(h) => { code = code * 16 + h }
+            None => { return None }
+        }
+        self.pos = self.pos + 1
+        n = n + 1
+    }
+    return Some(code)
+}
+/// UTF-8 encoding of a Unicode scalar value.
+fn push_scalar(out &mut Vec<u8>, code u32) {
+    if code < 128 {
+        out.push(u8(code))
+    } else if code < 2048 {
+        out.push(u8(192 + code / 64))
+        out.push(u8(128 + code % 64))
+    } else if code < 65536 {
+        out.push(u8(224 + code / 4096))
+        out.push(u8(128 + (code / 64) % 64))
+        out.push(u8(128 + code % 64))
+    } else {
+        out.push(u8(240 + code / 262144))
+        out.push(u8(128 + (code / 4096) % 64))
+        out.push(u8(128 + (code / 64) % 64))
+        out.push(u8(128 + code % 64))
+    }
+}
+/// A quoted string at the current position. Escapes are decoded; surrogate
+/// escapes must form a valid pair; raw control characters are rejected.
+fn Parser.text(&mut self) Result<string, Error> {
+    start := self.pos
+    self.pos = self.pos + 1
+    var out: Vec<u8> = Vec.new()
+    for {
+        if self.at_end() { return Err(Error{offset: self.pos}) }
+        byte := self.peek()
+        if byte == 34 {
+            self.pos = self.pos + 1
+            match string.from_utf8(out.as_slice()) {
+                Some(text) => { return Ok(text) }
+                None => { return Err(Error{offset: start}) }
+            }
+        }
+        if byte < 32 { return Err(Error{offset: self.pos}) }
+        if byte != 92 {
+            out.push(byte)
+            self.pos = self.pos + 1
+            continue
+        }
+        escape_at := self.pos
+        self.pos = self.pos + 1
+        if self.at_end() { return Err(Error{offset: escape_at}) }
+        kind := self.peek()
+        self.pos = self.pos + 1
+        if kind == 34 || kind == 92 || kind == 47 {
+            out.push(kind)
+        } else if kind == 98 {
+            out.push(8)
+        } else if kind == 102 {
+            out.push(12)
+        } else if kind == 110 {
+            out.push(10)
+        } else if kind == 114 {
+            out.push(13)
+        } else if kind == 116 {
+            out.push(9)
+        } else if kind == 117 {
+            var code: u32 = 0
+            match self.unit() {
+                Some(value) => { code = value }
+                None => { return Err(Error{offset: escape_at}) }
+            }
+            if code >= 56320 && code < 57344 { return Err(Error{offset: escape_at}) }
+            if code >= 55296 && code < 56320 {
+                if !self.word(&"\\u") { return Err(Error{offset: escape_at}) }
+                match self.unit() {
+                    Some(low) => {
+                        if low < 56320 || low >= 57344 { return Err(Error{offset: escape_at}) }
+                        code = 65536 + (code - 55296) * 1024 + (low - 56320)
+                    }
+                    None => { return Err(Error{offset: escape_at}) }
+                }
+            }
+            push_scalar(&mut out, code)
+        } else {
+            return Err(Error{offset: escape_at})
+        }
+    }
+}

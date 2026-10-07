@@ -23,6 +23,7 @@ Source → Lexer → Parser → AST → Resolve → Types → Typed IR
 | `stdlib/net` | — | blocking/nonblocking TCP/UDP, owned sockets, level-triggered epoll and explicit errors (ADRs 0034/0035) | done (12A/12B Linux v0) |
 | `stdlib/fs` | — | owned blocking regular files, directories and explicit io.Error (ADR 0043) | done (15B Linux v0) |
 | `stdlib/process` | — | owned blocking children, dual-pipe capture and io.Error (ADR 0045) | done (15D Linux v0) |
+| `stdlib/json` | — | ordinary bundled JSON writer/Encode and strict parser (ADR 0048) | done (17 v0) |
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | — | embedded C runtime: primitive print, strings, panic/abort; libc startup | initial (ADR 0027) |
 | `tools/cli` | `tarn` | the single CLI | started |
@@ -68,7 +69,7 @@ Cranelift ELF object + embedded `runtime/native.c`, compiled/linked through syst
 requires a C toolchain with libc/libm headers. No installed runtime archive needed.
 ABI, canonical layout, output paths and limits: [ADR 0027](adr/0027-native-backend.md).
 
-## Caching (planned, phase 17)
+## Caching (planned)
 
 Use a content-addressed global store, conceptually `~/.tarn/registry/`,
 `~/.tarn/sources/` and `~/.tarn/artifacts/`; exact disk layout remains open.
@@ -221,3 +222,13 @@ stage data through ordinary caller loans. No generic result can escape a destroy
 manual poller. Native test tracing observes frames/buffers/wakers/task allocations
 without providing an ownership registry. See [HTTP](http.md) and
 [ADR 0046](adr/0046-bounded-async-http.md).
+
+## Application ergonomics (Phase 17)
+
+`stdlib/json` and the `string.Builder`/`http.serve` additions are ordinary Tarn
+with no runtime or intrinsic changes. Two backend changes support them: `[0]T`
+markers no longer inspect `T` for layout, and vector element destruction calls
+on-demand per-type functions, so owned types may recurse through `Vec`. The
+type checker lets a non-consuming closure literal adopt an expected `mut fn`.
+The native bind bridge sets SO_REUSEADDR for TCP. See
+[ADR 0048](adr/0048-application-ergonomics.md).

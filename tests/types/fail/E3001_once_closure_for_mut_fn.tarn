@@ -1,0 +1,11 @@
+// Only a non-consuming closure adopts an expected `mut fn`: this one moves
+// its capture out, so it can run once and is still rejected.
+fn twice(handler mut fn() string) {
+    var call = handler
+    a := call()
+    b := call()
+}
+fn main() {
+    owned := "x"
+    twice(move fn() string { return owned })
+}

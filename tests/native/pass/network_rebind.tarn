@@ -1,0 +1,24 @@
+// Phase 17: a server that closes accepted connections first can bind its
+// port again immediately; an active listener still excludes a second one.
+import "net"
+import "io"
+import "string"
+fn main() Result<void, io.Error> {
+    var listener = try net.TcpListener.bind(&"127.0.0.1:0")
+    port := (try listener.local_addr()).port()
+    address := "127.0.0.1:" + &string.from_u64(u64(port))
+    var client = try net.TcpStream.connect(&address)
+    var accepted = try listener.accept()
+    try accepted.close()
+    var buffer = [1]u8{0}
+    print(try client.read(&mut buffer))
+    match net.TcpListener.bind(&address) {
+        Ok(other) => { print("second active listener accepted") }
+        Err(error) => { print("active listener excludes another") }
+    }
+    try listener.close()
+    try client.close()
+    rebound := try net.TcpListener.bind(&address)
+    print((try rebound.local_addr()).port() == port)
+    return Ok(())
+}

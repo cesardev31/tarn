@@ -1,0 +1,32 @@
+// Phase 17: linear string accumulation and prefix stripping.
+import "string"
+fn main() {
+    var b = string.Builder.new()
+    print(b.len())
+    b.push(&"id=")
+    b.push_u64(18446744073709551615)
+    b.push(&" ñ😀 ")
+    b.push_i64(-9223372036854775808)
+    print(b.len())
+    text := b.finish()
+    print(text)
+    var many = string.Builder.new()
+    var n = 0
+    for n < 1000 {
+        many.push(&"ab")
+        n = n + 1
+    }
+    print(many.finish().len())
+    match string.strip_prefix(&"/items/12", &"/items/") {
+        Some(rest) => { print(rest) }
+        None => { print("none") }
+    }
+    match string.strip_prefix(&"/items", &"/items/") {
+        Some(rest) => { print(rest) }
+        None => { print("none") }
+    }
+    match string.strip_prefix(&"abc", &"") {
+        Some(rest) => { print(rest) }
+        None => { print("none") }
+    }
+}

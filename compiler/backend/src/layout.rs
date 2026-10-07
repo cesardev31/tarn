@@ -44,6 +44,13 @@ fn layout_inner(t: &Typed, ty: &Ty, seen: &mut Vec<Ty>) -> Result<Layout> {
             }
         }
         Ty::Fn(..) | Ty::Async(_) => Layout { size: 16, align: 8, fields: Vec::new(), variants: Vec::new() },
+        // Zero-length markers (`Vec<T>.elements [0]T`, `AsyncTask<R>.result
+        // [0]R`) store nothing inline: elements live behind the header's
+        // pointer. Laying out their element would report false by-value
+        // recursion for `enum Value { List(Vec<Value>) }`, directly or through
+        // another aggregate. Every marker sits beside usize header fields, and
+        // no native type aligns beyond 8, so alignment 1 changes no layout.
+        Ty::Array(_, 0) => scalar(0),
         Ty::Array(elem, n) => {
             if *n > 4096 {
                 return Err(Error::unsupported("fixed arrays exceed v0 limit of 4096 elements"));

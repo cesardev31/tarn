@@ -852,3 +852,72 @@ fn cleanup_oracle_rejects_missing_and_duplicate_destruction_events() {
         assert!(std::panic::catch_unwind(|| balanced(trace)).is_err());
     }
 }
+
+/// Phase 17 `http.serve`: one request per connection, handler state shared by
+/// mutable capture, handler errors and protocol errors answered once, JSON and
+/// empty responses framed by the library.
+#[test]
+fn serve_runs_a_mutable_handler_sequentially_and_closes_each_connection() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let source = format!(
+        r#"import "http"
+import "io"
+import "string"
+fn main() Result<void, io.Error> {{
+    var hits: u64 = 0
+    return http.serve(&"127.0.0.1:{port}", fn(request &http.Request) Result<http.Response, http.Error> {{
+        hits = hits + 1
+        if request.target() == &"/fail" {{ return Err(http.Error.InvalidState) }}
+        if request.target() == &"/empty" {{ return http.Response.empty(204) }}
+        if request.method() != &"GET" {{ return http.Response.method_not_allowed(&"GET") }}
+        return http.Response.json(200, "{{\"hits\":" + &string.from_u64(hits) + &"}}")
+    }})
+}}
+"#
+    );
+    let exe = compile(&source, "serve");
+    let mut child = Command::new(&exe).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().unwrap();
+    let start = Instant::now();
+    let connect_ready = || loop {
+        if let Ok(stream) = TcpStream::connect(("127.0.0.1", port)) {
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            return stream;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "server did not bind");
+        // Startup polling only.
+        thread::sleep(Duration::from_millis(5));
+    };
+    let exchange = |request: &[u8]| {
+        let mut peer = connect_ready();
+        peer.write_all(request).unwrap();
+        let mut reader = BufReader::new(peer);
+        let reply = response(&mut reader, false);
+        reply
+    };
+    let first = exchange(b"GET /a HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    assert_eq!(first.status, 200);
+    assert_eq!(first.body, b"{\"hits\":1}");
+    assert!(first.headers.contains(&("content-type".into(), b"application/json".to_vec())));
+    assert!(first.headers.contains(&("connection".into(), b"close".to_vec())));
+    // A pipelined second request is not answered: each response closes.
+    let mut peer = connect_ready();
+    peer.write_all(b"GET /b HTTP/1.1\r\nHost: localhost\r\n\r\nGET /c HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+    let mut reader = BufReader::new(peer);
+    assert_eq!(response(&mut reader, false).body, b"{\"hits\":2}");
+    rejected_closed(&mut reader);
+    let empty = exchange(b"GET /empty HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    assert_eq!(empty.status, 204);
+    assert!(empty.body.is_empty());
+    let post = exchange(b"POST /a HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
+    assert_eq!(post.status, 405);
+    assert!(post.headers.contains(&("allow".into(), b"GET".to_vec())));
+    assert_eq!(exchange(b"GET /fail HTTP/1.1\r\nHost: localhost\r\n\r\n").status, 500);
+    assert_eq!(exchange(b"GET /a HTTP/1.1\r\n\r\n").status, 400);
+    // The server still answers after handler and protocol failures.
+    // The server still answers after handler and protocol failures; every
+    // request reached the handler except the one rejected before parsing.
+    assert_eq!(exchange(b"GET /a HTTP/1.1\r\nHost: localhost\r\n\r\n").body, b"{\"hits\":6}");
+    child.kill().unwrap();
+    child.wait().unwrap();
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}

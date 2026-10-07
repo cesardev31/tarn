@@ -1,0 +1,21 @@
+// Phase 17: a closure that only reads its captures is accepted where an
+// exclusively invoked `mut fn` is expected, both borrowed and owned.
+fn twice(handler mut fn(&string) string) {
+    var call = handler
+    print(call(&"a"))
+    print(call(&"b"))
+}
+fn main() {
+    prefix := "borrowed-"
+    twice(fn(p &string) string { return "" + &prefix + p })
+    twice(fn(p &string) string { return "free-" + p })
+    owned := "owned-"
+    twice(move fn(p &string) string { return "" + &owned + p })
+    var count: u64 = 0
+    twice(fn(p &string) string {
+        count = count + 1
+        return p.clone()
+    })
+    print(count)
+    print(prefix)
+}

@@ -1469,10 +1469,15 @@ impl<'e, 'a> FnCx<'e, 'a> {
             let fields = captured.map(|c| c.symbols.iter().map(|s| (*s, self.infer.zonk(&self.locals.get(s).cloned().unwrap_or(Ty::Error)))).collect()).unwrap_or_default();
             self.tables.owned_captures.insert(e.id, fields);
         }
+        // A closure written where `mut fn` is expected may be invoked
+        // exclusively even if it only reads its captures: exclusive access is
+        // strictly stronger, and capture modes stay shared. Once is not adopted
+        // because consuming invocation also changes environment release.
+        let wants_mutable = matches!(exp, Some(Ty::Fn(CallMode::Mutable, ..)));
         Ty::Fn(
             if consuming {
                 CallMode::Once
-            } else if mutable {
+            } else if mutable || wants_mutable {
                 CallMode::Mutable
             } else {
                 CallMode::Shared
