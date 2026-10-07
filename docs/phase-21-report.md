@@ -1,6 +1,6 @@
 # Phase 21 report: VS Code language support
 
-Status: implemented; final validation in progress.
+Status: implemented and validated.
 
 ## What was implemented
 
@@ -29,7 +29,7 @@ disk. An isolated real VS Code extension host also passes activation, applying
 format edits, unsaved compiler diagnostics, disable/enable and restart. Its
 `test-result.json` confirms success independently of the launcher exit status.
 It uses temporary user-data/extensions directories and never saves the source.
-Final workspace and rebuilt-artifact results are recorded below when complete.
+Final workspace and rebuilt-artifact results are recorded below.
 
 ## Bugs found
 
@@ -64,3 +64,22 @@ Extension JavaScript/grammar changes need a window reload; server-only rebuilds
 need the existing restart command. No Windows/macOS support was added.
 
 Usage and validation commands: [VS Code guide](../editors/vscode/README.md).
+
+## Final validation
+
+- `npm test` in `editors/vscode`: seven tests pass, including snippet defaults
+  parsed by the real Tarn CLI.
+- `ELECTRON_RUN_AS_NODE=1 /usr/share/code/code editors/vscode/tests/textmate.cjs`:
+  real TextMate/Oniguruma source and snapshot tokenization passes.
+- `python3 tools/lsp/tests/smoke.py`: all three acceptance groups pass after
+  rebuilding the effective debug server, including formatting failure codes.
+- The isolated VS Code extension-host acceptance writes `{ "ok": true }` after
+  real activation, formatting, unsaved diagnostics, disable/enable and restart.
+- Release/debug binaries were rebuilt; `tarn-lsp` and `tarn` installed in
+  `~/.local/bin` match the release artifacts. External CLI use passes.
+- Workspace validation and its two previously passed mutation-test exclusions
+  are documented in the [Phase 20 report](phase-20-report.md).
+
+The user's existing extension symlink already points to this checkout. Reload
+that VS Code window once to load the changed JavaScript, grammar and snippets;
+no user session/window was reloaded automatically by this work.

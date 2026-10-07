@@ -1,6 +1,6 @@
 # Phase 21: VS Code language support
 
-Status: implemented; final validation in progress.
+Status: implemented and validated.
 
 ## Existing foundation
 
@@ -34,3 +34,5 @@ unsaved diagnostics, hover and definition. Preserve that implementation.
 
 No independent parser, completion engine, rename, workspace index, debugger,
 marketplace publication or Windows/macOS work is authorized by this phase.
+
+Completed validation and known limits: [Phase 21 report](phase-21-report.md).

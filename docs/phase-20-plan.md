@@ -1,6 +1,6 @@
 # Phase 20: basic canonical formatter
 
-Status: implemented; final validation in progress.
+Status: implemented and validated.
 Design: [ADR 0050](adr/0050-conservative-source-formatting.md).
 
 ## Scope
@@ -25,3 +25,5 @@ Design: [ADR 0050](adr/0050-conservative-source-formatting.md).
   refuse invalid/closed documents and leave disk unchanged.
 
 No wrapping policy, range formatting, import sorting or syntax changes.
+
+Completed validation and known limits: [Phase 20 report](phase-20-report.md).
