@@ -509,3 +509,7 @@ not Share. Native destruction follows ordinary post-drop IR. See
 Blocking owned regular files and safe byte/text helpers are documented in
 [the filesystem module](filesystem.md) (Phase 15B). File operations return
 `Result<..., io.Error>` and use ordinary ownership, loans and post-drop.
+
+Owned lexical POSIX paths are documented in [the path module](path.md)
+(Phase 15C). Manipulation never performs filesystem I/O or implicitly cancels
+`..`; borrowed text and owned components use ordinary provenance.

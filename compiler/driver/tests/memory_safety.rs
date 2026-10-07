@@ -6,6 +6,14 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("path constructor moves text", Some("E4001"), "import \"path\"\nfn main() { text := \"owned\"\n p := path.Path.new(text)\n print(text) }"),
+    ("path cannot move with text loan", Some("E4103"), "import \"path\"\nfn main() { p := path.Path.new(\"owned\")\n r := p.as_string()\n moved := p\n print(r) }"),
+    ("path cannot overwrite with text loan", Some("E4102"), "import \"path\"\nfn main() { var p = path.Path.new(\"owned\")\n r := p.as_string()\n p = path.Path.new(\"next\")\n print(r) }"),
+    ("path text cannot escape owner", Some("E4201"), "import \"path\"\nfn bad() &string { p := path.Path.new(\"owned\")\n return p.as_string() }"),
+    ("path consumption makes owner unusable", Some("E4001"), "import \"path\"\nfn main() { p := path.Path.new(\"owned\")\n text := p.into_string()\n p.as_string() }"),
+    ("path components own their strings", None, "import \"path\"\nfn good() Vec<string> { p := path.Path.new(\"a/b\")\n return p.components() }"),
+    ("path transfers and returns through task", None, "import \"path\"\nfn main() { p := path.Path.new(\"owned\")\n t := spawn move fn() path.Path { return p }\n result := t.join()\n print(result.as_string()) }"),
+    ("path supports shared scoped workers", None, "import \"path\"\nfn main() { p := path.Path.new(\"owned\")\n scope { spawn fn() { print(p.as_string()) }\n spawn fn() { print(p.as_string()) } } }"),
     ("file cannot be used after move", Some("E4001"), "import \"fs\"\nfn bad(file fs.File) { moved := file\n file.metadata() }"),
     ("file cannot close twice", Some("E4001"), "import \"fs\"\nfn bad(file fs.File) { file.close()\n file.close() }"),
     ("file cannot move while borrowed", Some("E4103"), "import \"fs\"\nfn bad(file fs.File) { loan := &file\n moved := file\n loan.metadata() }"),

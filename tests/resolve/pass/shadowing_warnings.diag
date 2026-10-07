@@ -1,7 +1,7 @@
-warning[W2003]: unused import `path`
+warning[W2003]: unused import `http`
  --> tests/resolve/pass/shadowing_warnings.tarn:1:8
   |
-1 | import "path"
+1 | import "http"
   |        ^^^^^^
   |
   = help: remove the import
@@ -36,12 +36,12 @@ warning[W2002]: `print` shadows the builtin function `print`
    |
    = help: use a different name
 
-warning[W2002]: `path` shadows the module `path`
+warning[W2002]: `http` shadows the module `http`
   --> tests/resolve/pass/shadowing_warnings.tarn:17:5
    |
- 1 | import "path"
+ 1 | import "http"
    |        ------ declared here
-17 |     path := 1
+17 |     http := 1
    |     ^^^^
    |
    = help: use a different name

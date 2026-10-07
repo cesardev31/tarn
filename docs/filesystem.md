@@ -66,3 +66,7 @@ New errors are NotFound, PermissionDenied, AlreadyExists, InvalidInput,
 InvalidData, NotDirectory, IsDirectory, DirectoryNotEmpty and StorageFull.
 Inspect with match; native_code preserves OS diagnostics. Error.new(kind) creates
 an application error. See [ADR 0043](adr/0043-blocking-filesystem.md).
+
+For owned lexical paths, use [the path module](path.md) and pass
+`Path.as_string()` to these APIs. Filesystem operations do not implicitly
+normalize paths or cancel `..`, preserving symlink-sensitive lookup semantics.

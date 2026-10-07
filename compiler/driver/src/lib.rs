@@ -9,6 +9,8 @@ use tarn_ast::{ItemKind, Module};
 use tarn_diagnostics::{Diagnostic, Severity, SourceMap};
 use tarn_resolve::{ModuleInput, Resolved};
 
+const PATH_SOURCE: &str = include_str!("../../../stdlib/path/path.tarn");
+
 const STRING_SOURCE: &str = include_str!("../../../stdlib/string/string.tarn");
 
 const CORE_SOURCE: &str = include_str!("../../../stdlib/core/core.tarn");
@@ -29,7 +31,7 @@ fn trusted_source(name: &str) -> Option<&'static str> {
     TRUSTED_STDLIB.iter().find(|(n, _)| *n == name).map(|(_, source)| *source)
 }
 
-fn official_module(name: &str) -> bool { name == "string" || trusted_source(name).is_some() }
+fn official_module(name: &str) -> bool { (name == "string" || name == "path") || trusted_source(name).is_some() }
 
 pub struct Program {
     pub sources: SourceMap,
@@ -79,7 +81,7 @@ fn official_stdlib_path(name: &str) -> PathBuf {
 
 fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, editor: bool) -> Result<(Program, Vec<Diagnostic>), String> {
     let official_entry = if editor {
-        entry.canonicalize().ok().and_then(|entry| TRUSTED_STDLIB.iter().map(|(name, _)| *name).chain(["string"]).find(|name|
+        entry.canonicalize().ok().and_then(|entry| TRUSTED_STDLIB.iter().map(|(name, _)| *name).chain(["string", "path"]).find(|name|
             official_stdlib_path(name).canonicalize().ok().as_ref() == Some(&entry)))
     } else { None };
     let root = entry.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
@@ -111,6 +113,7 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
             match overlays.get(&path) {
                 Some(text) => text.clone(),
                 None if name == "string" && !path.is_file() => STRING_SOURCE.to_string(),
+                None if name == "path" && !path.is_file() => PATH_SOURCE.to_string(),
                 None => std::fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?,
             }
         };

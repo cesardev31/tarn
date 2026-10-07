@@ -1,0 +1,192 @@
+// POSIX lexical paths, phase 15C. No filesystem calls or native intrinsics.
+import "string"
+
+/// Owned path text, preserved verbatim. No OS existence/validity guarantee.
+pub struct Path { text string }
+pub fn Path.new(value string) Path { return Path{text: value} }
+pub fn Path.from_text(value &string) Path { return Path{text: value.clone()} }
+pub fn Path.as_string(&self) &string { return &self.text }
+pub fn Path.into_string(self) string { return self.text }
+pub fn Path.clone(&self) Path { return Path{text: self.text.clone()} }
+pub fn Path.is_empty(&self) bool { return self.text.is_empty() }
+pub fn Path.is_absolute(&self) bool { return is_absolute(&self.text) }
+pub fn Path.is_relative(&self) bool { return !is_absolute(&self.text) }
+pub fn Path.is_valid(&self) bool { return is_valid(&self.text) }
+pub fn Path.join(&self, other &string) Path { return Path{text: join(&self.text, other)} }
+pub fn Path.normalize(&self) Path { return Path{text: normalize(&self.text)} }
+pub fn Path.components(&self) Vec<string> { return components(&self.text) }
+pub fn Path.file_name(&self) Option<string> { return file_name(&self.text) }
+pub fn Path.file_stem(&self) Option<string> { return file_stem(&self.text) }
+pub fn Path.extension(&self) Option<string> { return extension(&self.text) }
+pub fn Path.parent(&self) Option<Path> {
+    match parent(&self.text) {
+        Some(value) => { return Some(Path{text: value}) }
+        None => { return None }
+    }
+}
+pub fn Path.with_extension(&self, value &string) Option<Path> {
+    match with_extension(&self.text, value) {
+        Some(text) => { return Some(Path{text: text}) }
+        None => { return None }
+    }
+}
+pub fn Path.starts_with(&self, base &string) bool { return starts_with(&self.text, base) }
+pub fn Path.strip_prefix(&self, base &string) Option<Path> {
+    match strip_prefix(&self.text, base) {
+        Some(text) => { return Some(Path{text: text}) }
+        None => { return None }
+    }
+}
+pub fn is_absolute(value &string) bool {
+    data := value.bytes()
+    return data.len() > usize(0) && data[0] == u8(47)
+}
+/// Valid nonempty POSIX filesystem input: no embedded NUL. Pure operations
+/// still accept other strings; fs enforces its own syscall boundary.
+pub fn is_valid(value &string) bool {
+    data := value.bytes()
+    if data.len() == usize(0) { return false }
+    for byte in data { if byte == u8(0) { return false } }
+    return true
+}
+/// Absolute children replace the base. Empty children preserve it. No '..'
+/// cancellation, separator collapse or filesystem lookup occurs here.
+pub fn join(base &string, child &string) string {
+    if is_absolute(child) || base.is_empty() { return child.clone() }
+    if child.is_empty() { return base.clone() }
+    data := base.bytes()
+    if data[data.len() - 1] == u8(47) { return base + child }
+    return base + "/" + child
+}
+fn _range(value &string, start usize, end usize) string {
+    match string.slice(value, start, end) {
+        Some(text) => { return text }
+        None => { panic("internal path UTF-8 boundary invariant") }
+    }
+}
+/// Root is '/'; repeated separators and '.' are omitted. '..' remains a
+/// component. Backslash and drive-letter text are ordinary POSIX names.
+pub fn components(value &string) Vec<string> {
+    var result: Vec<string> = Vec.new()
+    if is_absolute(value) { result.push("/") }
+    data := value.bytes()
+    var start: usize = 0
+    var index: usize = 0
+    for index <= data.len() {
+        if index == data.len() || data[index] == u8(47) {
+            if start < index {
+                part := _range(value, start, index)
+                if part != "." { result.push(part) }
+            }
+            start = index + 1
+        }
+        index = index + 1
+    }
+    return result
+}
+fn _assemble(parts &[]string, start usize, end usize) string {
+    var text = ""
+    var index = start
+    for index < end {
+        part := &parts[index]
+        if text.is_empty() { text = part.clone() } else { text = join(&text, part) }
+        index = index + 1
+    }
+    return text
+}
+/// Explicit lexical '..' cancellation; never canonicalizes symlinks.
+/// Empty/all-cancelled relative paths become '.', absolute paths stop at root.
+pub fn normalize(value &string) string {
+    parts := components(value)
+    var stack: Vec<string> = Vec.new()
+    for part in parts.as_slice() {
+        if part == &".." {
+            if !stack.is_empty() {
+                last := stack.get(stack.len() - 1)
+                if last == &"/" { continue }
+                if last != &".." { stack.pop()
+                    continue }
+            }
+        }
+        stack.push(part.clone())
+    }
+    if stack.is_empty() { return "." }
+    return _assemble(stack.as_slice(), usize(0), stack.len())
+}
+pub fn parent(value &string) Option<string> {
+    parts := components(value)
+    if parts.is_empty() { return None }
+    if parts.len() == usize(1) && parts.get(usize(0)) == &"/" { return None }
+    return Some(_assemble(parts.as_slice(), usize(0), parts.len() - 1))
+}
+pub fn file_name(value &string) Option<string> {
+    parts := components(value)
+    if parts.is_empty() { return None }
+    last := parts.get(parts.len() - 1)
+    if last == &"/" || last == &".." { return None }
+    return Some(last.clone())
+}
+fn _dot(name &string) usize {
+    data := name.bytes()
+    var found = data.len()
+    var index: usize = 1
+    for index < data.len() {
+        if data[index] == u8(46) { found = index }
+        index = index + 1
+    }
+    return found
+}
+pub fn file_stem(value &string) Option<string> {
+    match file_name(value) {
+        Some(name) => { return Some(_range(&name, usize(0), _dot(&name))) }
+        None => { return None }
+    }
+}
+pub fn extension(value &string) Option<string> {
+    match file_name(value) {
+        Some(name) => {
+            dot := _dot(&name)
+            if dot == name.len() { return None }
+            return Some(_range(&name, dot + 1, name.len()))
+        }
+        None => { return None }
+    }
+}
+/// Empty extension removes the suffix. Reject slash/NUL in the extension;
+/// root/parent-only paths have no replaceable file name.
+pub fn with_extension(value &string, suffix &string) Option<string> {
+    for byte in suffix.bytes() {
+        if byte == u8(47) || byte == u8(0) { return None }
+    }
+    match file_name(value) {
+        Some(name) => {
+            stem := _range(&name, usize(0), _dot(&name))
+            var replacement = stem
+            if !suffix.is_empty() { replacement = replacement + "." + suffix }
+            match parent(value) {
+                Some(base) => { return Some(join(&base, &replacement)) }
+                None => { return None }
+            }
+        }
+        None => { return None }
+    }
+}
+pub fn starts_with(value &string, base &string) bool {
+    parts := components(value)
+    prefix := components(base)
+    if prefix.len() > parts.len() { return false }
+    var index: usize = 0
+    for index < prefix.len() {
+        if parts.get(index) != prefix.get(index) { return false }
+        index = index + 1
+    }
+    return true
+}
+/// Component-prefix removal, not character-prefix removal. '.' and repeated
+/// separators are ignored; '..' is not cancelled. Matching whole paths yields ''.
+pub fn strip_prefix(value &string, base &string) Option<string> {
+    if !starts_with(value, base) { return None }
+    parts := components(value)
+    prefix := components(base)
+    return Some(_assemble(parts.as_slice(), prefix.len(), parts.len()))
+}

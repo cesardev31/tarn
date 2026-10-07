@@ -1,4 +1,4 @@
-import "path"
+import "http"
 
 fn main() {
     limit := 10
@@ -14,5 +14,5 @@ fn main() {
         print(total)
     }
     print := 3
-    path := 1
+    http := 1
 }

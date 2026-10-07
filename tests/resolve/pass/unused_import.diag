@@ -1,7 +1,7 @@
-warning[W2003]: unused import `path`
+warning[W2003]: unused import `http`
  --> tests/resolve/pass/unused_import.tarn:1:8
   |
-1 | import "path"
+1 | import "http"
   |        ^^^^^^
   |
   = help: remove the import

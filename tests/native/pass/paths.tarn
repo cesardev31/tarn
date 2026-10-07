@@ -1,0 +1,28 @@
+import "path"
+fn show(value Option<string>) {
+    match value { Some(text) => { print(text) }
+        None => { print("none") } }
+}
+fn main() {
+    owned := "a//./café.tar.gz"
+    value := path.Path.new(owned)
+    print(value.is_relative())
+    print(value.is_valid())
+    print(value.join(&"../child").into_string())
+    print(path.normalize(&"/a/../../café//./"))
+    show(path.parent(&"/a/b/"))
+    show(value.file_name())
+    show(value.file_stem())
+    show(value.extension())
+    show(path.extension(&".gitignore"))
+    show(path.with_extension(&"/a/café.tar.gz", &"txt"))
+    print(path.starts_with(&"/a/b", &"/a"))
+    print(path.starts_with(&"/apple", &"/app"))
+    show(path.strip_prefix(&"/a//./b", &"/a"))
+    parts := value.components()
+    print(parts.len())
+    for part in parts.as_slice() { print(part) }
+    cloned := value.clone()
+    print(cloned.into_string())
+    print(value.into_string())
+}

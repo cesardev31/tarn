@@ -186,3 +186,12 @@ borrow and drop elaboration analyze it unchanged. After verified drop
 elaboration, `ir::async_frame` relocates suspension-live locals and all flags
 into a stable heap frame and makes the state dispatch explicit. The backend only
 places slots at frame offsets and emits poll/destruction adapters.
+
+## Lexical paths (Phase 15C)
+
+`stdlib/path` is an ordinary Tarn module over owned UTF-8 strings. Bundled source
+is a fallback, not a trusted intrinsic provider; local modules can override it.
+Path capabilities, loans and destruction are entirely structural. No runtime
+or backend ABI changes are needed. Applications pass borrowed path text to fs.
+Explicit lexical normalization is separate from filesystem resolution. See
+[ADR 0044](adr/0044-lexical-owned-paths.md).

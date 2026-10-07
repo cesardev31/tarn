@@ -1093,6 +1093,17 @@ Detailed requirements and open choices: [dependency security](docs/dependency-se
 
 ---
 
+## Stable path rules (Phase 15C)
+
+- Path is an ordinary owned string wrapper; provenance and structural
+  Transfer/Share remain authoritative. No native ownership exception is needed.
+- Path manipulation is lexical. Join and filesystem I/O never implicitly
+  normalize `..`; symlink resolution is a separate filesystem operation.
+- Components and optional path results own their text. Do not invent stored
+  borrowed path views or a separate lifetime system.
+- POSIX slash syntax and strict UTF-8 are the current boundary. See
+  [ADR 0044](docs/adr/0044-lexical-owned-paths.md).
+
 ## Stable filesystem rules (Phase 15B)
 
 - `stdlib/fs` owns regular files; File is non-Copy, Transfer and not Share.
@@ -1105,7 +1116,7 @@ Detailed requirements and open choices: [dependency security](docs/dependency-se
   Invalid UTF-8 text/names and NUL paths are explicit errors, not lossy decoding.
 - Directory entries own copied names/paths; borrowed strings retain provenance.
 - fs depends downward on io, with separately validated resource/intrinsic IDs.
-  Path, process and async filesystem are separate phases. See
+  Process and async filesystem remain separate phases. See
   [ADR 0043](docs/adr/0043-blocking-filesystem.md).
 
 ## Stable string rules (Phase 15A)

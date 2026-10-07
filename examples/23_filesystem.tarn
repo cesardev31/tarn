@@ -1,10 +1,11 @@
 import "fs"
 import "io"
+import "path"
 
 fn check_sdk() Result<void, io.Error> {
-    sdk := "/opt/xlinux/sdk"
-    if !(try fs.exists(&sdk)) { return Err(io.Error.new(io.ErrorKind.NotFound)) }
-    entries := try fs.read_dir(&sdk)
+    sdk := path.Path.new("/opt/xlinux/sdk")
+    if !(try fs.exists(sdk.as_string())) { return Err(io.Error.new(io.ErrorKind.NotFound)) }
+    entries := try fs.read_dir(sdk.as_string())
     for entry in entries.as_slice() { print(entry.name()) }
     return Ok(())
 }
