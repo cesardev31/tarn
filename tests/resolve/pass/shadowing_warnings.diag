@@ -1,8 +1,8 @@
-warning[W2003]: unused import `json`
+warning[W2003]: unused import `collections`
  --> tests/resolve/pass/shadowing_warnings.tarn:1:8
   |
-1 | import "json"
-  |        ^^^^^^
+1 | import "collections"
+  |        ^^^^^^^^^^^^^
   |
   = help: remove the import
 
@@ -36,13 +36,13 @@ warning[W2002]: `print` shadows the builtin function `print`
    |
    = help: use a different name
 
-warning[W2002]: `json` shadows the module `json`
+warning[W2002]: `collections` shadows the module `collections`
   --> tests/resolve/pass/shadowing_warnings.tarn:17:5
    |
- 1 | import "json"
-   |        ------ declared here
-17 |     json := 1
-   |     ^^^^
+ 1 | import "collections"
+   |        ------------- declared here
+17 |     collections := 1
+   |     ^^^^^^^^^^^
    |
    = help: use a different name
 

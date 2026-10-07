@@ -1,8 +1,8 @@
-warning[W2003]: unused import `json`
+warning[W2003]: unused import `collections`
  --> tests/resolve/pass/unused_import.tarn:1:8
   |
-1 | import "json"
-  |        ^^^^^^
+1 | import "collections"
+  |        ^^^^^^^^^^^^^
   |
   = help: remove the import
 

@@ -1,5 +1,5 @@
 // Phase 17 acceptance program: a JSON CRUD over http.serve (ADR 0048).
-// Same source as the external tarn-crud evaluation application.
+// Derived from the external tarn-crud evaluation application (ADR 0048).
 // Items CRUD over HTTP, persisted as a JSON array in items.json.
 import "http"
 import "json"

@@ -1,4 +1,4 @@
-import "json"
+import "collections"
 
 fn main() {
     limit := 10
@@ -14,5 +14,5 @@ fn main() {
         print(total)
     }
     print := 3
-    json := 1
+    collections := 1
 }
