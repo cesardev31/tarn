@@ -13,8 +13,11 @@ usage:
     tarn resolve <file.tarn>         print what every name resolves to
     tarn types <file.tarn>           print the type of every local and parameter
     tarn ir <file.tarn>              print typed IR; --drops prints executable drops
-    tarn build <file.tarn> [-o path] emit a Linux x86_64 executable
-    tarn run <file.tarn>              build temporarily and execute
+    tarn build <file.tarn> [-o path] [--link lib]...
+                                     emit a Linux x86_64 executable; each
+                                     --link grants a system C library
+    tarn run <file.tarn> [--link lib]...
+                                     build temporarily and execute
     tarn version                     print the compiler version
 
 planned: build, run, test, check, fmt, clean, cache
@@ -210,12 +213,23 @@ fn json_str(out: &mut String, s: &str) {
 
 fn cmd_native(args: &[String], run: bool) -> ExitCode {
     let Some(path) = args.first().filter(|p| !p.starts_with('-')) else {
-        eprintln!("error: usage: tarn {} file.tarn{}", if run { "run" } else { "build" }, if run { "" } else { " [-o path]" });
+        eprintln!("error: usage: tarn {} file.tarn{} [--link library]...", if run { "run" } else { "build" }, if run { "" } else { " [-o path]" });
         return ExitCode::from(2);
     };
-    let explicit = if !run && args.len() == 3 && args[1] == "-o" { Some(std::path::PathBuf::from(&args[2])) }
-        else if args.len() == 1 { None }
-        else { eprintln!("error: invalid native command arguments"); return ExitCode::from(2); };
+    let mut explicit = None;
+    let mut libraries = Vec::new();
+    let mut rest = args[1..].iter();
+    while let Some(arg) = rest.next() {
+        match (arg.as_str(), rest.next()) {
+            ("-o", Some(out)) if !run && explicit.is_none() => explicit = Some(std::path::PathBuf::from(out)),
+            ("--link", Some(library)) if tarn_backend::valid_library(library) => libraries.push(library.clone()),
+            ("--link", Some(library)) => {
+                eprintln!("error: invalid library `{library}`: use a name such as `sqlite3` or an exact file such as `:libsqlite3.so.0`");
+                return ExitCode::from(2);
+            }
+            _ => { eprintln!("error: invalid native command arguments"); return ExitCode::from(2); }
+        }
+    }
     let res = match tarn_driver::check(std::path::Path::new(path)) {
         Ok(r) => r, Err(e) => { eprintln!("error: {e}"); return ExitCode::from(1); }
     };
@@ -227,7 +241,7 @@ fn cmd_native(args: &[String], run: bool) -> ExitCode {
     if std::path::Path::new(path).canonicalize().ok() == output.canonicalize().ok() && output.exists() {
         eprintln!("error: output would overwrite the source file"); return ExitCode::from(1);
     }
-    if let Err(e) = tarn_backend::build(p, t, &output) { eprintln!("error: {e}"); return ExitCode::from(1); }
+    if let Err(e) = tarn_backend::build_linked(p, t, &output, &libraries) { eprintln!("error: {e}"); return ExitCode::from(1); }
     if !run { return ExitCode::SUCCESS; }
     let status = std::process::Command::new(&output).status();
     let _ = std::fs::remove_file(&output);

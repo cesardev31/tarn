@@ -1,0 +1,129 @@
+// Phase 18D acceptance: the items CRUD of examples/http_crud.tarn over SQLite.
+// Run with `tarn run examples/sqlite/crud.tarn --link sqlite3`.
+import "http"
+import "json"
+import "io"
+import "string"
+import "sqlite"
+
+struct Item {
+    id u64
+    name string
+}
+
+impl json.Encode for Item {
+    fn encode(&self, out &mut json.Writer) {
+        out.begin_object()
+        out.field_u64(&"id", self.id)
+        out.field_string(&"name", &self.name)
+        out.end_object()
+    }
+}
+
+// The request body must be {"name": "..."} with a non-empty name.
+fn name_of(request &http.Request) Option<string> {
+    match json.parse_bytes(request.body()) {
+        Ok(body) => match body.text(&"name") {
+            Some(name) => {
+                if string.trim(&name).is_empty() { return None }
+                return Some(name)
+            }
+            None => { return None }
+        }
+        Err(error) => { return None }
+    }
+}
+
+// Run a query and collect its (id, name) rows.
+fn select(db &mut sqlite.Db, sql &string, id i64) Result<Vec<Item>, sqlite.Error> {
+    var query = try db.prepare(sql)
+    if id > 0 { try query.bind_i64(1, id) }
+    var items: Vec<Item> = Vec.new()
+    for try query.step() {
+        items.push(Item{id: u64(query.column_i64(0)), name: try query.column_text(1)})
+    }
+    try query.finalize()
+    return Ok(items)
+}
+
+// Run a statement with an optional name and id; returns rows changed.
+fn change(db &mut sqlite.Db, sql &string, name &string, id i64) Result<i64, sqlite.Error> {
+    var statement = try db.prepare(sql)
+    if !name.is_empty() { try statement.bind_text(1, name) }
+    if id > 0 { try statement.bind_i64(2, id) }
+    try statement.run()
+    try statement.finalize()
+    return Ok(db.changes())
+}
+
+fn handle(db &mut sqlite.Db, request &http.Request) Result<http.Response, sqlite.Error> {
+    method := request.method()
+    if request.target() == &"/items" {
+        if method == &"GET" {
+            items := try select(db, &"SELECT id, name FROM items ORDER BY id", 0)
+            return Ok(try_response(http.Response.json(200, json.encode_list(items.as_slice()))))
+        }
+        if method != &"POST" { return Ok(try_response(http.Response.method_not_allowed(&"GET, POST"))) }
+        match name_of(request) {
+            Some(name) => {
+                changed := try change(db, &"INSERT INTO items (name) VALUES (?1)", &name, 0)
+                item := Item{id: u64(db.last_insert_id()), name: name}
+                return Ok(try_response(http.Response.json(201, json.encode(&item))))
+            }
+            None => { return Ok(try_response(http.Response.text(400, &"expected {\"name\": \"...\"}\n"))) }
+        }
+    }
+    var id: i64 = 0
+    match string.strip_prefix(request.target(), &"/items/") {
+        Some(rest) => match string.parse_i64(&rest) {
+            Some(n) => { id = n }
+            None => {}
+        }
+        None => {}
+    }
+    if id <= 0 { return Ok(try_response(http.Response.text(404, &"not found\n"))) }
+    if method == &"DELETE" {
+        if try change(db, &"DELETE FROM items WHERE id = ?2", &"", id) == 0 { return Ok(try_response(http.Response.text(404, &"item not found\n"))) }
+        return Ok(try_response(http.Response.empty(204)))
+    }
+    if method == &"PUT" {
+        match name_of(request) {
+            Some(name) => { if try change(db, &"UPDATE items SET name = ?1 WHERE id = ?2", &name, id) == 0 { return Ok(try_response(http.Response.text(404, &"item not found\n"))) } }
+            None => { return Ok(try_response(http.Response.text(400, &"expected {\"name\": \"...\"}\n"))) }
+        }
+    } else if method != &"GET" {
+        return Ok(try_response(http.Response.method_not_allowed(&"GET, PUT, DELETE")))
+    }
+    items := try select(db, &"SELECT id, name FROM items WHERE id = ?1", id)
+    if items.is_empty() { return Ok(try_response(http.Response.text(404, &"item not found\n"))) }
+    return Ok(try_response(http.Response.json(200, json.encode(items.get(0)))))
+}
+
+// Response construction only fails for invalid statuses, which are constants here.
+fn try_response(response Result<http.Response, http.Error>) http.Response {
+    match response {
+        Ok(value) => { return value }
+        Err(error) => { panic("invalid constant response") }
+    }
+}
+
+fn main() Result<void, io.Error> {
+    var db: sqlite.Db
+    match sqlite.open(&"items.sqlite") {
+        Ok(value) => { db = value }
+        Err(error) => {
+            print(error.message)
+            return Ok(())
+        }
+    }
+    match db.exec(&"CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)") {
+        Ok(done) => {}
+        Err(error) => { print(error.message) }
+    }
+    return http.serve(&"127.0.0.1:8080", fn(request &http.Request) Result<http.Response, http.Error> {
+        match handle(&mut db, request) {
+            Ok(response) => { return Ok(response) }
+            Err(error) => { return http.Response.text(500, &(error.message + &"\n")) }
+        }
+    })
+}

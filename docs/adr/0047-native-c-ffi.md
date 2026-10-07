@@ -1,7 +1,7 @@
 # ADR 0047: minimal native C FFI
 
-Status: accepted for stages 18A (native scalar calls) and 18B (raw pointers,
-`unsafe fn`, `ffi` module); 18C linking/opaque types and 18D SQLite pending. Detailed stages, gates and tests:
+Status: accepted. Phase 18 implements all stages within documented v0 limits;
+[report](../phase-18-report.md). Detailed stages, gates and tests:
 [Phase 18 plan](../phase-18-plan.md).
 
 ## Context
@@ -43,8 +43,12 @@ magic surface (contrary to ADR 0020).
    declaration modifier: callers need an `unsafe` block (E3071); its body is
    not implicitly unsafe. Pointer-to-reference conversion is not provided:
    data returns from C through owned copies.
-3. **Opaque C types.** `extern "C" type sqlite3` declares a nominal unsized
-   type usable only behind `*`/`*mut`. No size, no fields, no construction.
+3. **Opaque C types use ordinary empty structs.** The proposed
+   `extern "C" type Name` syntax was not added: Phase 18C showed that
+   `struct Db {}` with `*mut Db` already gives a distinct, non-constructible-in-
+   practice pointee with no layout use (tested with `fopen`/`fclose` and
+   SQLite). Syntax would be justified only if empty structs cause real misuse,
+   for example construction or by-value passing of a C handle type.
 4. **Strings at the boundary are explicit.** `ffi.CString` is an owned
    NUL-terminated copy of `&string` (rejecting interior NUL);
    `unsafe fn string_from_c(*u8) Option<string>` copies and validates UTF-8.
@@ -54,7 +58,10 @@ magic surface (contrary to ADR 0020).
    `tarn.toml`). Source code cannot request a native library: an imported
    module must not acquire native authority by being imported (dependency
    security policy: declarations are not grants). Unknown symbols fail at link
-   time with the linker's message wrapped in a Tarn diagnostic.
+   time with a summary naming the missing C symbols or libraries (the linker
+   runs with `LC_ALL=C` so the summary does not depend on the user's locale).
+   Library names are validated (`name` or `:exact-file`), so a grant cannot
+   inject linker options or paths.
 6. **Resources wrapped by users have explicit close.** v0 has no user
    destructors. A Tarn struct holding `*mut sqlite3` is an ordinary non-Copy
    value; release is a consuming `close(self)`. Dropping without close leaks

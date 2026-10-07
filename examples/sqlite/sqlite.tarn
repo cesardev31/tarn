@@ -1,0 +1,202 @@
+// Safe SQLite bindings written in Tarn over `extern "C"` (ADR 0047, Phase 18D).
+// Build with `--link sqlite3` (or `--link :libsqlite3.so.0`).
+//
+// Applications never see raw pointers or `unsafe`. Db and Statement are owned,
+// non-Copy and not Transfer (raw pointers), so they stay on one thread.
+// Release them with consuming close/finalize; v0 has no destructors, so a
+// handle dropped without them leaks its C resource but stays memory-safe.
+// close uses sqlite3_close_v2: unfinalized statements keep the connection
+// alive inside SQLite, so a Statement never outlives its connection's memory.
+import "ffi"
+
+struct RawDb {}
+struct RawStatement {}
+
+extern "C" fn sqlite3_open(path *u8, db *mut *mut RawDb) i32
+extern "C" fn sqlite3_close_v2(db *mut RawDb) i32
+extern "C" fn sqlite3_errmsg(db *mut RawDb) *u8
+extern "C" fn sqlite3_exec(db *mut RawDb, sql *u8, callback *mut u8, argument *mut u8, error *mut *mut u8) i32
+extern "C" fn sqlite3_prepare_v2(db *mut RawDb, sql *u8, bytes i32, statement *mut *mut RawStatement, tail *mut *u8) i32
+extern "C" fn sqlite3_finalize(statement *mut RawStatement) i32
+extern "C" fn sqlite3_step(statement *mut RawStatement) i32
+extern "C" fn sqlite3_reset(statement *mut RawStatement) i32
+extern "C" fn sqlite3_bind_text(statement *mut RawStatement, index i32, text *u8, bytes i32, destructor *mut u8) i32
+extern "C" fn sqlite3_bind_int64(statement *mut RawStatement, index i32, value i64) i32
+extern "C" fn sqlite3_bind_null(statement *mut RawStatement, index i32) i32
+extern "C" fn sqlite3_column_int64(statement *mut RawStatement, column i32) i64
+extern "C" fn sqlite3_column_text(statement *mut RawStatement, column i32) *u8
+extern "C" fn sqlite3_column_bytes(statement *mut RawStatement, column i32) i32
+extern "C" fn sqlite3_column_type(statement *mut RawStatement, column i32) i32
+extern "C" fn sqlite3_last_insert_rowid(db *mut RawDb) i64
+extern "C" fn sqlite3_changes(db *mut RawDb) i32
+extern "C" fn sqlite3_free(memory *mut u8)
+
+/// SQLite result code and message (https://sqlite.org/rescode.html).
+pub struct Error {
+    pub code i32
+    pub message string
+}
+
+pub struct Db {
+    raw *mut RawDb
+}
+pub struct Statement {
+    raw *mut RawStatement
+    db *mut RawDb
+}
+
+fn failure(db *mut RawDb, code i32) Error {
+    var message = "out of memory"
+    if !ffi.is_null(ffi.to_const(db)) {
+        unsafe {
+            match ffi.string_from_c(sqlite3_errmsg(db)) {
+                Some(text) => { message = text }
+                None => { message = "invalid UTF-8 in SQLite message" }
+            }
+        }
+    }
+    return Error{code: code, message: message}
+}
+fn c_text(value &string) Result<ffi.CString, Error> {
+    match ffi.CString.new(value) {
+        Some(c) => { return Ok(c) }
+        None => { return Err(Error{code: 25, message: "text contains NUL"}) }
+    }
+}
+
+/// Open or create a database file; ":memory:" is a private in-memory database.
+pub fn open(path &string) Result<Db, Error> {
+    name := try c_text(path)
+    var raw: *mut RawDb = ffi.null()
+    var code: i32 = 0
+    unsafe { code = sqlite3_open(name.as_ptr(), ffi.of_mut(&mut raw)) }
+    if code != 0 {
+        error := failure(raw, code)
+        unsafe { closed := sqlite3_close_v2(raw) }
+        return Err(error)
+    }
+    return Ok(Db{raw: raw})
+}
+/// Close the connection. Statements not yet finalized keep it alive inside
+/// SQLite until they are finalized.
+pub fn Db.close(self) Result<void, Error> {
+    var code: i32 = 0
+    unsafe { code = sqlite3_close_v2(self.raw) }
+    if code != 0 { return Err(Error{code: code, message: "close failed"}) }
+    return Ok(())
+}
+/// Run one or more statements without results (DDL, transactions).
+pub fn Db.exec(&mut self, sql &string) Result<void, Error> {
+    statement := try c_text(sql)
+    var message: *mut u8 = ffi.null()
+    var code: i32 = 0
+    unsafe { code = sqlite3_exec(self.raw, statement.as_ptr(), ffi.null(), ffi.null(), ffi.of_mut(&mut message)) }
+    if code == 0 { return Ok(()) }
+    var error = Error{code: code, message: "exec failed"}
+    if !ffi.is_null(ffi.to_const(message)) {
+        unsafe {
+            match ffi.string_from_c(ffi.to_const(message)) {
+                Some(m) => { error.message = m }
+                None => {}
+            }
+            sqlite3_free(message)
+        }
+    }
+    return Err(error)
+}
+pub fn Db.prepare(&mut self, sql &string) Result<Statement, Error> {
+    statement := try c_text(sql)
+    var raw: *mut RawStatement = ffi.null()
+    var code: i32 = 0
+    unsafe { code = sqlite3_prepare_v2(self.raw, statement.as_ptr(), -1, ffi.of_mut(&mut raw), ffi.null()) }
+    if code != 0 { return Err(failure(self.raw, code)) }
+    if ffi.is_null(ffi.to_const(raw)) { return Err(Error{code: 21, message: "empty statement"}) }
+    return Ok(Statement{raw: raw, db: self.raw})
+}
+/// Row id of the most recent successful INSERT on this connection.
+pub fn Db.last_insert_id(&self) i64 {
+    var id: i64 = 0
+    unsafe { id = sqlite3_last_insert_rowid(self.raw) }
+    return id
+}
+/// Rows changed by the most recent INSERT, UPDATE or DELETE.
+pub fn Db.changes(&self) i64 {
+    var n: i32 = 0
+    unsafe { n = sqlite3_changes(self.raw) }
+    return i64(n)
+}
+
+fn Statement.check(&self, code i32) Result<void, Error> {
+    if code != 0 { return Err(failure(self.db, code)) }
+    return Ok(())
+}
+/// Parameters are numbered from 1, as in SQLite. SQLite copies the text.
+pub fn Statement.bind_text(&mut self, index i32, value &string) Result<void, Error> {
+    copied := try c_text(value)
+    // SQLITE_TRANSIENT, ((void*)-1): SQLite makes its own copy before returning.
+    transient: *mut u8 := ffi.from_address(18446744073709551615)
+    var code: i32 = 0
+    unsafe { code = sqlite3_bind_text(self.raw, index, copied.as_ptr(), i32(copied.len()), transient) }
+    return self.check(code)
+}
+pub fn Statement.bind_i64(&mut self, index i32, value i64) Result<void, Error> {
+    var code: i32 = 0
+    unsafe { code = sqlite3_bind_int64(self.raw, index, value) }
+    return self.check(code)
+}
+pub fn Statement.bind_null(&mut self, index i32) Result<void, Error> {
+    var code: i32 = 0
+    unsafe { code = sqlite3_bind_null(self.raw, index) }
+    return self.check(code)
+}
+/// Advance: true when a row is available, false when the statement is done.
+pub fn Statement.step(&mut self) Result<bool, Error> {
+    var code: i32 = 0
+    unsafe { code = sqlite3_step(self.raw) }
+    if code == 100 { return Ok(true) }
+    if code == 101 { return Ok(false) }
+    return Err(failure(self.db, code))
+}
+/// Run a statement that returns no rows.
+pub fn Statement.run(&mut self) Result<void, Error> {
+    row := try self.step()
+    return Ok(())
+}
+/// Rewind to run again with new bindings.
+pub fn Statement.reset(&mut self) Result<void, Error> {
+    var code: i32 = 0
+    unsafe { code = sqlite3_reset(self.raw) }
+    return self.check(code)
+}
+pub fn Statement.column_i64(&self, column i32) i64 {
+    var value: i64 = 0
+    unsafe { value = sqlite3_column_int64(self.raw, column) }
+    return value
+}
+pub fn Statement.column_is_null(&self, column i32) bool {
+    var kind: i32 = 0
+    unsafe { kind = sqlite3_column_type(self.raw, column) }
+    return kind == 5
+}
+/// Owned copy of a text column; NULL reads as "" (check column_is_null).
+pub fn Statement.column_text(&self, column i32) Result<string, Error> {
+    var data: *u8 = ffi.to_const(ffi.null())
+    var length: i32 = 0
+    unsafe {
+        data = sqlite3_column_text(self.raw, column)
+        length = sqlite3_column_bytes(self.raw, column)
+    }
+    if ffi.is_null(data) || length <= 0 { return Ok("") }
+    var bytes: Vec<u8> = Vec.new()
+    unsafe { bytes = ffi.copy_bytes(data, usize(length)) }
+    match string_from_utf8(bytes.as_slice()) {
+        Some(value) => { return Ok(value) }
+        None => { return Err(Error{code: 20, message: "column is not UTF-8 text"}) }
+    }
+}
+pub fn Statement.finalize(self) Result<void, Error> {
+    var code: i32 = 0
+    unsafe { code = sqlite3_finalize(self.raw) }
+    if code != 0 { return Err(failure(self.db, code)) }
+    return Ok(())
+}

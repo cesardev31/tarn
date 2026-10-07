@@ -66,7 +66,8 @@ package install hooks or imply current sandbox enforcement.
 ## Linking
 
 Cranelift ELF object + embedded `runtime/native.c`, compiled/linked through system
-`cc -std=c11 -O0 -fno-strict-aliasing -no-pie ... -lm`. Linux x86_64 only;
+`cc -std=c11 -O0 -fno-strict-aliasing -no-pie ... [-l<granted>] -lm`, run with
+`LC_ALL=C`; `--link` libraries are validated build-time grants (ADR 0047). Linux x86_64 only;
 requires a C toolchain with libc/libm headers. No installed runtime archive needed.
 ABI, canonical layout, output paths and limits: [ADR 0027](adr/0027-native-backend.md).
 

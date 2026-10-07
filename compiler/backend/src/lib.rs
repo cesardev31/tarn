@@ -59,6 +59,21 @@ pub fn emit_object(p: &post_drop::Program, t: &Typed) -> Result<Vec<u8>> {
 /// Build to the requested executable path. Object/runtime intermediates live in
 /// a unique scratch directory and are removed on every return path. No shell.
 pub fn build(p: &post_drop::Program, t: &Typed, output: &Path) -> Result<()> {
+    build_linked(p, t, output, &[])
+}
+
+/// Valid `--link` library: `name` (`-lname`) or `:file` (`-l:file`), never an
+/// option or a path. Linking is an explicit build-time grant (ADR 0047).
+pub fn valid_library(name: &str) -> bool {
+    let file = name.strip_prefix(':').unwrap_or(name);
+    !file.is_empty() && !file.starts_with('-') && file.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.+-".contains(&b))
+}
+
+/// `build` plus system libraries granted with `tarn build --link`.
+pub fn build_linked(p: &post_drop::Program, t: &Typed, output: &Path, libraries: &[String]) -> Result<()> {
+    if let Some(bad) = libraries.iter().find(|l| !valid_library(l)) {
+        return Err(Error { message: format!("invalid library `{bad}`: use a name such as `sqlite3` or an exact file such as `:libsqlite3.so.0`") });
+    }
     let bytes = emit_object(p, t)?;
     let scratch = Scratch::new()?;
     let object = scratch.0.join("program.o");
@@ -71,21 +86,44 @@ pub fn build(p: &post_drop::Program, t: &Typed, output: &Path) -> Result<()> {
     let executable = publication.0.join("program");
     std::fs::write(&object, bytes).map_err(io_error)?;
     std::fs::write(&runtime, RUNTIME).map_err(io_error)?;
+    // Untranslated linker diagnostics keep linker_message deterministic.
     let linked = Command::new("cc")
+        .env("LC_ALL", "C")
         .args(["-std=c11", "-O0", "-fno-strict-aliasing", "-no-pie", "-pthread"])
         .arg(&object)
         .arg(&runtime)
+        .args(libraries.iter().map(|l| format!("-l{l}")))
         .arg("-lm")
         .arg("-o")
         .arg(&executable)
         .output()
         .map_err(io_error)?;
     if !linked.status.success() {
-        return Err(Error { message: format!("native linker failed: {}", String::from_utf8_lossy(&linked.stderr)) });
+        return Err(Error { message: linker_message(&String::from_utf8_lossy(&linked.stderr), libraries) });
     }
     // Do not replace an existing executable until codegen and linking succeed.
     std::fs::rename(executable, output).map_err(io_error)?;
     Ok(())
+}
+/// Summarize the system linker's failure in source-level terms: missing C
+/// symbols and missing libraries, with the raw output kept for anything else.
+fn linker_message(stderr: &str, libraries: &[String]) -> String {
+    let mut symbols: Vec<&str> = stderr
+        .lines()
+        .filter_map(|l| l.split("undefined reference to `").nth(1))
+        .filter_map(|rest| rest.split('\'').next())
+        .collect();
+    symbols.sort_unstable();
+    symbols.dedup();
+    let missing: Vec<&str> = stderr.lines().filter_map(|l| l.split("cannot find -l").nth(1)).map(|l| l.split(':').next().unwrap_or(l).trim()).collect();
+    if !missing.is_empty() {
+        return format!("native linker cannot find library {}; install it or pass the exact file, e.g. `--link :libname.so.0`", missing.iter().map(|m| format!("`{m}`")).collect::<Vec<_>>().join(", "));
+    }
+    if !symbols.is_empty() {
+        let hint = if libraries.is_empty() { "declare the library with `--link <name>`" } else { "check the extern \"C\" names and the `--link` libraries" };
+        return format!("native linker found no definition for extern \"C\" {}; {hint}", symbols.iter().map(|s| format!("`{s}`")).collect::<Vec<_>>().join(", "));
+    }
+    format!("native linker failed: {stderr}")
 }
 fn io_error(e: std::io::Error) -> Error {
     Error { message: format!("native build I/O: {e}") }

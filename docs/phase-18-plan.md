@@ -1,6 +1,6 @@
 # Phase 18 implementation plan: minimal native C FFI
 
-Status: proposed; no stage started. Design decisions:
+Status: complete; [report](phase-18-report.md). Design decisions:
 [ADR 0047](adr/0047-native-c-ffi.md).
 Baseline: Phase 17 (application ergonomics, ADR 0048).
 
@@ -63,9 +63,10 @@ Gate: native tests pass; no change to existing IR/borrow snapshots.
 Gate: memory-safety contract suite unchanged; new pass/fail suites for pointer
 rules; mutation tests do not panic.
 
-### 18C: opaque types, CString and linking
+### 18C: linking (done; opaque types not needed)
 
-- `extern "C" type Name` declarations, only valid behind pointers.
+- Opaque C types: ordinary empty structs behind pointers; no new syntax
+  (ADR 0047 decision 3).
 - `stdlib/ffi` CString and string_from_c: done early in 18B.
 - `tarn build/run --link <name>` repeatable; forwarded as `-l<name>` after the
   runtime; linker failures become a Tarn diagnostic listing undefined symbols.
@@ -74,7 +75,7 @@ rules; mutation tests do not panic.
 Gate: libc `strlen`/`getenv` round trips; missing library and missing symbol
 diagnostics have golden tests.
 
-### 18D: SQLite acceptance
+### 18D: SQLite acceptance (done)
 
 - Example `examples/sqlite/` with a Tarn wrapper: `Db.open`, `exec`,
   `prepare`, `bind_text`/`bind_i64`, `step`, `column_*`, consuming

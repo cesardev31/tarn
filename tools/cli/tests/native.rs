@@ -36,3 +36,47 @@ fn build_run_and_failure_paths() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("panic: stop"));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// Phase 18C: `--link` grants a system library; names cannot inject linker
+/// options; missing symbols and libraries are summarized in C-source terms.
+#[test]
+fn link_grants_validate_and_explain_failures() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-link-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cli = env!("CARGO_BIN_EXE_tarn");
+    let source = dir.join("floor.tarn");
+    std::fs::write(&source, "extern \"C\" fn floor(x f64) f64\nfn main() {\n    unsafe { print(floor(3.75)) }\n}\n").unwrap();
+    let output = Command::new(cli).args(["run"]).arg(&source).args(["--link", "m"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout, b"3\n");
+    for bad in ["-Wl,--wrap=main", "../lib", "", "a/b", ":"] {
+        let output = Command::new(cli).arg("build").arg(&source).args(["--link", bad]).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{bad}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("invalid library"), "{bad}");
+    }
+    std::fs::write(&source, "extern \"C\" fn tarn_no_such_symbol() i32\nfn main() {\n    unsafe { print(tarn_no_such_symbol()) }\n}\n").unwrap();
+    let output = Command::new(cli).arg("build").arg(&source).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("no definition for extern \"C\" `tarn_no_such_symbol`"), "{stderr}");
+    assert!(stderr.contains("--link"), "{stderr}");
+    let output = Command::new(cli).arg("build").arg(&source).args(["--link", "tarn_missing_library"]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot find library `tarn_missing_library`"), "{stderr}");
+    // SQLite is present on the reference machine only as its runtime soname.
+    let sqlite = std::path::Path::new("/usr/lib/x86_64-linux-gnu/libsqlite3.so.0");
+    if sqlite.exists() {
+        std::fs::write(&source, "extern \"C\" fn sqlite3_libversion_number() i32\nfn main() {\n    unsafe { print(sqlite3_libversion_number() >= 3000000) }\n}\n").unwrap();
+        let output = Command::new(cli).arg("run").arg(&source).args(["--link", ":libsqlite3.so.0"]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout, b"true\n");
+        // Phase 18D: the safe wrapper example end to end.
+        let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sqlite/main.tarn");
+        let output = Command::new(cli).arg("run").arg(&example).args(["--link", ":libsqlite3.so.0"]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n1\n1\npan integral\n2\nleche ñ\n3\ncafé 😀\nno such table: missing\n");
+    } else {
+        eprintln!("skipped: libsqlite3.so.0 is not installed");
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}

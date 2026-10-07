@@ -20,7 +20,7 @@ Every `extern "C"` call requires `unsafe`. Native builds accept `bool`,
 fixed-width integers, `usize`/`isize`, `f32`/`f64`, raw pointers and `void`
 results. Other types (references, strings, structs, slices) remain valid in
 declarations for contract checking (ADR 0031) but fail native builds. Symbols
-resolve against libc and libm; linking other libraries is Phase 18C.
+resolve against libc and libm unless another library is granted at build time.
 
 ## Raw pointers
 
@@ -56,3 +56,21 @@ unmoved.
 `unsafe fn` declares a function whose callers must write `unsafe { ... }`
 (E3071), after checking its documented requirements. Its own body is not
 implicitly unsafe: unsafe operations inside still need a block.
+
+## Linking libraries
+
+```
+tarn build app.tarn --link sqlite3
+tarn run app.tarn --link :libsqlite3.so.0   # exact file when no dev symlink exists
+```
+
+Linking is a build-time grant, never something source code or an import can
+request. `--link` accepts a library name (`-lname`) or `:exact-file`; option-
+or path-like values are rejected. Missing symbols and libraries are reported by
+name. Opaque C handles are ordinary empty structs used behind pointers:
+
+```tarn
+struct Db {}
+extern "C" fn sqlite3_open(path *u8, db *mut *mut Db) i32
+```
+
