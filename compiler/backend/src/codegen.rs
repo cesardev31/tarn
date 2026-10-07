@@ -411,6 +411,9 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
         ("tarn_rt_rem_f64", vec![types::F64, types::F64], vec![types::F64]),
         ("tarn_rt_string", vec![types::I64, types::I64], vec![types::I64]),
         ("tarn_rt_drop_string", vec![types::I64], vec![]),
+        ("tarn_rt_string_utf8", vec![types::I64, types::I64], vec![types::I64]),
+        ("tarn_rt_string_add", vec![types::I64, types::I64], vec![types::I64]),
+        ("tarn_rt_string_compare", vec![types::I64, types::I64], vec![types::I32]),
         ("tarn_rt_env_alloc", vec![types::I64], vec![types::I64]),
         ("tarn_rt_vec_grow", vec![types::I64, types::I64, types::I64], vec![types::I64]),
         ("tarn_rt_async_task_new", vec![types::I64, types::I64], vec![types::I64]),
@@ -1745,7 +1748,59 @@ impl Cx<'_, '_> {
         }
         Ok(())
     }
+    fn string_operation(&mut self, name: &str, args: &[Val], dest: &Ty) -> Result<Option<Val>> {
+        let flags = cl::MemFlags::new();
+        let string_ref = Ty::Ref(false, Box::new(Ty::Str));
+        let byte_slice = Ty::Ref(false, Box::new(Ty::Slice(Box::new(Ty::Int(IntTy::U8)))));
+        if name == "string.bytes" && args.len() == 1 && args[0].ty == string_ref && *dest == byte_slice {
+            let string = self.b.ins().load(types::I64, flags, args[0].value.unwrap(), 0);
+            let len = self.b.ins().load(types::I64, flags, string, 0);
+            let bytes = self.b.ins().iadd_imm(string, 8);
+            return Ok(Some(Val { value: Some(self.pair(bytes, len)), ty: dest.clone() }));
+        }
+        if name == "core.string_from_utf8" && args.len() == 1 && args[0].ty == byte_slice {
+            let Ty::Adt(option, params) = dest else { return Err(Error::bug("UTF-8 result type")) };
+            let def = self.t.decls.enums.get(option).ok_or_else(|| Error::bug("UTF-8 option definition"))?;
+            if *option != self.t.prelude.option || params != &[Ty::Str] { return Err(Error::bug("UTF-8 option payload")); }
+            let some = def.variants.iter().position(|v| v.name == "Some").ok_or_else(|| Error::bug("Option.Some"))?;
+            let none = def.variants.iter().position(|v| v.name == "None").ok_or_else(|| Error::bug("Option.None"))?;
+            let l = layout::layout(self.t, dest)?;
+            let payload = l.variants.get(some).and_then(|v| v.first()).filter(|(_, ty)| *ty == Ty::Str).ok_or_else(|| Error::bug("UTF-8 option layout"))?.0;
+            let addr = args[0].value.unwrap();
+            let data = self.b.ins().load(types::I64, flags, addr, 0);
+            let len = self.b.ins().load(types::I64, flags, addr, 8);
+            let string = self.runtime("tarn_rt_string_utf8", &[data, len])[0];
+            let valid = self.b.ins().icmp_imm(IntCC::NotEqual, string, 0);
+            let yes = self.b.ins().iconst(types::I32, some as i64);
+            let no = self.b.ins().iconst(types::I32, none as i64);
+            let tag = self.b.ins().select(valid, yes, no);
+            let slot = self.stack(l.size, l.align);
+            let out = self.b.ins().stack_addr(types::I64, slot, 0);
+            self.b.ins().store(flags, tag, out, 0);
+            self.b.ins().store(flags, string, out, payload as i32);
+            return Ok(Some(Val { value: Some(out), ty: dest.clone() }));
+        }
+        if matches!(name, "string.add" | "string.eq" | "string.ne" | "string.lt" | "string.le" | "string.gt" | "string.ge")
+            && args.len() == 2 && args.iter().all(|a| a.ty == string_ref) {
+            let a = self.b.ins().load(types::I64, flags, args[0].value.unwrap(), 0);
+            let b = self.b.ins().load(types::I64, flags, args[1].value.unwrap(), 0);
+            let value = if name == "string.add" && *dest == Ty::Str {
+                self.runtime("tarn_rt_string_add", &[a, b])[0]
+            } else if *dest == Ty::Bool && name != "string.add" {
+                let order = self.runtime("tarn_rt_string_compare", &[a, b])[0];
+                let cc = match name {
+                    "string.eq" => IntCC::Equal, "string.ne" => IntCC::NotEqual,
+                    "string.lt" => IntCC::SignedLessThan, "string.le" => IntCC::SignedLessThanOrEqual,
+                    "string.gt" => IntCC::SignedGreaterThan, _ => IntCC::SignedGreaterThanOrEqual,
+                };
+                self.b.ins().icmp_imm(cc, order, 0)
+            } else { return Err(Error::bug("string operator result")); };
+            return Ok(Some(Val { value: Some(value), ty: dest.clone() }));
+        }
+        Ok(None)
+    }
     fn intrinsic(&mut self, name: &str, args: &[Val], dest: &Ty) -> Result<Val> {
+        if let Some(result) = self.string_operation(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.tasks(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.networking(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.synchronization(name, args, dest)? { return Ok(result); }

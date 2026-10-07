@@ -114,3 +114,11 @@ backend work: word-sized copies, and eliding temporary-to-destination copies.
 
 Each item came from a concrete failure above; none is copied from another
 language because it exists there.
+
+## Phase 15A follow-up
+
+The byte-access and text-conversion gap is addressed by the
+[string essentials API](strings.md): immutable borrowed bytes, validated UTF-8
+construction, parsing/formatting and owned split/line results. Examples 11 and
+27 now run natively. Filesystem/stdin access, byte literals and repeat-filled
+arrays remain separate work. This update makes no new performance claim.

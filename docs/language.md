@@ -98,11 +98,14 @@ var index = 0          // mutable, inferred
     module-level item is W2002.
 
 ```tarn
+import "string"
+
 fn parse(line string) {
     count := 0
     // count := 1             // error[E2003]: already declared in this scope
-    for part in line.split(",") {
-        line := part.trim()   // ok: shadows the parameter inside the loop
+    parts := string.split(&line, &",")
+    for part in parts.as_slice() {
+        line := string.trim(part) // ok: shadows the parameter inside the loop
         print(line)
     }
 }
@@ -114,7 +117,11 @@ Primitive: `bool`, `i8 i16 i32 i64`, `u8 u16 u32 u64`, `isize usize`,
 `f32 f64`, `string`, `void`, `never`.
 
 - `string` is an owned, immutable-by-default UTF-8 string (heap). A string
-  literal has type `string` in draft 0; a borrowed view is `&string`.
+  literal has type `string` in draft 0; a borrowed view is `&string`. Length
+  and indices count bytes. `bytes()` returns immutable `&[]u8` borrowing its
+  owner; validated UTF-8 conversion and text helpers live in the
+  [string module](strings.md). String `+` borrows both inputs and returns a new
+  owner; comparisons use content and UTF-8 byte order.
 - `void` is the unit type (functions without a return type return `void`).
   Its only value is written `()`, e.g. `return Ok(())`.
 - `never` is the type of expressions that do not return (`panic(...)`, `return`).

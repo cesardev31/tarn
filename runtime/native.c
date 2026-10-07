@@ -15,8 +15,47 @@ TarnString *tarn_rt_string(const unsigned char *data, uint64_t len) {
     TarnString *s = malloc(sizeof(TarnString) + len);
     if (!s) abort();
     s->len = len;
-    memcpy(s->bytes, data, len);
+    if (len) memcpy(s->bytes, data, len);
     return s;
+}
+/* Strict UTF-8: reject overlong encodings, surrogates and values > U+10FFFF.
+ * The private null result represents invalid bytes, never a Tarn string. */
+TarnString *tarn_rt_string_utf8(const unsigned char *data, uint64_t len) {
+    uint64_t i = 0;
+    while (i < len) {
+        unsigned char c = data[i++];
+        if (c < 0x80) continue;
+        uint64_t n;
+        uint32_t cp, min;
+        if (c >= 0xc2 && c <= 0xdf) { n = 1; cp = c & 0x1f; min = 0x80; }
+        else if (c >= 0xe0 && c <= 0xef) { n = 2; cp = c & 0x0f; min = 0x800; }
+        else if (c >= 0xf0 && c <= 0xf4) { n = 3; cp = c & 0x07; min = 0x10000; }
+        else return NULL;
+        if (n > len - i) return NULL;
+        for (uint64_t j = 0; j < n; j++) {
+            unsigned char next = data[i++];
+            if ((next & 0xc0) != 0x80) return NULL;
+            cp = (cp << 6) | (next & 0x3f);
+        }
+        if (cp < min || (cp >= 0xd800 && cp <= 0xdfff) || cp > 0x10ffff) return NULL;
+    }
+    return tarn_rt_string(data, len);
+}
+TarnString *tarn_rt_string_add(const TarnString *a, const TarnString *b) {
+    if (b->len > SIZE_MAX - sizeof(TarnString) - a->len) abort();
+    uint64_t len = a->len + b->len;
+    TarnString *s = malloc(sizeof(TarnString) + len);
+    if (!s) abort();
+    s->len = len;
+    if (a->len) memcpy(s->bytes, a->bytes, a->len);
+    if (b->len) memcpy(s->bytes + a->len, b->bytes, b->len);
+    return s;
+}
+int32_t tarn_rt_string_compare(const TarnString *a, const TarnString *b) {
+    uint64_t len = a->len < b->len ? a->len : b->len;
+    int order = len ? memcmp(a->bytes, b->bytes, len) : 0;
+    if (order) return order < 0 ? -1 : 1;
+    return (a->len > b->len) - (a->len < b->len);
 }
 void tarn_rt_drop_string(TarnString *s) {
     /* Opt-in compiler test observation, never a user destructor hook. */

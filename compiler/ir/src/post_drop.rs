@@ -186,6 +186,23 @@ pub fn verify(p: &Program, t: &Typed) -> Vec<String> {
         }
         for b in &f.blocks {
             if let Terminator::Call { callee: Callee::Intrinsic(name), args, dest, .. } = &b.term {
+                // String bridges and operators have a fixed typed ABI. Check
+                // it before native execution; no ownership is inferred here.
+                let string_ref = Ty::Ref(false, Box::new(Ty::Str));
+                let bytes_ref = Ty::Ref(false, Box::new(Ty::Slice(Box::new(Ty::Int(tarn_types::IntTy::U8)))));
+                let string_abi = match name.as_str() {
+                    "string.bytes" => Some((vec![string_ref.clone()], bytes_ref.clone())),
+                    "core.string_from_utf8" => Some((vec![bytes_ref], Ty::Adt(t.prelude.option, vec![Ty::Str]))),
+                    "string.add" => Some((vec![string_ref.clone(), string_ref], Ty::Str)),
+                    "string.eq" | "string.ne" | "string.lt" | "string.le" | "string.gt" | "string.ge" =>
+                        Some((vec![string_ref.clone(), string_ref], Ty::Bool)),
+                    _ => None,
+                };
+                if let Some((params, ret)) = string_abi {
+                    let valid = place_ty(&f.decl, t, dest) == Some(ret) && args.len() == params.len()
+                        && args.iter().zip(params).all(|(arg, ty)| matches!(arg, Operand::Copy(place) if place_ty(&f.decl, t, place) == Some(ty)));
+                    if !valid { err("invalid string intrinsic ABI".into()); }
+                }
                 let task = name.strip_prefix("runtime.").is_some_and(|n| tarn_types::TASK_INTRINSICS.contains(&n));
                 if task && t.decls.task_intrinsics.len() != tarn_types::TASK_INTRINSICS.len() {
                     err("missing task intrinsic declarations".into());

@@ -48,8 +48,8 @@ fn resolve_fail_suite() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// Examples that call string methods only the future stdlib provides.
-const NEEDS_STDLIB: &[&str] = &["11_result.tarn", "12_try.tarn", "27_shadowing.tarn"];
+/// Example depending on filesystem APIs reserved for phase 15B.
+const NEEDS_STDLIB: &[&str] = &["12_try.tarn"];
 
 /// Every example checks without errors (except missing stdlib methods in the
 /// examples listed above); the only warnings are the documented ones.

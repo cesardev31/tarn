@@ -6,6 +6,13 @@
 const PRELUDE: &str = "struct Buffer {\n    data string\n}\n\nfn Buffer.new() Buffer {\n    return Buffer{data: \"\"}\n}\n\nfn read(b &Buffer) {\n}\n\nfn write(b &mut Buffer) {\n}\n\nfn consume(b Buffer) {\n}\n\n";
 
 const CASES: &[(&str, Option<&str>, &str)] = &[
+    ("string byte view cannot mutate storage", Some("E3015"), "fn main() { value := \"text\"\n data := value.bytes()\n data[0] = u8(65) }"),
+    ("string byte view cannot escape local owner", Some("E4201"), "fn bad() &[]u8 { value := \"text\"\n return value.bytes() }"),
+    ("string cannot move while byte view remains live", Some("E4103"), "fn main() { value := \"text\"\n bytes := value.bytes()\n moved := value\n print(bytes[0]) }"),
+    ("string cannot overwrite while byte view remains live", Some("E4102"), "fn main() { var value = \"text\"\n bytes := value.bytes()\n value = \"new\"\n print(bytes[0]) }"),
+    ("string byte views preserve parameter provenance", None, "import \"string\"\nfn view(value &string) &[]u8 { return string.bytes(value) }\nfn main() { value := \"text\"\n print(view(&value)[0]) }"),
+    ("validated string owns its bytes", None, "import \"string\"\nfn make() Option<string> { bytes := [2]u8{65, 66}\n return string.from_utf8(&bytes) }\nfn main() { make() }"),
+    ("split owns its fields independently", None, "import \"string\"\nfn make() Vec<string> { value := \"a,b\"\n return string.split(&value, &\",\") }\nfn main() { parts := make()\n print(parts.len()) }"),
     ("suspended read buffer held until destruction", Some("E4102"), "import \"runtime\"\nimport \"net\"\nfn bad(owner &runtime.Execution, stream &mut net.TcpStream) { var bytes = [2]u8{0, 0}\n var op = runtime.read_operation(owner, stream, &mut bytes)\n op.poll()\n bytes[0] = 1 }"),
     ("suspended read buffer released by consuming finish", None, "import \"runtime\"\nimport \"net\"\nfn good(owner &runtime.Execution, stream &mut net.TcpStream) { var bytes = [2]u8{0, 0}\n var op = runtime.read_operation(owner, stream, &mut bytes)\n op.poll()\n op.finish()\n bytes[0] = 1 }"),
     ("suspended write_all retains source loan", Some("E4102"), "import \"runtime\"\nimport \"net\"\nfn bad(owner &runtime.Execution, stream &mut net.TcpStream) { var bytes = [2]u8{0, 0}\n var op = runtime.write_all_operation(owner, stream, &bytes)\n op.poll()\n bytes[0] = 1 }"),

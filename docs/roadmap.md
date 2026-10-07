@@ -29,7 +29,8 @@ tested and documented.
 | 14B | Monotonic timers and timeouts (ADR 0039) | **done; [report](phase-14b-report.md)** |
 | 14C | Buffered async I/O and a concurrent buffered server (ADR 0040) | **done; [report](phase-14c-report.md)** |
 | 14R | Trusted stdlib module layers: io, time, net, runtime (ADR 0041) | **done; [report](phase-14r-report.md)** |
-| 15 | System and text: string essentials, fs, path, process (milestone 5) | planned: 15A string, 15B fs, 15C path, 15D process |
+| 15A | Owned UTF-8 string essentials (ADR 0042) | **done; [report](phase-15a-report.md)** |
+| 15B–D | System: fs, path, process (milestone 5) | planned: 15B fs, 15C path, 15D process |
 | 16 | Async HTTP/1.1 over buffered I/O | planned after 15 |
 | 18 | CLI `build run test check fmt clean` | started (`lex`, `ast`, `check`, `resolve`) |
 | 19 | Formatter (basic) | |

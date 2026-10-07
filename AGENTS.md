@@ -1093,6 +1093,19 @@ Detailed requirements and open choices: [dependency security](docs/dependency-se
 
 ---
 
+## Stable string rules (Phase 15A)
+
+- Strings own immutable UTF-8 storage; lengths and indices count bytes.
+- Byte views are immutable loans of the owner, with ordinary provenance and
+  move/overwrite checks. Never expose mutable string storage.
+- Byte-to-string conversion validates UTF-8 and returns a new owned copy.
+- Split/line elements are owned strings. Do not invent stored borrowed
+  references or a separate text lifetime checker to avoid copying.
+- Text parsing checks ranges before checked arithmetic; invalid input and
+  overflow return Option failure. Comparisons inspect content, not pointers.
+- High-level text functions belong in `stdlib/string`; primitive methods
+  remain in core. See [ADR 0042](docs/adr/0042-string-essentials.md).
+
 ## Tests
 
 Tests are part of the language specification.
