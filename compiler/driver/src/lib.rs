@@ -41,6 +41,8 @@ fn official_module(name: &str) -> bool { (name == "string" || name == "path" || 
 
 pub struct Program {
     pub sources: SourceMap,
+    /// Files read from disk during loading; embedded stdlib sources are excluded.
+    pub disk_sources: Vec<PathBuf>,
     /// (module name, AST); the entry module is first.
     pub modules: Vec<(String, Module)>,
     /// Embedded source provenance retained for semantic contracts.
@@ -96,6 +98,7 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
     let stem = if let Some(name) = official_entry { name.to_string() }
         else if trusted_source(&stem).is_some() { format!("entry/{stem}") } else { stem };
     let mut sources = SourceMap::new();
+    let mut disk_sources = Vec::new();
     let mut modules: Vec<(String, Module)> = Vec::new();
     let mut diags = Vec::new();
     let mut trusted_modules = std::collections::HashSet::new();
@@ -122,7 +125,11 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
                 None if name == "path" && !path.is_file() => PATH_SOURCE.to_string(),
                 None if name == "http" && !path.is_file() => HTTP_SOURCE.to_string(),
                 None if name == "json" && !path.is_file() => JSON_SOURCE.to_string(),
-                None => std::fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?,
+                None => {
+                    let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
+                    disk_sources.push(path.clone());
+                    text
+                },
             }
         };
         let display = if editor && (official_entry == Some(name.as_str()) || has_editor_text) {
@@ -164,7 +171,7 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
         modules.push(("core".to_string(), res.module));
         trusted_modules.insert("core".to_string());
     }
-    Ok((Program { sources, modules, trusted_modules }, diags))
+    Ok((Program { sources, disk_sources, modules, trusted_modules }, diags))
 }
 
 /// Lex, parse and resolve. Resolution only runs on syntactically valid

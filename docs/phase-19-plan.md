@@ -1,7 +1,7 @@
 # Phase 19 plan: integrated CLI
 
-Status: 19A complete. Stages 19B and 19C have not started; 19D remains
-deferred while outputs live beside sources. An ADR is required before 19B
+Status: 19A complete; 19C in progress (`check --watch` implemented).
+19B has not started; 19D remains deferred while outputs live beside sources. An ADR is required before 19B
 (test discovery conventions) because they become part of the language contract.
 Baseline: Phase 18.
 
@@ -145,5 +145,25 @@ Completed 19A:
   messages, source-overwrite protection, unsupported backend operations,
   missing libraries and unresolved symbols.
 
-Next: 19C watch support, then the ADR and implementation for 19B. 19D stays
+First 19C delivery:
+
+- `tarn check [entry] --watch [--json]` checks immediately and keeps running
+  after compilation or load failures. Stop the session with Ctrl+C.
+- The driver records files read from disk, including transitive local imports;
+  embedded stdlib sources are excluded. No parser or import-resolution logic
+  is duplicated in the watcher.
+- Polling compares modification times and sizes every 250 ms. Changes are
+  batched until every watched file is stable for one interval.
+- Successful checks refresh the watched set. Failed checks retain previously
+  observed files so deleting and restoring an import can recover the session.
+  Initially missing imports that have never loaded are outside the watched set;
+  edit a watched source after creating them to trigger another check.
+- Rebuild headers include Unix time and changed paths on stderr. Status lines
+  also use stderr; `--json` leaves stdout for diagnostic/error JSON Lines only.
+- Tests cover live imported-file edits, compile-error recovery, deletion and
+  recreation, source-set refresh, initially missing entry recovery, JSON output,
+  debounce batching and exclusion of embedded stdlib sources.
+
+Next: native `run --watch` child restart and termination semantics. `test --watch`
+requires the 19B runner first; neither command accepts `--watch` yet. 19D stays
 stubbed because build outputs still live beside their sources.

@@ -11,7 +11,8 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
             "lex" | "ast" | "check" | "resolve" | "types" | "ir"
         );
     let usage = match command.as_str() {
-        "lex" | "check" | "resolve" => format!("tarn {command} [file.tarn | directory] [--json]"),
+        "check" => "tarn check [file.tarn | directory] [--json] [--watch]".into(),
+        "lex" | "resolve" => format!("tarn {command} [file.tarn | directory] [--json]"),
         "ir" => "tarn ir [file.tarn | directory] [--drops]".into(),
         "build" => {
             "tarn build [file.tarn | directory] [-o path] [--link library]... [--json]".into()
@@ -35,6 +36,7 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
         match arg.as_str() {
             "--" if command == "run" => return Err(fail("program arguments are not supported yet; the process-arguments API is not available".into())),
             "--json" if matches!(command.as_str(), "lex" | "check" | "resolve" | "build" | "run") => options.push(arg.clone()),
+            "--watch" if command == "check" => options.push(arg.clone()),
             "--drops" if command == "ir" => options.push(arg.clone()),
             "-o" if command == "build" && !output_seen => {
                 let value = rest.next().filter(|v| !v.starts_with('-')).ok_or_else(|| fail("-o requires an output path".into()))?;

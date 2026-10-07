@@ -1,6 +1,7 @@
 //! `tarn` — the single official CLI.
 
 mod args;
+mod watch;
 
 use std::process::ExitCode;
 use tarn_diagnostics::SourceMap;
@@ -11,7 +12,7 @@ tarn — the Tarn language toolchain
 usage:
     tarn lex [entry] [--json]    print the token stream (debugging)
     tarn ast [entry]             parse and print the syntax tree
-    tarn check [entry] [--json]  lex, parse and resolve names; report diagnostics
+    tarn check [entry] [--json] [--watch]  lex, parse and resolve names; report diagnostics
     tarn resolve [entry]         print what every name resolves to
     tarn types [entry]           print the type of every local and parameter
     tarn ir [entry]              print typed IR; --drops prints executable drops
@@ -133,6 +134,9 @@ fn cmd_ast(args: &[String]) -> ExitCode {
 }
 
 fn cmd_check(args: &[String], dump: bool) -> ExitCode {
+    if args.iter().any(|arg| arg == "--watch") {
+        return watch::check(std::path::Path::new(&args[0]), args.iter().any(|arg| arg == "--json"));
+    }
     let json = args.iter().any(|a| a == "--json");
     let Some(path) = args.iter().find(|a| !a.starts_with("--")) else {
         eprintln!("error: missing file\n\nusage: tarn check <file.tarn> [--json]");
