@@ -1,6 +1,7 @@
 # ADR 0047: minimal native C FFI
 
-Status: proposed; stage 18A (native scalar calls) implemented. Detailed stages, gates and tests:
+Status: accepted for stages 18A (native scalar calls) and 18B (raw pointers,
+`unsafe fn`, `ffi` module); 18C linking/opaque types and 18D SQLite pending. Detailed stages, gates and tests:
 [Phase 18 plan](../phase-18-plan.md).
 
 ## Context
@@ -32,18 +33,21 @@ magic surface (contrary to ADR 0020).
    types to express and test provenance contracts without execution. A
    frontend error would invalidate that accepted decision and its tests for no
    safety gain, since such calls already require `unsafe` (decided in Phase 18A).
-2. **Raw pointers `*T` and `*mut T`.** Copy, Transfer-less and Share-less,
-   never carry loans and never extend provenance. Creating one from a borrow
-   (`data.as_ptr()`, `value.as_mut_ptr()`) is safe; dereferencing, offsetting
-   and passing to C requires `unsafe`. A raw pointer cannot be stored in a
-   type that is Transfer or Share. Pointer-to-reference conversion is not
-   provided in v0: data returns from C through Tarn-owned buffers passed by
-   pointer and length.
+2. **Raw pointers `*T` and `*mut T`.** Copy, neither Transfer nor Share
+   (even inside Copy structs), never carry loans and never extend provenance.
+   Pointers to unsized values (`*[]T`, `*any I`) are rejected (E3072). There
+   is no dereference syntax: a trusted `ffi` layer (no dependencies) provides
+   safe creation/conversion intrinsics (`null`, `of`, `of_mut`, `slice`,
+   `slice_mut`, `to_const`, `address`, `from_address`) and `unsafe fn`
+   readers (`copy_bytes`, `string_from_c`) over libc. `unsafe fn` is a new
+   declaration modifier: callers need an `unsafe` block (E3071); its body is
+   not implicitly unsafe. Pointer-to-reference conversion is not provided:
+   data returns from C through owned copies.
 3. **Opaque C types.** `extern "C" type sqlite3` declares a nominal unsized
    type usable only behind `*`/`*mut`. No size, no fields, no construction.
-4. **Strings at the boundary are explicit.** A small `ffi` stdlib module offers
-   an owned NUL-terminated `CString` built from `&string` (rejecting interior
-   NUL) and a copying `string_from_c(ptr *u8) Option<string>` under `unsafe`.
+4. **Strings at the boundary are explicit.** `ffi.CString` is an owned
+   NUL-terminated copy of `&string` (rejecting interior NUL);
+   `unsafe fn string_from_c(*u8) Option<string>` copies and validates UTF-8.
    Tarn `string` keeps no ABI promise.
 5. **Linking is a build-time grant, not a source declaration.** Libraries are
    linked only through `tarn build/run --link <name>` (and later the planned

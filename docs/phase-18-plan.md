@@ -46,12 +46,14 @@ module. Do not start Phase 19 work.
 
 Gate: native tests pass; no change to existing IR/borrow snapshots.
 
-### 18B: raw pointers
+### 18B: raw pointers (done)
 
 - Parser/AST/types for `*T` and `*mut T`; Copy, neither Transfer nor Share.
-- Safe creation: `Vec<T>.as_ptr`, `Vec<T>.as_mut_ptr`, slice `as_ptr`;
-  null via `ptr.null()`; `is_null()`.
-- `unsafe` deref read/write, `offset(n)`, pointer-to-usize casts.
+- Safe creation in the trusted `ffi` layer: `null`, `of`, `of_mut`, `slice`,
+  `slice_mut`, `to_const`, `address`, `from_address`, `is_null`.
+- `unsafe fn` (E3071) for readers `copy_bytes` and `string_from_c`; no deref
+  syntax and no pointer offsetting until real code needs them. `*[]T` and
+  `*any I` rejected (E3072).
 - Borrow model: creating a pointer does not create a loan that survives the
   expression; tests document that use-after-free through raw pointers is
   only possible inside `unsafe`.
@@ -64,8 +66,7 @@ rules; mutation tests do not panic.
 ### 18C: opaque types, CString and linking
 
 - `extern "C" type Name` declarations, only valid behind pointers.
-- `stdlib/ffi`: `CString.new(&string) Option<CString>`, `as_ptr`,
-  `unsafe fn string_from_c(*u8) Option<string>` (copies, validates UTF-8).
+- `stdlib/ffi` CString and string_from_c: done early in 18B.
 - `tarn build/run --link <name>` repeatable; forwarded as `-l<name>` after the
   runtime; linker failures become a Tarn diagnostic listing undefined symbols.
 - LSP/`check` ignore link flags (no native step).

@@ -1,0 +1,64 @@
+// Raw pointers and C strings for `extern "C"` calls (ADR 0047). Creating,
+// converting and comparing pointers is safe because nothing is accessed;
+// reading through a pointer requires `unsafe`. Pointers carry no loans: the
+// caller keeps the pointee alive for as long as C may use it.
+
+/// The null pointer.
+pub extern "intrinsic" fn null<T>() *mut T
+/// Pointer to a borrowed value or the first element of a borrowed slice. The
+/// borrow ends with this call.
+pub extern "intrinsic" fn of<T>(value &T) *T
+pub extern "intrinsic" fn of_mut<T>(value &mut T) *mut T
+pub extern "intrinsic" fn slice<T>(data &[]T) *T
+pub extern "intrinsic" fn slice_mut<T>(data &mut []T) *mut T
+/// Mutable-to-shared pointer conversion; the reverse is not provided.
+pub extern "intrinsic" fn to_const<T>(pointer *mut T) *T
+/// Numeric address, for comparisons and C sentinels such as `(void*)-1`.
+pub extern "intrinsic" fn address<T>(pointer *T) usize
+pub extern "intrinsic" fn from_address<T>(value usize) *mut T
+
+pub fn is_null<T>(pointer *T) bool { return address(pointer) == 0 }
+
+extern "C" fn strlen(text *u8) usize
+extern "C" fn memcpy(target *mut u8, source *u8, count usize) *mut u8
+
+/// Owned copy of `count` bytes at `source`.
+/// Requires: `source` is valid for reading `count` bytes.
+pub unsafe fn copy_bytes(source *u8, count usize) Vec<u8> {
+    var bytes: Vec<u8> = Vec.new()
+    var index: usize = 0
+    for index < count {
+        bytes.push(0)
+        index = index + 1
+    }
+    if count > 0 {
+        unsafe { copied := memcpy(slice_mut(bytes.as_mut_slice()), source, count) }
+    }
+    return bytes
+}
+/// Owned copy of a NUL-terminated C string; None if it is not UTF-8.
+/// Requires: `text` is non-null and points to a NUL-terminated string.
+pub unsafe fn string_from_c(text *u8) Option<string> {
+    var bytes: Vec<u8> = Vec.new()
+    unsafe { bytes = copy_bytes(text, strlen(text)) }
+    return string_from_utf8(bytes.as_slice())
+}
+
+/// Owned NUL-terminated copy of a Tarn string for C.
+pub struct CString {
+    bytes Vec<u8>
+}
+/// None when the text contains NUL, which C would read as its end.
+pub fn CString.new(text &string) Option<CString> {
+    var bytes: Vec<u8> = Vec.new()
+    for byte in text.bytes() {
+        if byte == 0 { return None }
+        bytes.push(byte)
+    }
+    bytes.push(0)
+    return Some(CString{bytes: bytes})
+}
+/// Valid while this CString is alive and not moved.
+pub fn CString.as_ptr(&self) *u8 { return slice(self.bytes.as_slice()) }
+/// Byte length without the terminator.
+pub fn CString.len(&self) usize { return self.bytes.len() - 1 }

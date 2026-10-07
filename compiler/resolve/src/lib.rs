@@ -47,8 +47,8 @@ pub struct ModuleInput<'a> {
 /// first. A trusted module may use private items and fields only of the layers
 /// it builds on, never of layers above or beside it; user modules never see
 /// private stdlib items.
-pub const STDLIB_LAYERS: &[&str] = &["io", "time", "net", "runtime", "fs", "process"];
-const STDLIB_BELOW: &[(&str, &[&str])] = &[("io", &[]), ("fs", &["io"]), ("process", &["io"]), ("time", &["io"]), ("net", &["io"]), ("runtime", &["io", "time", "net"])];
+pub const STDLIB_LAYERS: &[&str] = &["io", "time", "net", "runtime", "fs", "process", "ffi"];
+const STDLIB_BELOW: &[(&str, &[&str])] = &[("io", &[]), ("ffi", &[]), ("fs", &["io"]), ("process", &["io"]), ("time", &["io"]), ("net", &["io"]), ("runtime", &["io", "time", "net"])];
 
 /// Whether `from` may use a private item or field declared in `to`.
 pub fn internal_visible(from: &ModuleInput, to: &ModuleInput) -> bool {

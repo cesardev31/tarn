@@ -1,0 +1,54 @@
+// Phase 18B: raw pointers, ffi helpers and C strings across real libc calls.
+// Pointers carry no loan: `x` is assigned while a pointer to it exists.
+import "ffi"
+extern "C" fn strlen(text *u8) usize
+extern "C" fn snprintf(out *mut u8, size usize, format *u8) i32
+fn main() {
+    match ffi.CString.new(&"héllo") {
+        Some(text) => {
+            unsafe { print(strlen(text.as_ptr())) }
+            print(text.len())
+        }
+        None => {}
+    }
+    match ffi.CString.new(&"a\u{0}b") { Some(t) => { print("accepted NUL") }
+        None => { print("rejected NUL") } }
+    p: *mut u8 := ffi.null()
+    print(ffi.is_null(ffi.to_const(p)))
+    var x: i64 = 5
+    q := ffi.of(&x)
+    print(ffi.address(q) != 0)
+    x = 6
+    var buffer: Vec<u8> = Vec.new()
+    var n = 0
+    for n < 16 {
+        buffer.push(0)
+        n = n + 1
+    }
+    match ffi.CString.new(&"tarn") {
+        Some(fmt) => {
+            unsafe {
+                written := snprintf(ffi.slice_mut(buffer.as_mut_slice()), 16, fmt.as_ptr())
+                print(written)
+                match ffi.string_from_c(ffi.slice(buffer.as_slice())) { Some(s) => { print(s) }
+                    None => {} }
+            }
+        }
+        None => {}
+    }
+    handles()
+    unsafe {
+        copied := ffi.copy_bytes(ffi.slice(buffer.as_slice()), 4)
+        print(copied.len())
+    }
+}
+copy struct Handle {
+    raw *mut u8
+}
+fn handles() {
+    h := Handle{raw: ffi.null()}
+    copied := h
+    print(ffi.is_null(ffi.to_const(h.raw)) && ffi.is_null(ffi.to_const(copied.raw)))
+    sentinel: *mut u8 := ffi.from_address(4096)
+    print(ffi.address(ffi.to_const(sentinel)))
+}

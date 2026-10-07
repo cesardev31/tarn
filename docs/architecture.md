@@ -23,6 +23,7 @@ Source → Lexer → Parser → AST → Resolve → Types → Typed IR
 | `stdlib/net` | — | blocking/nonblocking TCP/UDP, owned sockets, level-triggered epoll and explicit errors (ADRs 0034/0035) | done (12A/12B Linux v0) |
 | `stdlib/fs` | — | owned blocking regular files, directories and explicit io.Error (ADR 0043) | done (15B Linux v0) |
 | `stdlib/process` | — | owned blocking children, dual-pipe capture and io.Error (ADR 0045) | done (15D Linux v0) |
+| `stdlib/ffi` | — | trusted layer without dependencies: raw pointer intrinsics, CString, unsafe readers (ADR 0047) | 18B |
 | `stdlib/json` | — | ordinary bundled JSON writer/Encode and strict parser (ADR 0048) | done (17 v0) |
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | — | embedded C runtime: primitive print, strings, panic/abort; libc startup | initial (ADR 0027) |

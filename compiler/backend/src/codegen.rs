@@ -42,7 +42,7 @@ fn scalar(ty: &Ty) -> Option<cl::Type> {
         Ty::Float(FloatTy::F32) => types::F32,
         Ty::Float(_) => types::F64,
         Ty::Ref(_, inner) if !matches!(inner.as_ref(), Ty::Slice(_) | Ty::Any(_)) => types::I64,
-        Ty::Str => types::I64,
+        Ty::Str | Ty::Ptr(..) => types::I64,
         _ => return None,
     })
 }
@@ -183,6 +183,7 @@ fn c_type(ty: &Ty) -> Option<cl::AbiParam> {
         }
         Ty::Float(FloatTy::F32) => cl::AbiParam::new(types::F32),
         Ty::Float(_) => cl::AbiParam::new(types::F64),
+        Ty::Ptr(..) => cl::AbiParam::new(types::I64),
         _ => return None,
     })
 }
@@ -1949,6 +1950,7 @@ impl Cx<'_, '_> {
         if let Some(result) = self.networking(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.synchronization(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.vector(name, args, dest)? { return Ok(result); }
+        if let Some(result) = self.ffi(name, args, dest)? { return Ok(result); }
         if args.len() != 1 {
             return Err(Error::unsupported(format!("intrinsic {name}")));
         }
@@ -2228,5 +2230,8 @@ mod networking;
 
 #[path = "filesystem.rs"]
 mod filesystem;
+
+#[path = "ffi.rs"]
+mod ffi;
 #[path = "process.rs"]
 mod process;

@@ -352,6 +352,7 @@ fn show(t: &Ty, r: &Resolved, names: &HashMap<ParamId, String>, var: &dyn Fn(u32
         Ty::Adt(s, args) if args.is_empty() => r.symbol(*s).name.clone(),
         Ty::Adt(s, args) => format!("{}<{}>", r.symbol(*s).name, list(args)),
         Ty::Ref(m, x) => format!("&{}{}", if *m { "mut " } else { "" }, show(x)),
+        Ty::Ptr(m, x) => format!("*{}{}", if *m { "mut " } else { "" }, show(x)),
         Ty::Array(x, n) => format!("[{n}]{}", show(x)),
         Ty::Slice(x) => format!("[]{}", show(x)),
         Ty::Async(output) => format!("async computation<{}>", show(output)),

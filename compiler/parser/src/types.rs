@@ -6,7 +6,7 @@ use tarn_diagnostics::Diagnostic;
 use tarn_lexer::TokenKind;
 
 pub(crate) fn starts_type(k: &TokenKind) -> bool {
-    matches!(k, TokenKind::Ident(_) | TokenKind::Amp | TokenKind::AmpAmp | TokenKind::LBracket | TokenKind::Fn | TokenKind::Mut)
+    matches!(k, TokenKind::Ident(_) | TokenKind::Amp | TokenKind::AmpAmp | TokenKind::Star | TokenKind::LBracket | TokenKind::Fn | TokenKind::Mut)
 }
 
 impl Parser {
@@ -34,6 +34,11 @@ impl Parser {
                 let kind = self.ref_type();
                 let inner = Type { id: self.id(), span: self.since(inner_start), kind };
                 TypeKind::Ref { mutable: false, inner: Box::new(inner) }
+            }
+            TokenKind::Star => {
+                self.bump();
+                let mutable = self.eat(&TokenKind::Mut);
+                TypeKind::Ptr { mutable, inner: Box::new(self.parse_type()) }
             }
             TokenKind::LBracket => {
                 self.bump();

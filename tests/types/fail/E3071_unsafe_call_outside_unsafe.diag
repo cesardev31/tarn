@@ -1,0 +1,8 @@
+error[E3071]: calling the unsafe function `copy_bytes` requires `unsafe`
+ --> tests/types/fail/E3071_unsafe_call_outside_unsafe.tarn:6:14
+  |
+6 |     bytes := ffi.copy_bytes(ffi.slice(data.as_slice()), 1)
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: wrap the call in `unsafe { ... }` after checking the function's documented requirements
+

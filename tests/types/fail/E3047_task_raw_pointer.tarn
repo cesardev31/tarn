@@ -1,0 +1,11 @@
+// A raw pointer has neither Transfer nor Share (ADR 0047): a native task
+// cannot capture one, even inside a Copy struct.
+import "ffi"
+copy struct Handle {
+    raw *mut u8
+}
+fn main() {
+    h := Handle{raw: ffi.null()}
+    task := spawn move fn() usize { return ffi.address(ffi.to_const(h.raw)) }
+    print(task.join())
+}

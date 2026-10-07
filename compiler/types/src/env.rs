@@ -57,6 +57,8 @@ pub struct SemanticContract {
 #[derive(Clone)]
 pub struct FnSig {
     pub is_async: bool,
+    /// `unsafe fn`: callers need an `unsafe` block (ADR 0047).
+    pub is_unsafe: bool,
     /// Owner binders, then the function's own generics.
     pub generics: Vec<ParamId>,
     pub receiver: Option<ReceiverKind>,
@@ -148,6 +150,7 @@ impl Decls {
         match t {
             Ty::Bool | Ty::Int(_) | Ty::Float(_) | Ty::Never | Ty::Void | Ty::Opaque | Ty::Error => true,
             Ty::Ref(m, _) => !m,
+            Ty::Ptr(..) => true,
             Ty::Array(e, _) => self.is_copy(e),
             Ty::Adt(s, _) => self.structs.get(s).is_some_and(|d| d.is_copy) || self.enums.get(s).is_some_and(|d| d.is_copy),
             Ty::Param(p) => self.copy.is_some_and(|c| self.bounds.get(p).is_some_and(|b| b.contains(&c))),
@@ -476,7 +479,7 @@ impl<'a> Env<'a> {
                 contract.result = ResultContract::Borrowed(explicit);
             }
         }
-        let sig = FnSig { is_async: f.is_async, generics, receiver, self_ty, params, ret, abi: f.abi.clone(), module: m, span: f.name.span, contract };
+        let sig = FnSig { is_async: f.is_async, is_unsafe: f.is_unsafe, generics, receiver, self_ty, params, ret, abi: f.abi.clone(), module: m, span: f.name.span, contract };
         self.decls.fns.insert(sym, sig);
     }
 
@@ -567,6 +570,17 @@ impl<'a> Env<'a> {
             }
             TypeKind::Fn { mode, params, ret } => {
                 Ty::Fn(*mode, params.iter().map(|p| self.lower_with(m, p, diags)).collect(), Box::new(ret.as_ref().map(|r| self.lower_with(m, r, diags)).unwrap_or(Ty::Void)))
+            }
+            TypeKind::Ptr { mutable, inner } => {
+                if matches!(inner.kind, TypeKind::Slice(_) | TypeKind::Any(_)) {
+                    diags.push(
+                        Diagnostic::error("E3072", "unsized_pointee", "raw pointers point to sized values")
+                            .primary(t.span, "a slice or dynamic interface has no single address")
+                            .help("point to the first element instead: `*T` from `ffi.slice(data)`"),
+                    );
+                    return Ty::Error;
+                }
+                Ty::Ptr(*mutable, Box::new(self.lower_with(m, inner, diags)))
             }
             TypeKind::Any(_) => {
                 diags.push(

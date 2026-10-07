@@ -681,7 +681,7 @@ impl<'c, 'a> Walker<'c, 'a> {
                 self.use_(p.id, p.span, res.clone());
                 self.use_(t.id, t.span, res);
             }
-            TypeKind::Ref { inner, .. } | TypeKind::Slice(inner) => self.ty(inner),
+            TypeKind::Ref { inner, .. } | TypeKind::Ptr { inner, .. } | TypeKind::Slice(inner) => self.ty(inner),
             TypeKind::Array { len, elem } => {
                 self.expr(len);
                 self.ty(elem);

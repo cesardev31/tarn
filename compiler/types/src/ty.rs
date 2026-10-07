@@ -76,6 +76,8 @@ pub enum Ty {
     /// Struct, enum or prelude type with its type arguments.
     Adt(SymbolId, Vec<Ty>),
     Ref(bool, Box<Ty>),
+    /// Raw pointer `*T` / `*mut T` (ADR 0047): Copy, no loan, no capabilities.
+    Ptr(bool, Box<Ty>),
     Array(Box<Ty>, u64),
     /// Unsized; only valid behind a reference.
     Slice(Box<Ty>),
@@ -145,6 +147,7 @@ impl Infer {
         match self.shallow(t) {
             Ty::Adt(s, args) => Ty::Adt(s, args.iter().map(|a| self.zonk(a)).collect()),
             Ty::Ref(m, x) => Ty::Ref(m, Box::new(self.zonk(&x))),
+            Ty::Ptr(m, x) => Ty::Ptr(m, Box::new(self.zonk(&x))),
             Ty::Array(x, n) => Ty::Array(Box::new(self.zonk(&x)), n),
             Ty::Slice(x) => Ty::Slice(Box::new(self.zonk(&x))),
             Ty::Fn(mode, ps, r) => Ty::Fn(mode, ps.iter().map(|p| self.zonk(p)).collect(), Box::new(self.zonk(&r))),
@@ -157,7 +160,7 @@ impl Infer {
         match self.shallow(t) {
             Ty::Var(w) => v == w,
             Ty::Adt(_, args) => args.iter().any(|a| self.occurs(v, a)),
-            Ty::Ref(_, x) | Ty::Array(x, _) | Ty::Slice(x) => self.occurs(v, &x),
+            Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) => self.occurs(v, &x),
             Ty::Fn(_, ps, r) => ps.iter().any(|p| self.occurs(v, p)) || self.occurs(v, &r),
             Ty::Async(r) => self.occurs(v, &r),
             _ => false,
@@ -242,6 +245,7 @@ impl Infer {
             (Ty::Never, _) | (_, Ty::Never) => true,
             (Ty::Adt(s1, a1), Ty::Adt(s2, a2)) => s1 == s2 && a1.len() == a2.len() && a1.iter().zip(a2).all(|(x, y)| self.unify_inner(x, y)),
             (Ty::Ref(m1, x), Ty::Ref(m2, y)) => m1 == m2 && self.unify_inner(x, y),
+            (Ty::Ptr(m1, x), Ty::Ptr(m2, y)) => m1 == m2 && self.unify_inner(x, y),
             (Ty::Array(x, n1), Ty::Array(y, n2)) => n1 == n2 && self.unify_inner(x, y),
             (Ty::Slice(x), Ty::Slice(y)) => self.unify_inner(x, y),
             (Ty::Fn(m1, p1, r1), Ty::Fn(m2, p2, r2)) => m1 == m2 && p1.len() == p2.len() && p1.iter().zip(p2).all(|(x, y)| self.unify_inner(x, y)) && self.unify_inner(r1, r2),
@@ -268,7 +272,7 @@ impl Infer {
         match self.zonk(t) {
             Ty::Var(_) => true,
             Ty::Adt(_, args) => args.iter().any(|a| self.has_unresolved(a)),
-            Ty::Ref(_, x) | Ty::Array(x, _) | Ty::Slice(x) => self.has_unresolved(&x),
+            Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) => self.has_unresolved(&x),
             Ty::Fn(_, ps, r) => ps.iter().any(|p| self.has_unresolved(p)) || self.has_unresolved(&r),
             Ty::Async(r) => self.has_unresolved(&r),
             _ => false,

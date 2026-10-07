@@ -35,7 +35,7 @@ fn layout_inner(t: &Typed, ty: &Ty, seen: &mut Vec<Ty>) -> Result<Layout> {
         Ty::Int(i) => scalar((crate::codegen::int_bits(*i) / 8) as u32),
         Ty::Float(tarn_types::FloatTy::F32) => scalar(4),
         Ty::Float(_) => scalar(8),
-        Ty::Str => scalar(8),
+        Ty::Str | Ty::Ptr(..) => scalar(8),
         Ty::Ref(_, inner) => {
             if matches!(inner.as_ref(), Ty::Slice(_) | Ty::Any(_)) {
                 Layout { size: 16, align: 8, fields: Vec::new(), variants: Vec::new() }

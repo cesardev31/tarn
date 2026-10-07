@@ -470,14 +470,16 @@ fn pid() i32 {
 `unsafe { ... }` is a block statement (blocks never produce values).
 
 Native calls (Phase 18A, ADR 0047) support System V x86_64 scalar signatures:
-`bool`, fixed-width integers, `usize`/`isize`, `f32`/`f64` and `void` results.
+`bool`, fixed-width integers, `usize`/`isize`, `f32`/`f64`, raw pointers and
+`void` results.
 The symbol is the declared name, resolved by the system linker against libc
 and libm. Other parameter or result types still fail native builds with
 "has no C ABI in v0"; they remain usable for semantic contract checks.
 
-`unsafe` enables a fixed list of operations (call extern functions, deref raw
-pointers `*T`, access mutable statics). Ownership and type checks still apply
-inside `unsafe`.
+`unsafe` is required to call `extern "C"` functions and `unsafe fn` functions
+(E3031, E3071). Raw pointers `*T` / `*mut T` exist (Phase 18B); there is no
+dereference syntax: memory is read through `unsafe fn` helpers in `ffi`.
+Ownership and type checks still apply inside `unsafe`. See [C interop](ffi.md).
 
 ## 15. Builtins (draft 0)
 

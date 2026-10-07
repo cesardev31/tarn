@@ -96,6 +96,8 @@ impl Decls {
                 let marker = match cap { Capability::Transfer => self.transfer, Capability::Share => self.share };
                 marker.is_some_and(|s| self.bounds.get(p).is_some_and(|b| b.contains(&s)))
             }
+            // A raw pointer is unchecked shared mutable access (ADR 0047).
+            Ty::Ptr(..) => false,
             Ty::Ref(false, t) => self.capability_inner(t, Capability::Share, path, budget),
             Ty::Ref(true, t) => cap == Capability::Transfer && self.capability_inner(t, Capability::Transfer, path, budget),
             Ty::Array(t, _) | Ty::Slice(t) => self.capability_inner(t, cap, path, budget),

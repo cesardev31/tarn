@@ -62,6 +62,8 @@ pub struct FnDecl {
     pub span: Span,
     /// Source modifier only; execution and frame metadata live in later tables.
     pub is_async: bool,
+    /// `unsafe fn`: every call requires an `unsafe` block (ADR 0047).
+    pub is_unsafe: bool,
     /// `extern "C"` ABI string, if any.
     pub abi: Option<String>,
     /// `User` in `fn User.new()`, `Pair<A, B>` in `fn Pair<A, B>.first()`.
@@ -199,6 +201,11 @@ pub enum TypeKind {
     Path(Path),
     /// `&T` / `&mut T`
     Ref {
+        mutable: bool,
+        inner: Box<Type>,
+    },
+    /// `*T` / `*mut T`: raw pointer (ADR 0047). Carries no loan.
+    Ptr {
         mutable: bool,
         inner: Box<Type>,
     },

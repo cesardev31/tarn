@@ -1,0 +1,10 @@
+(fn extern "C" sqlite3_open ((path *u8) (db *mut *mut Connection)) -> i32)
+(unsafe fn read ((source *u8) (count usize)) -> usize
+  (block
+    (return count)))
+(pub unsafe fn first ((items *u8)) -> *mut u8
+  (block
+    (return items)))
+(struct Holder
+  (raw *mut u8)
+  (view **i32))

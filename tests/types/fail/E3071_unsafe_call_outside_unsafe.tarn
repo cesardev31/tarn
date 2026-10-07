@@ -1,0 +1,7 @@
+// Reading through a raw pointer is an `unsafe fn`; the caller must opt in.
+import "ffi"
+fn main() {
+    var data: Vec<u8> = Vec.new()
+    data.push(7)
+    bytes := ffi.copy_bytes(ffi.slice(data.as_slice()), 1)
+}

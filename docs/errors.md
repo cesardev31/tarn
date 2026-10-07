@@ -185,6 +185,8 @@ Golden tests in `tests/**/fail/*.tarn` pin the rendered text of each code.
 | Code | Name | Meaning |
 |------|------|---------|
 | E3051 | `unmodeled_replacement_loans` | a native guard replacement cannot accept new payload loans without a stored-loan effect contract |
+| E3071 | `unsafe_call_outside_unsafe` | calling an `unsafe fn` requires an `unsafe` block (ADR 0047) |
+| E3072 | `unsized_pointee` | raw pointers point to sized values; use `ffi.slice` for a slice's first element |
 | E3060 | `await_outside_async` | await requires an async function context; an ordinary closure does not inherit that context |
 | E3061 | `not_awaitable` | the operand is neither a source async computation nor the trusted Phase-12C Operation declaration |
 | E3062 | `async_lowering_unavailable` | retired: temporary Phase-13 checkpoint gate, removed when frame lowering landed; never reused |

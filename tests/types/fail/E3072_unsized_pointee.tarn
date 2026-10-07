@@ -1,0 +1,7 @@
+// A raw pointer needs one address: slices and dynamic interfaces are
+// fat references, so `*[]T` and `*any I` are rejected.
+fn first(items *[]u8) usize {
+    return 0
+}
+fn main() {
+}

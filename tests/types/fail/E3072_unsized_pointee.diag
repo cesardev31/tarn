@@ -1,0 +1,8 @@
+error[E3072]: raw pointers point to sized values
+ --> tests/types/fail/E3072_unsized_pointee.tarn:3:16
+  |
+3 | fn first(items *[]u8) usize {
+  |                ^^^^^ a slice or dynamic interface has no single address
+  |
+  = help: point to the first element instead: `*T` from `ffi.slice(data)`
+

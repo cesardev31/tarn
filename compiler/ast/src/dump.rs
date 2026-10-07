@@ -113,6 +113,7 @@ impl Dumper {
     fn func(&mut self, f: &FnDecl, vis: &str, ind: usize) {
         self.s("(");
         self.s(vis);
+        if f.is_unsafe { self.s("unsafe "); }
         if f.is_async { self.s("async "); }
         self.s("fn ");
         if let Some(abi) = &f.abi {
@@ -190,6 +191,10 @@ impl Dumper {
             TypeKind::Path(p) => self.path(p),
             TypeKind::Ref { mutable, inner } => {
                 self.s(if *mutable { "&mut " } else { "&" });
+                self.ty(inner);
+            }
+            TypeKind::Ptr { mutable, inner } => {
+                self.s(if *mutable { "*mut " } else { "*" });
                 self.ty(inner);
             }
             TypeKind::Slice(e) => {

@@ -52,6 +52,7 @@ pub fn subst(t: &Ty, map: &HashMap<ParamId, Ty>) -> Ty {
         Ty::Param(p) => map.get(p).cloned().unwrap_or(Ty::Param(*p)),
         Ty::Adt(s, a) => Ty::Adt(*s, a.iter().map(|x| subst(x, map)).collect()),
         Ty::Ref(m, x) => Ty::Ref(*m, Box::new(subst(x, map))),
+        Ty::Ptr(m, x) => Ty::Ptr(*m, Box::new(subst(x, map))),
         Ty::Array(x, n) => Ty::Array(Box::new(subst(x, map)), *n),
         Ty::Slice(x) => Ty::Slice(Box::new(subst(x, map))),
         Ty::Fn(mode, ps, r) => Ty::Fn(*mode, ps.iter().map(|x| subst(x, map)).collect(), Box::new(subst(r, map))),
@@ -1636,6 +1637,12 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 Diagnostic::error("E3031", "extern_call_outside_unsafe", format!("calling the extern function `{name}` requires `unsafe`"))
                     .primary(e.span, "")
                     .help("wrap the call in `unsafe { ... }` and document why it is sound"),
+            );
+        } else if sig.is_unsafe && self.unsafe_depth == 0 {
+            self.err(
+                Diagnostic::error("E3071", "unsafe_call_outside_unsafe", format!("calling the unsafe function `{name}` requires `unsafe`"))
+                    .primary(e.span, "")
+                    .help("wrap the call in `unsafe { ... }` after checking the function's documented requirements"),
             );
         }
         let mut map = self.instantiate(&sig.generics);

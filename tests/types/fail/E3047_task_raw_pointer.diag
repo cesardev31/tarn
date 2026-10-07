@@ -1,0 +1,8 @@
+error[E3047]: capture `h` of type `Handle` requires `Transfer`
+ --> tests/types/fail/E3047_task_raw_pointer.tarn:9:19
+  |
+9 |     task := spawn move fn() usize { return ffi.address(ffi.to_const(h.raw)) }
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot cross this native task boundary
+  |
+  = help: use structurally capable owned data or declare the required generic bound; unknown native and erased callable values need explicit evidence
+

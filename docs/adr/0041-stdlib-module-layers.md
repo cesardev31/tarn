@@ -94,3 +94,9 @@ they previously loaded `net`.
 [ADR 0043](0043-blocking-filesystem.md) adds trusted `fs` → `io`. Its text
 helpers import the ordinary `string` module. No sideways privilege is granted
 to net/time/runtime; filesystem intrinsics/resources have a separate catalog.
+
+## Phase 18B extension
+
+`ffi` is a trusted layer with no dependencies (`ffi` builds on nothing and
+nothing builds on it yet). Its public intrinsics are raw pointer operations;
+readers are `unsafe fn` over libc. See [ADR 0047](0047-native-c-ffi.md).
