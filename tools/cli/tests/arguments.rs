@@ -24,7 +24,9 @@ fn usage_errors_are_rejected_before_loading_sources() {
         vec!["build", "--link"],
         vec!["build", "-o", "one", "-o", "two"],
         vec!["run", "-o", "out"],
-        vec!["run", "--", "hello"],
+        // Program arguments exist only for `run` (Phase 24, ADR 0053).
+        vec!["build", "--", "hello"],
+        vec!["check", "--", "hello"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_tarn"))
             .args(args)

@@ -78,4 +78,7 @@ adapter checks). Where the extra lines come from, most impactful first:
 
 ## Final validation
 
-Recorded after the full workspace run.
+`cargo test --workspace --no-fail-fast`: 264 passed, 0 failed, 1 ignored
+(existing benchmark), no build warnings. One existing CLI test asserted the
+old rejection of `tarn run -- args`; it now asserts `--` is rejected for
+`build` and `check`, where program arguments do not apply.
