@@ -1,0 +1,8 @@
+error[E3022]: `string` does not implement `Copy`
+ --> tests/types/fail/E3022_extend_requires_copy.tarn:5:5
+  |
+5 |     names.extend_from_slice(&more)
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by a bound `Copy` here
+  |
+  = help: `string` is not a copy type; copy types are numbers, `bool`, `&T` and types declared with `copy`
+

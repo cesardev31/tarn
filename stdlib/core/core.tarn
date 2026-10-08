@@ -172,6 +172,8 @@ pub extern "intrinsic" fn Vec<T>.is_empty(&self) bool
 /// Borrow every element as a slice; the slice borrows the vector, so the vector
 /// cannot grow, shrink or move while the slice is live.
 pub extern "intrinsic" fn Vec<T>.as_slice(&self) &[]T
+/// Append copies of `items` with one bulk copy; elements must be Copy.
+pub extern "intrinsic" fn Vec<T>.extend_from_slice(&mut self, items &[]T)
 pub extern "intrinsic" fn Vec<T>.as_mut_slice(&mut self) &mut []T
 
 // ------------------------------------------------ synchronization (phase 11C)
@@ -277,5 +279,9 @@ pub extern "intrinsic" fn AtomicUsize.fetch_sub(&self, value usize) usize
 // ------------------------------------------------ UTF-8 bridges (phase 15A)
 /// Immutable UTF-8 bytes; the slice borrows this string.
 pub extern "intrinsic" fn string.bytes(&self) &[]u8
+/// Owned copy of bytes [start, end). Both ends must be scalar boundaries
+/// (callers check; an invalid range aborts), so the copy is valid UTF-8
+/// without re-validation (Phase 28).
+pub extern "intrinsic" fn string.copy_range(&self, start usize, end usize) string
 /// Validate UTF-8 and copy the bytes into a new owner; invalid input is None.
 pub extern "intrinsic" fn string_from_utf8(data &[]u8) Option<string>

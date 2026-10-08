@@ -1,0 +1,32 @@
+import "json"
+struct Item {
+    id u64
+    name string
+}
+impl json.Encode for Item {
+    fn encode(&self, out &mut json.Writer) {
+        out.begin_object()
+        out.field_u64("id", self.id)
+        out.field_string("name", &self.name)
+        out.end_object()
+    }
+}
+fn main() {
+    var items: Vec<Item> = Vec.new()
+    var i: u64 = 0
+    for i < 1000 {
+        items.push(Item{id: i, name: "producto número " + &"x"})
+        i = i + 1
+    }
+    var total: usize = 0
+    var round = 0
+    for round < 200 {
+        text := json.encode_list(items.as_slice())
+        match json.parse(&text) {
+            Ok(value) => { total = total + value.into_list().len() + text.len() }
+            Err(e) => {}
+        }
+        round = round + 1
+    }
+    print(total)
+}

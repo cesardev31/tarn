@@ -1,0 +1,15 @@
+fn main() {
+    var data: Vec<i64> = Vec.new()
+    var i: i64 = 0
+    for i < 20000000 {
+        data.push(i % 977)
+        i = i + 1
+    }
+    var total: i64 = 0
+    var round = 0
+    for round < 5 {
+        for value in data.as_slice() { total = total + value }
+        round = round + 1
+    }
+    print(total)
+}

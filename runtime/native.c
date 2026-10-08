@@ -10,10 +10,25 @@
 #include <string.h>
 #include <inttypes.h>
 #include <math.h>
+#include <stdatomic.h>
+/* Test tracing switches (TARN_TRACE_*), read once: getenv scans the whole
+ * environment and used to run on every string drop. Tarn never changes the
+ * environment, so a cached answer stays correct. */
+static int tarn_trace_enabled(_Atomic int *cache, const char *name) {
+    int value = atomic_load_explicit(cache, memory_order_relaxed);
+    if (value < 0) {
+        value = getenv(name) != NULL;
+        atomic_store_explicit(cache, value, memory_order_relaxed);
+    }
+    return value;
+}
+#define TARN_TRACE(name) tarn_trace_enabled(&tarn_trace_##name, "TARN_TRACE_" #name)
+static _Atomic int tarn_trace_EXEC = -1, tarn_trace_DROPS = -1, tarn_trace_SYNC = -1,
+    tarn_trace_NET = -1, tarn_trace_FS = -1, tarn_trace_PROCESS = -1;
 
 /* Opt-in allocation observations for compiler tests; no ownership decisions. */
 static void exec_trace(const char *kind, const char *event, uintptr_t storage) {
-    if (storage && getenv("TARN_TRACE_EXEC")) {
+    if (storage && TARN_TRACE(EXEC)) {
         flockfile(stderr);
         fprintf(stderr, "exec:%s:%s:%" PRIxPTR "\n", kind, event, storage);
         funlockfile(stderr);
@@ -82,7 +97,7 @@ void tarn_rt_drop_string(TarnString *s) {
     /* Opt-in compiler test observation, never a user destructor hook. A
      * static literal is still destroyed as a value (and traced), only its
      * storage is not released. */
-    if (getenv("TARN_TRACE_DROPS")) { flockfile(stderr); fputs("drop:", stderr); fwrite(s->bytes, 1, s->len, stderr); fputc('\n', stderr); funlockfile(stderr); }
+    if (TARN_TRACE(DROPS)) { flockfile(stderr); fputs("drop:", stderr); fwrite(s->bytes, 1, s->len, stderr); fputc('\n', stderr); funlockfile(stderr); }
     if (tarn_static_string(s)) return;
     free(s);
 }
@@ -95,6 +110,14 @@ _Noreturn void tarn_rt_panic(const TarnString *s) {
     fputs("panic: ", stderr); fwrite(s->bytes, 1, s->len, stderr); fputc('\n', stderr); fflush(NULL); abort();
 }
 _Noreturn void tarn_rt_fault(void) { fputs("panic: checked arithmetic or bounds failure\n", stderr); fflush(NULL); abort(); }
+/* string.copy_range (Phase 28): a valid string cut at scalar boundaries is
+ * valid UTF-8, so only the two boundary bytes are checked. */
+TarnString *tarn_rt_string_range(const TarnString *s, uint64_t start, uint64_t end) {
+    if (start > end || end > s->len) tarn_rt_fault();
+    if (start < s->len && (s->bytes[start] & 0xc0) == 0x80) tarn_rt_fault();
+    if (end < s->len && (s->bytes[end] & 0xc0) == 0x80) tarn_rt_fault();
+    return tarn_rt_string(s->bytes + start, end - start);
+}
 
 float tarn_rt_rem_f32(float a, float b) { return fmodf(a, b); }
 double tarn_rt_rem_f64(double a, double b) { return fmod(a, b); }
@@ -119,6 +142,21 @@ void *tarn_rt_vec_grow(void *data, uint64_t count, uint64_t size) {
     if (!p) abort();
     exec_trace("storage", "alloc", (uintptr_t)p);
     return p;
+}
+/* Vec<T>.extend_from_slice for Copy T (Phase 28): header words are
+ * (storage, count, capacity); growth goes through tarn_rt_vec_grow so
+ * allocation tracing still sees it. */
+void tarn_rt_vec_extend(uint64_t *vec, const void *src, uint64_t count, uint64_t size) {
+    uint64_t len = vec[1], cap = vec[2];
+    if (count > UINT64_MAX - len) abort();
+    if (len + count > cap) {
+        uint64_t next = cap ? cap * 2 : 4;
+        if (cap > UINT64_MAX / 2 || next < len + count) next = len + count;
+        vec[0] = (uint64_t)(uintptr_t)tarn_rt_vec_grow((void *)(uintptr_t)vec[0], next, size);
+        vec[2] = next;
+    }
+    if (count) memcpy((unsigned char *)(uintptr_t)vec[0] + len * size, src, count * size);
+    vec[1] = len + count;
 }
 void tarn_rt_env_drop(void *p) {
     if (!p) return;
@@ -203,7 +241,7 @@ void tarn_rt_task_drop(TarnTask *task) {
 #include <limits.h>
 typedef struct { pthread_mutex_t mutex; } TarnMutex;
 static void tarn_sync_trace(const char *event) {
-    if (getenv("TARN_TRACE_SYNC")) {
+    if (TARN_TRACE(SYNC)) {
         flockfile(stderr); fprintf(stderr, "sync:%s\n", event); funlockfile(stderr);
     }
 }
@@ -310,7 +348,7 @@ _Static_assert(sizeof(TarnNetRaw) == 40 && offsetof(TarnNetRaw, address) == 16, 
 static void net_init(TarnNetRaw *out) { memset(out, 0, sizeof(*out)); }
 static void net_status(TarnNetRaw *out, int64_t value) { out->value = value; if (value < 0) out->code = errno; }
 static void net_trace(const char *event, int fd) {
-    if (getenv("TARN_TRACE_NET")) { flockfile(stderr); fprintf(stderr, "net:%s:%d\n", event, fd); funlockfile(stderr); }
+    if (TARN_TRACE(NET)) { flockfile(stderr); fprintf(stderr, "net:%s:%d\n", event, fd); funlockfile(stderr); }
 }
 static int net_native(const TarnNetAddr *address, struct sockaddr_storage *storage, socklen_t *len) {
     memset(storage, 0, sizeof(*storage));
@@ -745,7 +783,7 @@ static void fs_status(TarnNetRaw *out, int64_t value) {
     if (value < 0) fs_error(out, errno);
 }
 static void fs_trace(const char *event, int fd) {
-    if (getenv("TARN_TRACE_FS")) { flockfile(stderr); fprintf(stderr, "fs:%s:%d\n", event, fd); funlockfile(stderr); }
+    if (TARN_TRACE(FS)) { flockfile(stderr); fprintf(stderr, "fs:%s:%d\n", event, fd); funlockfile(stderr); }
 }
 static char *fs_path(TarnNetRaw *out, const TarnString *path) {
     net_init(out);
@@ -846,7 +884,7 @@ void tarn_rt_fs_dir_drop(DIR *directory) {
 #include <sys/wait.h>
 extern char **environ;
 static void process_trace(const char *event, int id) {
-    if (getenv("TARN_TRACE_PROCESS")) { flockfile(stderr); fprintf(stderr, "process:%s:%d\n", event, id); funlockfile(stderr); }
+    if (TARN_TRACE(PROCESS)) { flockfile(stderr); fprintf(stderr, "process:%s:%d\n", event, id); funlockfile(stderr); }
 }
 static void process_error(TarnNetRaw *out, int code) { net_init(out); out->domain = 4; out->code = code; }
 static void process_close(int fd) {

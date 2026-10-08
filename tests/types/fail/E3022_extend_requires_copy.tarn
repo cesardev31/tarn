@@ -1,0 +1,6 @@
+// Bulk append copies bytes, so it requires Copy elements (Phase 28).
+fn main() {
+    var names: Vec<string> = Vec.new()
+    more := [1]string{"x"}
+    names.extend_from_slice(&more)
+}

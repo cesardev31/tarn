@@ -91,8 +91,8 @@ fn _config_valid(l Limits, t Timeouts) bool {
     return l.request_line >= 2 && l.line >= 2 && l.head >= l.request_line && l.headers > 0 && l.body > 0 && l.response_body > 0 && l.response_head >= 64 && l.response_headers > 0 && l.chunk_metadata >= l.line && l.chunks > 0 && l.trailers > 0 && l.buffer > 0 && l.requests > 0 && l.head <= 1073741824 && l.line <= l.head && l.body <= 1073741824 && l.response_body <= 1073741824 && l.response_head <= 1073741824 && l.chunk_metadata <= 1073741824 && l.buffer <= 1073741824 && _duration_valid(t.head) && _duration_valid(t.body) && _duration_valid(t.write)
 }
 fn _copy(data &[]u8) Vec<u8> {
-    var out = Vec.new()
-    for b in data { out.push(b) }
+    var out: Vec<u8> = Vec.new()
+    out.extend_from_slice(data)
     return out
 }
 fn _append(out &mut Vec<u8>, data &[]u8) { for b in data { out.push(b) } }

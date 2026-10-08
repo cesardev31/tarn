@@ -272,7 +272,7 @@ pub fn parse(text &string) Result<Value, Error> { return parse_bytes(text.bytes(
 /// fails at that string's offset.
 pub fn parse_bytes(data &[]u8) Result<Value, Error> {
     var owned: Vec<u8> = Vec.new()
-    for byte in data { owned.push(byte) }
+    owned.extend_from_slice(data)
     var parser = Parser{data: owned, pos: 0}
     value := try parser.value(0)
     parser.space()

@@ -97,6 +97,20 @@ impl Cx<'_, '_> {
                 let at = self.vec_element(data, index, &elem)?;
                 self.vec_take(at, &elem)?
             }
+            ("extend_from_slice", 2)
+                if *mutable && *dest == Ty::Void && self.t.decls.is_copy(&elem)
+                    && args[1].ty == Ty::Ref(false, Box::new(Ty::Slice(Box::new(elem.clone())))) =>
+            {
+                if (data_at, len_at, cap_at) != (0, 8, 16) {
+                    return Err(Error::bug("vector header layout for bulk append"));
+                }
+                let slice = args[1].value.ok_or_else(|| Error::bug("bulk append slice"))?;
+                let src = self.b.ins().load(types::I64, flags, slice, 0);
+                let count = self.b.ins().load(types::I64, flags, slice, 8);
+                let size = self.b.ins().iconst(types::I64, i64::from(layout::layout(self.t, &elem)?.size));
+                self.runtime("tarn_rt_vec_extend", &[addr, src, count, size]);
+                Val { value: None, ty: Ty::Void }
+            }
             ("push", 2) if *mutable && args[1].ty == elem && *dest == Ty::Void => {
                 let cap = self.b.ins().load(types::I64, flags, addr, cap_at);
                 let full = self.b.ins().icmp(IntCC::Equal, len, cap);

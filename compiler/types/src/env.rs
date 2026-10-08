@@ -406,7 +406,7 @@ impl<'a> Env<'a> {
         // method syntax (ordinary owner bounds remain forbidden by ADR 0015).
         if f.abi.as_deref() == Some("intrinsic")
             && ((f.name.name == "read" && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.mutex_guard))
-                || (f.name.name == "at" && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.vec)))
+                || ((f.name.name == "at" || f.name.name == "extend_from_slice") && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.vec)))
             && let (Some(parameter), Some(copy)) = (generics.first(), self.decls.copy) {
             self.decls.bounds.entry(*parameter).or_default().push(copy);
         }

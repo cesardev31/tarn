@@ -353,7 +353,7 @@ pub fn emit_entry(p: &post::Program, t: &Typed, test: bool) -> Result<Vec<u8>> {
     }
     verify_dynamic(p, t)?;
     let mut settings = settings::builder();
-    settings.set("opt_level", "none").map_err(|e| Error::bug(e.to_string()))?;
+    settings.set("opt_level", "speed").map_err(|e| Error::bug(e.to_string()))?;
     settings.set("is_pic", "false").map_err(|e| Error::bug(e.to_string()))?;
     let isa = cranelift_native::builder().map_err(|e| Error::unsupported(e.to_string()))?.finish(settings::Flags::new(settings)).map_err(|e| Error::bug(e.to_string()))?;
     let builder = ObjectBuilder::new(isa, "tarn", cranelift_module::default_libcall_names()).map_err(|e| Error::bug(e.to_string()))?;
@@ -370,7 +370,10 @@ pub fn emit_entry(p: &post::Program, t: &Typed, test: bool) -> Result<Vec<u8>> {
             module.declare_function(name, Linkage::Import, &sig).map_err(|e| Error::unsupported(format!("extern \"C\" fn {name}: {e}")))?
         } else {
             let sig = signature(&module, t, f)?;
-            module.declare_function(&format!("tarn_fn_{}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?
+            // Readable local symbols for profilers and debuggers: the id keeps
+            // them unique, the source name says what they are.
+            let readable: String = f.name.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+            module.declare_function(&format!("tarn_fn_{}__{readable}", id.0), Linkage::Local, &sig).map_err(|e| Error::bug(e.to_string()))?
         };
         ids.insert(*id, fid);
     }
@@ -491,6 +494,8 @@ pub fn emit_entry(p: &post::Program, t: &Typed, test: bool) -> Result<Vec<u8>> {
         ("tarn_rt_string", vec![types::I64, types::I64], vec![types::I64]),
         ("tarn_rt_drop_string", vec![types::I64], vec![]),
         ("tarn_rt_string_utf8", vec![types::I64, types::I64], vec![types::I64]),
+        ("tarn_rt_string_range", vec![types::I64, types::I64, types::I64], vec![types::I64]),
+        ("tarn_rt_vec_extend", vec![types::I64; 4], vec![]),
         ("tarn_rt_string_add", vec![types::I64, types::I64], vec![types::I64]),
         ("tarn_rt_string_compare", vec![types::I64, types::I64], vec![types::I32]),
         ("tarn_rt_env_alloc", vec![types::I64], vec![types::I64]),
@@ -984,9 +989,19 @@ impl Cx<'_, '_> {
         let call = self.b.ins().call(target, args);
         self.b.inst_results(call).to_vec()
     }
+    /// The value of `v` when it is an integer constant in this function.
+    fn constant(&self, v: cl::Value) -> Option<i64> {
+        let cl::ValueDef::Result(inst, _) = self.b.func.dfg.value_def(v) else { return None };
+        match self.b.func.dfg.insts[inst] {
+            cl::InstructionData::UnaryImm { opcode: cl::Opcode::Iconst, imm } => Some(imm.bits()),
+            _ => None,
+        }
+    }
     fn fault_if(&mut self, condition: cl::Value) {
         let fail = self.b.create_block();
         let next = self.b.create_block();
+        // Faults abort: keep them out of the hot path's layout.
+        self.b.set_cold_block(fail);
         self.b.ins().brif(condition, fail, &[], next, &[]);
         self.b.switch_to_block(fail);
         self.runtime("tarn_rt_fault", &[]);
@@ -1550,9 +1565,13 @@ impl Cx<'_, '_> {
                             v
                         }
                         BinOp::Div | BinOp::Rem => {
-                            let zero = self.b.ins().icmp_imm(IntCC::Equal, y, 0);
-                            self.fault_if(zero);
-                            if signed {
+                            // A constant divisor needs only the checks it can fail.
+                            let divisor = self.constant(y);
+                            if divisor.is_none_or(|d| d == 0) {
+                                let zero = self.b.ins().icmp_imm(IntCC::Equal, y, 0);
+                                self.fault_if(zero);
+                            }
+                            if signed && divisor.is_none_or(|d| d == -1) {
                                 let Ty::Int(i) = a.ty else {
                                     return Err(Error::bug("signed bool"));
                                 };
@@ -1947,6 +1966,13 @@ impl Cx<'_, '_> {
             let len = self.b.ins().load(types::I64, flags, string, 0);
             let bytes = self.b.ins().iadd_imm(string, 8);
             return Ok(Some(Val { value: Some(self.pair(bytes, len)), ty: dest.clone() }));
+        }
+        if name == "string.copy_range" && args.len() == 3 && args[0].ty == string_ref && *dest == Ty::Str
+            && args[1].ty == Ty::Int(IntTy::Usize) && args[2].ty == Ty::Int(IntTy::Usize)
+        {
+            let string = self.b.ins().load(types::I64, flags, args[0].value.unwrap(), 0);
+            let (start, end) = (args[1].value.unwrap(), args[2].value.unwrap());
+            return Ok(Some(Val { value: Some(self.runtime("tarn_rt_string_range", &[string, start, end])[0]), ty: Ty::Str }));
         }
         if name == "core.string_from_utf8" && args.len() == 1 && args[0].ty == byte_slice {
             let Ty::Adt(option, params) = dest else { return Err(Error::bug("UTF-8 result type")) };

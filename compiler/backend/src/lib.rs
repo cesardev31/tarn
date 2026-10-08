@@ -103,7 +103,7 @@ fn build_entry(p: &post_drop::Program, t: &Typed, output: &Path, libraries: &[St
     // Untranslated linker diagnostics keep linker_message deterministic.
     let linked = Command::new("cc")
         .env("LC_ALL", "C")
-        .args(["-std=c11", "-O0", "-fno-strict-aliasing", "-no-pie", "-pthread"])
+        .args(["-std=c11", "-O2", "-fno-strict-aliasing", "-no-pie", "-pthread"])
         .arg(&object)
         .arg(&runtime)
         .args(libraries.iter().map(|l| format!("-l{l}")))

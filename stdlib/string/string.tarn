@@ -19,7 +19,7 @@ pub fn slice(value &string, start usize, end usize) Option<string> {
     data := value.bytes()
     if start < data.len() && (data[start] & 192) == 128 { return None }
     if end < data.len() && (data[end] & 192) == 128 { return None }
-    return string_from_utf8(&data[start..end])
+    return Some(value.copy_range(start, end))
 }
 
 fn equal_at(data &[]u8, pattern &[]u8, start usize) bool {
@@ -37,9 +37,12 @@ pub fn find(value &string, pattern &string) Option<usize> {
     data := value.bytes()
     needle := pattern.bytes()
     if needle.len() > data.len() { return None }
+    if needle.is_empty() { return Some(0) }
+    first := needle[0]
     var index: usize = 0
     for index <= data.len() - needle.len() {
-        if equal_at(data, needle, index) { return Some(index) }
+        // Most positions differ in the first byte: skip the call there.
+        if data[index] == first && equal_at(data, needle, index) { return Some(index) }
         index = index + 1
     }
     return None
@@ -61,12 +64,7 @@ pub fn ends_with(value &string, pattern &string) bool {
 fn whitespace(byte u8) bool {
     return byte == 32 || (byte >= 9 && byte <= 13)
 }
-fn copy_range(value &string, start usize, end usize) string {
-    match slice(value, start, end) {
-        Some(part) => { return part }
-        None => { panic("internal string boundary invariant") }
-    }
-}
+fn copy_range(value &string, start usize, end usize) string { return value.copy_range(start, end) }
 /// Owned copy after trimming ASCII whitespace (09..0D and 20). Unicode
 /// whitespace classification and normalization are deliberately deferred.
 pub fn trim(value &string) string {
@@ -95,8 +93,9 @@ pub fn split(value &string, separator &string) Vec<string> {
         }
         return parts
     }
+    first := needle[0]
     for index < data.len() {
-        if equal_at(data, needle, index) {
+        if data[index] == first && equal_at(data, needle, index) {
             parts.push(copy_range(value, start, index))
             index = index + needle.len()
             start = index
@@ -215,9 +214,7 @@ pub struct Builder {
     data Vec<u8>
 }
 pub fn Builder.new() Builder { return Builder{data: Vec.new()} }
-pub fn Builder.push(&mut self, text &string) {
-    for byte in text.bytes() { self.data.push(byte) }
-}
+pub fn Builder.push(&mut self, text &string) { self.data.extend_from_slice(text.bytes()) }
 pub fn Builder.push_u64(&mut self, value u64) { self.push(&from_u64(value)) }
 pub fn Builder.push_i64(&mut self, value i64) { self.push(&from_i64(value)) }
 /// Byte length accumulated so far.
