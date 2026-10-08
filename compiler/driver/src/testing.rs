@@ -41,6 +41,17 @@ pub fn check_tests(entry: &Path) -> Result<(CheckResult, Vec<TestCase>), String>
 
 /// `check_tests` for a project whose package dependencies the host verified.
 pub fn check_tests_with_packages(entry: &Path, packages: Option<&PackageSet>) -> Result<(CheckResult, Vec<TestCase>), String> {
+    check_harness(entry, packages, "test_")
+}
+
+/// Benchmarks (Phase 30): `bench_*` functions, discovered, checked and
+/// dispatched exactly like tests; the CLI measures each run.
+pub fn check_benches_with_packages(entry: &Path, packages: Option<&PackageSet>) -> Result<(CheckResult, Vec<TestCase>), String> {
+    check_harness(entry, packages, "bench_")
+}
+
+fn check_harness(entry: &Path, packages: Option<&PackageSet>, prefix: &str) -> Result<(CheckResult, Vec<TestCase>), String> {
+    let kind = if prefix == "bench_" { "benchmark" } else { "test" };
     let entry = entry
         .canonicalize()
         .map_err(|e| format!("cannot read `{}`: {e}", entry.display()))?;
@@ -128,7 +139,7 @@ pub fn check_tests_with_packages(entry: &Path, packages: Option<&PackageSet>) ->
             let ItemKind::Fn(function) = &item.kind else {
                 continue;
             };
-            if function.owner.is_some() || !function.name.name.starts_with("test_") {
+            if function.owner.is_some() || !function.name.name.starts_with(prefix) {
                 continue;
             }
             let symbol = resolved.tables[module_index]
@@ -146,7 +157,7 @@ pub fn check_tests_with_packages(entry: &Path, packages: Option<&PackageSet>) ->
                 || function.receiver.is_some()
             {
                 return Err(format!(
-                    "test `{name}` must be a safe, synchronous, non-generic function with no parameters"
+                    "{kind} `{name}` must be a safe, synchronous, non-generic function with no parameters"
                 ));
             }
             let index = cases.len();
@@ -154,7 +165,7 @@ pub fn check_tests_with_packages(entry: &Path, packages: Option<&PackageSet>) ->
                 format!("{}()\n", function.name.name)
             } else if let Ty::Adt(id, args) = &signature.ret {
                 if Some(*id) != typed.decls.result || args.len() != 2 || args[0] != Ty::Void {
-                    return Err(format!("test `{name}` must return void or Result<void, E>"));
+                    return Err(format!("{kind} `{name}` must return void or Result<void, E>"));
                 }
                 let mut report = String::from("print(\"Err\")\n");
                 match &args[1] {
@@ -253,7 +264,7 @@ pub fn check_tests_with_packages(entry: &Path, packages: Option<&PackageSet>) ->
                     function.name.name
                 )
             } else {
-                return Err(format!("test `{name}` must return void or Result<void, E>"));
+                return Err(format!("{kind} `{name}` must return void or Result<void, E>"));
             };
             text.get_mut(&path)
                 .unwrap()

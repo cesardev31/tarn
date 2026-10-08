@@ -154,3 +154,50 @@ fn range_proofs_do_not_change_behavior() {
     }
     assert!(compared > 20, "{compared}");
 }
+
+/// Phase 30: `tarn test --bench` measures `bench_*` functions in isolated
+/// processes, reports failures, and plain `tarn test` ignores them.
+#[test]
+fn bench_runner_measures_and_reports() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-bench-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("main.tarn");
+    std::fs::write(&source, "fn main() {\n}\nfn bench_sum() {\n    var t: u64 = 0\n    var i: u64 = 0\n    for i < 100000 {\n        t = t + i\n        i = i + 1\n    }\n    print(t)\n}\nfn bench_fails() {\n    panic(\"broken bench\")\n}\nfn test_plain() {\n}\n").unwrap();
+    let cli = env!("CARGO_BIN_EXE_tarn");
+    let output = Command::new(cli).args(["test", "--bench", "--runs", "2", "--json"]).arg(&source).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!output.status.success(), "a failing benchmark fails the run");
+    let ok = stdout.lines().find(|l| l.contains("main.bench_sum")).unwrap();
+    assert!(ok.contains("\"status\":\"ok\"") && ok.contains("\"runs\":2") && ok.contains("\"wall_ms\"") && ok.contains("\"cpu_ms\"") && ok.contains("\"peak_rss_kb\""), "{ok}");
+    let failed = stdout.lines().find(|l| l.contains("main.bench_fails")).unwrap();
+    assert!(failed.contains("FAILED") && failed.contains("broken bench"), "{failed}");
+    assert!(!stdout.contains("test_plain"));
+    let output = Command::new(cli).arg("test").arg(&source).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success() && stdout.contains("main.test_plain ... ok") && !stdout.contains("bench_"), "{stdout}");
+    let output = Command::new(cli).args(["test", "--runs", "0", "--bench"]).arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Phase 30: `tarn profile` names Tarn functions in its report.
+#[test]
+fn profile_names_tarn_functions() {
+    if Command::new("valgrind").arg("--version").output().is_err() {
+        eprintln!("skipped: valgrind is not installed");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("tarn-cli-profile-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("main.tarn");
+    std::fs::write(&source, "fn heavy(n u64) u64 {\n    var t: u64 = 0\n    var i: u64 = 0\n    for i < n {\n        t = t + i % 7\n        i = i + 1\n    }\n    return t\n}\nfn main() {\n    print(heavy(200000))\n}\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tarn")).arg("profile").arg(&source).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    // `heavy` may be inlined into `main`; either way the report uses Tarn
+    // names, never raw `tarn_fn_<id>__` symbols.
+    assert!(stderr.lines().any(|l| l.trim_end().ends_with(" main") || l.trim_end().ends_with(" heavy")), "{stderr}");
+    assert!(!stderr.contains("tarn_fn_"), "{stderr}");
+    assert!(stderr.contains("total ") && stderr.contains("instructions"));
+    std::fs::remove_dir_all(dir).unwrap();
+}

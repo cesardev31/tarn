@@ -48,7 +48,7 @@ tested and documented.
 | 27 | Static string literals: no allocation per literal evaluation | **done**: [report](phase-27-report.md), [ADR 0055](adr/0055-static-string-literals.md) |
 | 28 | Native performance vs Go: optimizer on, trace switches cached, bulk primitives, constant-divisor checks | **done**: [report](phase-28-report.md), [ADR 0056](adr/0056-native-performance-baseline.md) |
 | 29 | Fair Go benchmarks, thread cache for `spawn`, proven integer arithmetic | **done**: [report](phase-29-report.md), [ADR 0057](adr/0057-proven-arithmetic.md) |
-| 30 | Multi-core async/HTTP (design) and performance tooling (`tarn test --bench`, `tarn profile`) | **proposed**: [ADR 0058](adr/0058-multicore-executor-design.md) |
+| 30 | `tarn test --bench`, `tarn profile`, multi-core `http.serve_parallel` | **done**: [report](phase-30-report.md), [ADR 0058](adr/0058-multicore-executor-design.md), [ADR 0059](adr/0059-performance-tooling.md) |
 
 ## Milestones
 

@@ -90,6 +90,14 @@ are rejected exactly as with Connection. For concurrency or keep-alive control,
 use Connection with owned tasks as above. Complete program:
 [http_crud.tarn](../examples/http_crud.tarn).
 
+For several cores, `http.serve_parallel(address, workers, &handler)` takes a
+value implementing `http.Handler` (`fn handle(&self, request &Request)
+Result<Response, Error>`) that must be `Share`; keep mutable state in a
+`Mutex`. Each worker owns a `net.TcpListener.bind_shared` listener
+(SO_REUSEPORT) and its own Execution; the kernel spreads connections, no task
+changes threads, and every listener is bound before any worker starts
+(ADR 0058).
+
 Response helpers: `Response.json(status, body string)` (content-type
 application/json; http does not depend on [json](json.md)), `Response.empty(status)`
 and `Response.method_not_allowed(allow &string)` (405 with Allow).

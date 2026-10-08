@@ -1,0 +1,17 @@
+// Parallel HTTP server for the Go comparison: shared counter behind a Mutex.
+import "http"
+import "io"
+struct App {
+    hits Mutex<u64>
+}
+impl http.Handler for App {
+    fn handle(&self, request &http.Request) Result<http.Response, http.Error> {
+        var guard = self.hits.lock()
+        previous := guard.replace(guard.read() + 1)
+        return Ok(http.text(200, "ok"))
+    }
+}
+fn main() Result<void, io.Error> {
+    app := App{hits: Mutex.new(u64(0))}
+    return http.serve_parallel("127.0.0.1:18091", 8, &app)
+}

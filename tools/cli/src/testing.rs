@@ -9,6 +9,9 @@ pub struct Options {
     pub filter: String,
     pub timeout: Duration,
     pub libraries: Vec<String>,
+    /// `--bench`: run `bench_*` functions and measure them (Phase 30).
+    pub bench: bool,
+    pub runs: usize,
 }
 impl Options {
     pub fn parse(args: &[String]) -> Self {
@@ -17,6 +20,8 @@ impl Options {
             filter: String::new(),
             timeout: Duration::from_secs(10),
             libraries: Vec::new(),
+            bench: false,
+            runs: 5,
         };
         let mut rest = args[1..].iter();
         while let Some(arg) = rest.next() {
@@ -27,6 +32,8 @@ impl Options {
                     options.timeout = Duration::from_millis(rest.next().unwrap().parse().unwrap())
                 }
                 "--link" => options.libraries.push(rest.next().unwrap().clone()),
+                "--bench" => options.bench = true,
+                "--runs" => options.runs = rest.next().unwrap().parse().unwrap(),
                 "--watch" => {}
                 _ => unreachable!("validated test option"),
             }
@@ -58,7 +65,13 @@ pub fn run_with_sources(
     options: &Options,
     mut loaded: impl FnMut(&[std::path::PathBuf], bool),
 ) -> (ExitCode, Vec<std::path::PathBuf>) {
-    let tested = crate::package_set(entry).and_then(|packages| tarn_driver::testing::check_tests_with_packages(entry, packages.as_ref()));
+    let tested = crate::package_set(entry).and_then(|packages| {
+        if options.bench {
+            tarn_driver::testing::check_benches_with_packages(entry, packages.as_ref())
+        } else {
+            tarn_driver::testing::check_tests_with_packages(entry, packages.as_ref())
+        }
+    });
     let (result, cases) = match tested {
         Ok(result) => result,
         Err(error) => {
@@ -116,6 +129,10 @@ pub fn run_with_sources(
             super::native_error(options.json, "native", &error.to_string());
             return (ExitCode::from(1), paths);
         }
+    }
+    if options.bench {
+        let ok = run_benchmarks(&executable, &selected, options);
+        return (if ok && !super::process::stopping() { ExitCode::SUCCESS } else { ExitCode::from(1) }, paths);
     }
     let mut failed = 0;
     let mut completed = 0;
@@ -239,3 +256,94 @@ pub fn run_with_sources(
         paths,
     )
 }
+
+/// One measured benchmark process: wall time from the runner, CPU time and
+/// peak resident memory reported by the runtime's `getrusage` at exit.
+struct Sample {
+    wall: Duration,
+    user_us: u64,
+    system_us: u64,
+    max_rss_kb: u64,
+}
+
+fn run_once(executable: &Path, index: usize, timeout: Duration) -> Result<Sample, String> {
+    let started = Instant::now();
+    let mut child = super::process::command(executable)
+        .arg(index.to_string())
+        .env("TARN_BENCH_RUSAGE", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let stderr = capture(child.stderr.take().unwrap());
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < timeout && !super::process::stopping() => std::thread::sleep(Duration::from_millis(1)),
+            _ => {
+                super::process::terminate(&mut child, Duration::ZERO);
+                return Err(format!("timeout after {} ms", timeout.as_millis()));
+            }
+        }
+    };
+    let wall = started.elapsed();
+    let stderr = String::from_utf8_lossy(&stderr.join().unwrap_or_default()).into_owned();
+    if !status.success() {
+        let shown: String = stderr.lines().filter(|l| !l.starts_with("tarn-bench-usage:")).collect::<Vec<_>>().join("\n");
+        return Err(format!("{status}{}{shown}", if shown.is_empty() { "" } else { "\n" }));
+    }
+    let usage = stderr.lines().find_map(|l| l.strip_prefix("tarn-bench-usage:")).ok_or("missing runtime usage report")?;
+    let fields: Vec<u64> = usage.split(':').filter_map(|v| v.parse().ok()).collect();
+    let [user_us, system_us, max_rss_kb] = fields[..] else { return Err("malformed runtime usage report".into()) };
+    Ok(Sample { wall, user_us, system_us, max_rss_kb })
+}
+
+fn median(mut values: Vec<f64>) -> f64 {
+    values.sort_by(|a, b| a.total_cmp(b));
+    values[values.len() / 2]
+}
+
+fn run_benchmarks(executable: &Path, cases: &[&tarn_driver::testing::TestCase], options: &Options) -> bool {
+    let runs = options.runs.max(1);
+    let mut failed = 0;
+    if !options.json {
+        println!("{:<40} {:>12} {:>12} {:>10}", "benchmark", "wall", "cpu", "peak rss");
+    }
+    for case in cases {
+        let mut samples = Vec::new();
+        let mut error = None;
+        for _ in 0..runs {
+            match run_once(executable, case.index, options.timeout) {
+                Ok(sample) => samples.push(sample),
+                Err(e) => {
+                    error = Some(e);
+                    break;
+                }
+            }
+        }
+        if let Some(e) = error {
+            failed += 1;
+            if options.json {
+                println!("{{\"kind\":\"bench\",\"name\":{},\"status\":\"FAILED\",\"error\":{}}}", quoted(&case.name), quoted(&e));
+            } else {
+                println!("{:<40} FAILED", case.name);
+                eprintln!("{e}");
+            }
+            continue;
+        }
+        let wall = median(samples.iter().map(|s| s.wall.as_secs_f64() * 1000.0).collect());
+        let cpu = median(samples.iter().map(|s| (s.user_us + s.system_us) as f64 / 1000.0).collect());
+        let rss = samples.iter().map(|s| s.max_rss_kb).max().unwrap_or(0);
+        if options.json {
+            println!("{{\"kind\":\"bench\",\"name\":{},\"status\":\"ok\",\"runs\":{runs},\"wall_ms\":{wall:.3},\"cpu_ms\":{cpu:.3},\"peak_rss_kb\":{rss}}}", quoted(&case.name));
+        } else {
+            println!("{:<40} {:>9.2} ms {:>9.2} ms {:>7.1} MB", case.name, wall, cpu, rss as f64 / 1024.0);
+        }
+    }
+    if !options.json {
+        println!("bench result: {} measured; {failed} failed ({runs} runs each, median)", cases.len() - failed);
+    }
+    failed == 0
+}
+

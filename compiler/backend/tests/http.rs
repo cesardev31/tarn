@@ -935,3 +935,64 @@ fn fixed_response_shorthands_abort_on_invalid_status() {
         std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
     }
 }
+
+/// Phase 30: `serve_parallel` runs workers on SO_REUSEPORT listeners and a
+/// shared `Handler`; concurrent clients are all answered and the Mutex-held
+/// counter loses no increment.
+#[test]
+fn serve_parallel_answers_concurrent_clients_with_shared_state() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let source = format!(
+        r#"import "http"
+import "io"
+import "string"
+struct App {{
+    hits Mutex<u64>
+}}
+impl http.Handler for App {{
+    fn handle(&self, request &http.Request) Result<http.Response, http.Error> {{
+        var guard = self.hits.lock()
+        next := guard.read() + 1
+        previous := guard.replace(next)
+        return Ok(http.text(200, &string.from_u64(next)))
+    }}
+}}
+fn main() Result<void, io.Error> {{
+    app := App{{hits: Mutex.new(u64(0))}}
+    return http.serve_parallel("127.0.0.1:{port}", 4, &app)
+}}
+"#
+    );
+    let exe = compile(&source, "serve-parallel");
+    let mut child = Command::new(&exe).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    let start = Instant::now();
+    while TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(start.elapsed() < Duration::from_secs(10), "server did not bind");
+        thread::sleep(Duration::from_millis(5));
+    }
+    // A plain listener still cannot take the shared address.
+    assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_err());
+    let clients: Vec<_> = (0..8)
+        .map(|_| {
+            thread::spawn(move || {
+                let mut seen = Vec::new();
+                for _ in 0..50 {
+                    let mut peer = connect(port);
+                    peer.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n").unwrap();
+                    let mut reader = BufReader::new(peer);
+                    let reply = response(&mut reader, false);
+                    assert_eq!(reply.status, 200);
+                    seen.push(String::from_utf8(reply.body).unwrap().parse::<u64>().unwrap());
+                }
+                seen
+            })
+        })
+        .collect();
+    let mut all: Vec<u64> = clients.into_iter().flat_map(|c| c.join().unwrap()).collect();
+    all.sort_unstable();
+    // 400 requests saw 400 distinct counter values 1..=400: no lost update.
+    assert_eq!(all, (1..=400).collect::<Vec<_>>());
+    child.kill().unwrap();
+    child.wait().unwrap();
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}

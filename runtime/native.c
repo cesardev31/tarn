@@ -10,6 +10,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <math.h>
+#include <sys/resource.h>
 #include <stdatomic.h>
 /* Test tracing switches (TARN_TRACE_*), read once: getenv scans the whole
  * environment and used to run on every string drop. Tarn never changes the
@@ -108,6 +109,19 @@ void tarn_rt_print_bool(uint8_t v) { puts(v ? "true" : "false"); }
 void tarn_rt_print_string(const TarnString *s) { fwrite(s->bytes, 1, s->len, stdout); fputc('\n', stdout); }
 _Noreturn void tarn_rt_panic(const TarnString *s) {
     fputs("panic: ", stderr); fwrite(s->bytes, 1, s->len, stderr); fputc('\n', stderr); fflush(NULL); abort();
+}
+/* `tarn test --bench` (Phase 30): the runner asks for this process's CPU time
+ * and peak memory, all threads included, reported once at normal exit. */
+static void tarn_bench_report(void) {
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage)) return;
+    fflush(stdout);
+    fprintf(stderr, "tarn-bench-usage:%lld:%lld:%ld\n",
+        (long long)usage.ru_utime.tv_sec * 1000000LL + usage.ru_utime.tv_usec,
+        (long long)usage.ru_stime.tv_sec * 1000000LL + usage.ru_stime.tv_usec, usage.ru_maxrss);
+}
+__attribute__((constructor)) static void tarn_bench_init(void) {
+    if (getenv("TARN_BENCH_RUSAGE")) atexit(tarn_bench_report);
 }
 _Noreturn void tarn_rt_fault(void) { fputs("panic: checked arithmetic or bounds failure\n", stderr); fflush(NULL); abort(); }
 /* string.copy_range (Phase 28): a valid string cut at scalar boundaries is

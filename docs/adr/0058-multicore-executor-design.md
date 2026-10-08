@@ -1,7 +1,8 @@
 # ADR 0058: multi-core async execution (design)
 
-Status: proposed design only. Not implemented. AGENTS.md requires a separate
-approved phase for a multi-thread scheduler.
+Status: option 1 accepted and implemented in Phase 30 (`http.serve_parallel`,
+`net.TcpListener.bind_shared`); option 2 (work stealing) remains unapproved.
+See [the Phase 30 report](../phase-30-report.md).
 
 ## Problem
 

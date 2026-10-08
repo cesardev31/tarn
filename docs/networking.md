@@ -20,6 +20,10 @@ fn main() Result<void, io.Error> {
 }
 ```
 
+`TcpListener.bind_shared(address)` additionally sets SO_REUSEPORT so several
+listeners of this process can share an address, each with its own accept
+queue (Phase 30); plain `bind` keeps rejecting a second active listener.
+
 TCP listeners set SO_REUSEADDR before binding (Phase 17, ADR 0048): a restarted
 server can rebind over connections it closed that remain in TIME_WAIT, while a
 second active listener on the same address is still rejected.

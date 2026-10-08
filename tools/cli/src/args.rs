@@ -6,7 +6,7 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
     };
     if super::packages::COMMANDS.contains(&command.as_str()) { super::packages::validate(command,&args[1..])?; return Ok(args); }
     if command == "fmt" { return formatter_args(args); }
-    let native = matches!(command.as_str(), "build" | "run" | "test");
+    let native = matches!(command.as_str(), "build" | "run" | "test" | "profile");
     let source = native
         || matches!(
             command.as_str(),
@@ -20,7 +20,8 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
             "tarn build [file.tarn | directory] [-o path] [--link library]... [--json]".into()
         }
         "run" => "tarn run [file.tarn | directory] [--link library]... [--json] [--watch] [-- program arguments...]".into(),
-        "test" => "tarn test [file.tarn | directory] [--filter text] [--timeout milliseconds] [--json] [--watch] [--link library]...".into(),
+        "profile" => "tarn profile [file.tarn | directory] [--link library]... [-- program arguments...]".into(),
+        "test" => "tarn test [file.tarn | directory] [--bench [--runs n]] [--filter text] [--timeout milliseconds] [--json] [--watch] [--link library]...".into(),
         _ => format!(
             "tarn {command}{}",
             if source {
@@ -39,7 +40,7 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             // Everything after `--` belongs to the program, verbatim (os.args()).
-            "--" if command == "run" => {
+            "--" if command == "run" || command == "profile" => {
                 program.push(arg.clone());
                 program.extend(rest.by_ref().cloned());
             }
@@ -52,6 +53,11 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
                 options.extend([arg.clone(), value.clone()]);
             }
             "--drops" if command == "ir" => options.push(arg.clone()),
+            "--bench" if command == "test" && !options.contains(arg) => options.push(arg.clone()),
+            "--runs" if command == "test" && !options.contains(arg) => {
+                let value = rest.next().filter(|v| v.parse::<usize>().is_ok_and(|n| n > 0)).ok_or_else(|| fail("--runs requires a positive integer".into()))?;
+                options.extend([arg.clone(), value.clone()]);
+            }
             "-o" if command == "build" && !output_seen => {
                 let value = rest.next().filter(|v| !v.starts_with('-')).ok_or_else(|| fail("-o requires an output path".into()))?;
                 output_seen = true;

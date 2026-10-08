@@ -836,3 +836,65 @@ async fn _answer(connection Connection, owner &runtime.Execution, handler &mut m
         }
     }
 }
+
+/// Request handling for `serve_parallel`: one value shared by every worker.
+/// Keep mutable application state behind a `Mutex`; the compiler checks the
+/// implementing type is `Share` (Phase 30).
+pub interface Handler {
+    fn handle(&self, request &Request) Result<Response, Error>
+}
+
+/// Serve on `workers` cores (Phase 30, ADR 0058). Each worker owns a
+/// SO_REUSEPORT listener and its own Execution, and runs the same sequential
+/// loop as `serve`; the kernel spreads connections across workers, so no task
+/// moves between threads. Every listener is bound before any worker starts,
+/// so address errors are returned immediately. Runs until a listener fails.
+pub fn serve_parallel<H: Handler + Share>(address &string, workers usize, handler &H) Result<void, io.Error> {
+    if workers == 0 { return Err(io.Error.new(io.ErrorKind.InvalidInput)) }
+    var listeners: Vec<net.TcpListener> = Vec.new()
+    var n: usize = 0
+    for n < workers {
+        var listener = try net.TcpListener.bind_shared(address)
+        try listener.set_nonblocking(true)
+        listeners.push(listener)
+        n = n + 1
+    }
+    // Each worker's handle lives in its own scope frame until every later
+    // worker has started; dropping a handle would join it (ADR 0033).
+    failure: Mutex<Option<io.Error>> := Mutex.new(None)
+    _start_workers(&mut listeners, handler, &failure)
+    var guard = failure.lock()
+    var result: Result<void, io.Error> = Ok(())
+    match guard.replace(None) {
+        Some(error) => { result = Err(error) }
+        None => {}
+    }
+    return result
+}
+fn _start_workers<H: Handler + Share>(listeners &mut Vec<net.TcpListener>, handler &H, failure &Mutex<Option<io.Error>>) {
+    match listeners.pop() {
+        Some(listener) => {
+            scope {
+                task := spawn move fn() {
+                    match _worker(listener, handler) {
+                        Ok(done) => {}
+                        Err(error) => {
+                            var guard = failure.lock()
+                            previous := guard.replace(Some(error))
+                        }
+                    }
+                }
+                _start_workers(listeners, handler, failure)
+                task.join()
+            }
+        }
+        None => {}
+    }
+}
+fn _worker<H: Handler + Share>(listener net.TcpListener, handler &H) Result<void, io.Error> {
+    var call: mut fn(&Request) Result<Response, Error> = fn(request &Request) Result<Response, Error> { return handler.handle(request) }
+    execution := try runtime.Execution.new()
+    var operation = runtime.Operation.new(&execution, _serve(listener, &execution, &mut call))
+    try try execution.block_on(&mut operation)
+    return Ok(())
+}

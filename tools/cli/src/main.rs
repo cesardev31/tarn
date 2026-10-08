@@ -39,6 +39,9 @@ usage:
     tarn verify [--json]              verify locked content and graph
     tarn audit [--json]               inspect advisories; 3 means unknown evidence
     tarn publish [--registry origin]  publish an immutable local release
+    tarn profile <file.tarn> [--link lib]... [-- args...]
+                                     run under callgrind and list the costliest
+                                     Tarn functions (requires valgrind)
     tarn version                     print the compiler version
 
 Entry uses the nearest tarn.toml package.entry; otherwise ./main.tarn.
@@ -87,6 +90,7 @@ fn main() -> ExitCode {
         Some("build") => cmd_native(&args[1..], false),
         Some("run") if tool_args(&args).iter().any(|a| a == "--watch") => watch::run(&args[1..]),
         Some("run") => cmd_native(&args[1..], true),
+        Some("profile") => cmd_profile(&args[1..]),
         Some("test") => {
             let options = testing::Options::parse(&args[1..]);
             if args.iter().any(|a| a == "--watch") { watch::test(std::path::Path::new(&args[1]), &options) }
@@ -327,3 +331,73 @@ fn native_error(json: bool, stage: &str, message: &str) {
         eprintln!("error: {message}");
     }
 }
+
+/// `tarn profile` (Phase 30): build like `run`, execute under callgrind and
+/// print the functions with the most instructions, by Tarn name.
+fn cmd_profile(args: &[String]) -> ExitCode {
+    if std::process::Command::new("valgrind").arg("--version").output().is_err() {
+        eprintln!("error: `tarn profile` needs valgrind (callgrind); install it, e.g. `sudo apt install valgrind`");
+        return ExitCode::from(1);
+    }
+    let path = std::path::Path::new(&args[0]);
+    let mut libraries = Vec::new();
+    let mut program = Vec::new();
+    let mut rest = args[1..].iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--link" => libraries.push(rest.next().expect("validated library").clone()),
+            "--" => program.extend(rest.by_ref().cloned()),
+            _ => {}
+        }
+    }
+    let res = match check_project(path) {
+        Ok(r) => r,
+        Err(e) => { eprintln!("error: {e}"); return ExitCode::from(1); }
+    };
+    for d in &res.diagnostics { eprint!("{}", d.render(&res.program.sources)); }
+    if res.has_errors() { return ExitCode::from(1); }
+    let (Some(p), Some(t)) = (&res.drops, &res.typed) else { eprintln!("error: compiler bug: missing post-drop IR"); return ExitCode::from(1); };
+    let scratch = match process::Scratch::new() {
+        Ok(s) => s,
+        Err(e) => { eprintln!("error: {e}"); return ExitCode::from(1); }
+    };
+    let executable = scratch.0.join("program");
+    let profile = scratch.0.join("callgrind.out");
+    if let Err(e) = tarn_backend::build_linked(p, t, &executable, &libraries) { eprintln!("error: {e}"); return ExitCode::from(1); }
+    let status = std::process::Command::new("valgrind")
+        .arg("--tool=callgrind").arg("--quiet").arg(format!("--callgrind-out-file={}", profile.display()))
+        .arg(&executable).args(&program).status();
+    let Ok(status) = status else { eprintln!("error: cannot start valgrind"); return ExitCode::from(1); };
+    let annotate = std::process::Command::new("callgrind_annotate").arg("--inclusive=no").arg(&profile).output();
+    let Ok(annotate) = annotate else { eprintln!("error: cannot run callgrind_annotate"); return ExitCode::from(1); };
+    let text = String::from_utf8_lossy(&annotate.stdout);
+    let mut total = 0u64;
+    let mut rows = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_start();
+        let Some((count, rest)) = line.split_once(' ') else { continue };
+        let Ok(count) = count.replace(',', "").parse::<u64>() else { continue };
+        if rest.contains("PROGRAM TOTALS") { total = count; continue; }
+        let symbol = rest.rsplit_once(':').map_or(rest, |(_, s)| s);
+        let symbol = symbol.split(" [").next().unwrap_or(symbol).trim();
+        rows.push((count, readable_symbol(symbol)));
+    }
+    eprintln!();
+    eprintln!("{:>8}  {:>14}  function", "share", "instructions");
+    for (count, name) in rows.iter().take(15) {
+        let share = if total > 0 { *count as f64 * 100.0 / total as f64 } else { 0.0 };
+        eprintln!("{share:>7.2}%  {count:>14}  {name}");
+    }
+    eprintln!("total {total} instructions (callgrind; times are proportional, not wall clock)");
+    ExitCode::from(status.code().unwrap_or(1).clamp(0, 255) as u8)
+}
+
+/// `tarn_fn_12__Vec_push__instance_3` → `Vec.push` (instance suffix dropped);
+/// runtime and libc symbols are shown as they are.
+fn readable_symbol(symbol: &str) -> String {
+    let Some(rest) = symbol.strip_prefix("tarn_fn_") else { return symbol.to_string() };
+    let name = rest.split_once("__").map_or(rest, |(_, n)| n);
+    let name = name.split("__instance").next().unwrap_or(name);
+    name.replacen('_', ".", if name.starts_with('_') { 0 } else { 1 })
+}
+
