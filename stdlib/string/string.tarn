@@ -17,8 +17,8 @@ pub fn from_utf8(data &[]u8) Option<string> { return string_from_utf8(data) }
 pub fn slice(value &string, start usize, end usize) Option<string> {
     if start > end || end > value.len() { return None }
     data := value.bytes()
-    if start < data.len() && (data[start] & u8(192)) == u8(128) { return None }
-    if end < data.len() && (data[end] & u8(192)) == u8(128) { return None }
+    if start < data.len() && (data[start] & 192) == 128 { return None }
+    if end < data.len() && (data[end] & 192) == 128 { return None }
     return string_from_utf8(&data[start..end])
 }
 
@@ -51,7 +51,7 @@ pub fn contains(value &string, pattern &string) bool {
     }
 }
 pub fn starts_with(value &string, pattern &string) bool {
-    return equal_at(value.bytes(), pattern.bytes(), usize(0))
+    return equal_at(value.bytes(), pattern.bytes(), 0)
 }
 pub fn ends_with(value &string, pattern &string) bool {
     if pattern.len() > value.len() { return false }
@@ -59,7 +59,7 @@ pub fn ends_with(value &string, pattern &string) bool {
 }
 
 fn whitespace(byte u8) bool {
-    return byte == u8(32) || (byte >= u8(9) && byte <= u8(13))
+    return byte == 32 || (byte >= 9 && byte <= 13)
 }
 fn copy_range(value &string, start usize, end usize) string {
     match slice(value, start, end) {
@@ -86,10 +86,10 @@ pub fn split(value &string, separator &string) Vec<string> {
     needle := separator.bytes()
     var start: usize = 0
     var index: usize = 0
-    if needle.len() == usize(0) {
+    if needle.len() == 0 {
         for index < data.len() {
             index = index + 1
-            for index < data.len() && (data[index] & u8(192)) == u8(128) { index = index + 1 }
+            for index < data.len() && (data[index] & 192) == 128 { index = index + 1 }
             parts.push(copy_range(value, start, index))
             start = index
         }
@@ -114,9 +114,9 @@ pub fn lines(value &string) Vec<string> {
     var start: usize = 0
     var index: usize = 0
     for index < data.len() {
-        if data[index] == u8(10) {
+        if data[index] == 10 {
             var end = index
-            if end > start && data[end - 1] == u8(13) { end = end - 1 }
+            if end > start && data[end - 1] == 13 { end = end - 1 }
             parts.push(copy_range(value, start, end))
             start = index + 1
         }
@@ -130,18 +130,18 @@ pub fn lines(value &string) Vec<string> {
 /// Overflow is None, never a checked-arithmetic panic.
 pub fn parse_u64(value &string) Option<u64> {
     data := value.bytes()
-    if data.len() == usize(0) { return None }
+    if data.len() == 0 { return None }
     var index: usize = 0
-    if data[0] == u8(43) { index = 1 }
+    if data[0] == 43 { index = 1 }
     if index == data.len() { return None }
     var number: u64 = 0
     maximum: u64 := 18446744073709551615
     for index < data.len() {
         byte := data[index]
-        if byte < u8(48) || byte > u8(57) { return None }
-        digit := u64(byte - u8(48))
-        if number > (maximum - digit) / u64(10) { return None }
-        number = number * u64(10) + digit
+        if byte < 48 || byte > 57 { return None }
+        digit := u64(byte - 48)
+        if number > (maximum - digit) / 10 { return None }
+        number = number * 10 + digit
         index = index + 1
     }
     return Some(number)
@@ -149,7 +149,7 @@ pub fn parse_u64(value &string) Option<u64> {
 pub fn parse_u16(value &string) Option<u16> {
     match parse_u64(value) {
         Some(number) => {
-            if number > u64(65535) { return None }
+            if number > 65535 { return None }
             return Some(u16(number))
         }
         None => { return None }
@@ -158,20 +158,20 @@ pub fn parse_u16(value &string) Option<u16> {
 /// Optional sign; accepts the complete i64 range, including its minimum.
 pub fn parse_i64(value &string) Option<i64> {
     data := value.bytes()
-    if data.len() == usize(0) { return None }
+    if data.len() == 0 { return None }
     var index: usize = 0
-    negative := data[0] == u8(45)
-    if negative || data[0] == u8(43) { index = 1 }
+    negative := data[0] == 45
+    if negative || data[0] == 43 { index = 1 }
     if index == data.len() { return None }
     var limit: i64 = -9223372036854775807
     if negative { limit = -9223372036854775808 }
     var number: i64 = 0
     for index < data.len() {
         byte := data[index]
-        if byte < u8(48) || byte > u8(57) { return None }
-        digit := i64(byte - u8(48))
-        if number < limit / i64(10) || (number == limit / i64(10) && digit > -(limit % i64(10))) { return None }
-        number = number * i64(10) - digit
+        if byte < 48 || byte > 57 { return None }
+        digit := i64(byte - 48)
+        if number < limit / 10 || (number == limit / 10 && digit > -(limit % 10)) { return None }
+        number = number * 10 - digit
         index = index + 1
     }
     if negative { return Some(number) }
@@ -185,9 +185,9 @@ pub fn from_u64(value u64) string {
     var number = value
     for {
         start = start - 1
-        digits[start] = u8(number % u64(10)) + u8(48)
-        number = number / u64(10)
-        if number == u64(0) { break }
+        digits[start] = u8(number % 10) + 48
+        number = number / 10
+        if number == 0 { break }
     }
     match from_utf8(&digits[start..]) {
         Some(text) => { return text }
@@ -195,9 +195,9 @@ pub fn from_u64(value u64) string {
     }
 }
 pub fn from_i64(value i64) string {
-    if value >= i64(0) { return from_u64(u64(value)) }
+    if value >= 0 { return from_u64(u64(value)) }
     // Avoid negating the minimum signed value.
-    magnitude := u64(-(value + i64(1))) + u64(1)
+    magnitude := u64(-(value + 1)) + 1
     digits := from_u64(magnitude)
     return "-" + digits
 }

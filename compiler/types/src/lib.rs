@@ -56,6 +56,9 @@ pub enum CoercionKind {
     /// `async computation<T>` → trusted manual poller `mut fn(&Waker) Progress<T>`
     /// (ADR 0037). Same owned representation; never the reverse direction.
     Poller,
+    /// A string literal used where `&string` is expected: borrow a temporary,
+    /// as for the written form `&"..."` (Phase 26B).
+    BorrowLiteral,
 }
 
 /// How a binding introduced by a pattern or `for` gets its value (ADR 0018).
@@ -94,6 +97,8 @@ pub struct TypeTables {
     pub mutable_captures: HashMap<NodeId, std::collections::HashSet<SymbolId>>,
     /// Method-call expression → method.
     pub method_calls: HashMap<NodeId, MethodTarget>,
+    /// `==`/`!=` expression → the `Eq.eq` method it calls (Phase 26C).
+    pub eq_ops: HashMap<NodeId, SymbolId>,
     /// Method-call expression → receiver adjustment.
     pub receivers: HashMap<NodeId, Receiver>,
     /// Pattern node → enum variant it matches (resolves `ScrutineeVariant`).
@@ -163,6 +168,7 @@ pub fn check(inputs: &[ModuleInput], r: &Resolved) -> (Typed, Vec<Diagnostic>) {
             t.borrowed_builtin_calls.extend(cx.tables.borrowed_builtin_calls);
             t.closure_captures.extend(cx.tables.closure_captures);
             t.method_calls.extend(cx.tables.method_calls);
+            t.eq_ops.extend(cx.tables.eq_ops);
             t.pattern_variants.extend(cx.tables.pattern_variants);
             t.receivers.extend(cx.tables.receivers);
             t.coercions.extend(cx.tables.coercions);
@@ -255,6 +261,14 @@ fn validate_impls(env: &Env, diags: &mut Vec<Diagnostic>) {
             let name = &env.r.symbol(m).name;
             let Some(decl) = env.r.member(iface, name) else { continue };
             let (Some(have), Some(want)) = (env.decls.fns.get(&m), env.decls.fns.get(&decl)) else { continue };
+            // The interface's `Self` is this impl's target type (Phase 26C).
+            let mut want = want.clone();
+            if let (Some(this), Some(target)) = (env.r.interface_self.get(&iface), &have.self_ty) {
+                let map = std::collections::HashMap::from([(ParamId(this.0), target.clone())]);
+                want.params = want.params.iter().map(|t| crate::check::subst(t, &map)).collect();
+                want.ret = crate::check::subst(&want.ret, &map);
+            }
+            let want = &want;
             let mut problems = Vec::new();
             if have.receiver != want.receiver {
                 problems.push(format!("receiver is `{}`, the interface declares `{}`", recv_name(have.receiver), recv_name(want.receiver)));

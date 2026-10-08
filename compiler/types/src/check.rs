@@ -21,6 +21,9 @@ pub struct FnCx<'e, 'a> {
     async_context: bool,
     unsafe_depth: u32,
     task_scope_depth: u32,
+    /// String literal expressions, which may be borrowed where `&string` is
+    /// expected (Phase 26B).
+    string_literals: std::collections::HashSet<NodeId>,
     /// Integer literals to range-check once types are known: (span, value, type).
     literals: Vec<(Span, i128, Ty)>,
     /// Generic arguments that must implement an interface: (type, interface, span).
@@ -78,6 +81,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             async_context: false,
             unsafe_depth: 0,
             task_scope_depth: 0,
+            string_literals: std::collections::HashSet::new(),
             literals: Vec::new(),
             obligations: Vec::new(),
             printables: Vec::new(),
@@ -131,6 +135,16 @@ impl<'e, 'a> FnCx<'e, 'a> {
     /// Records the coercion applied to `node` (for IR lowering).
     fn coerce(&mut self, actual: &Ty, expected: &Ty, span: Span, node: Option<NodeId>) -> bool {
         let (a, x) = (self.infer.shallow(actual), self.infer.shallow(expected));
+        // `f("GET")` for `f(method &string)`: the literal is borrowed exactly
+        // as if written `&"GET"` (a temporary), so no new semantics.
+        if a == Ty::Str
+            && matches!(&x, Ty::Ref(false, inner) if **inner == Ty::Str)
+            && let Some(n) = node
+            && self.string_literals.contains(&n)
+        {
+            self.tables.coercions.insert(n, Coercion { mut_to_shared: false, kind: CoercionKind::BorrowLiteral });
+            return true;
+        }
         if let (Ty::Ref(am, ai), Ty::Ref(xm, xi)) = (&a, &x)
             && (*am || !*xm)
         {
@@ -858,7 +872,10 @@ impl<'e, 'a> FnCx<'e, 'a> {
         match &e.kind {
             ExprKind::Int(v) => self.int_literal(e, *v as i128),
             ExprKind::Float(_) => self.infer.fresh(VarKind::Float),
-            ExprKind::Str(_) => Ty::Str,
+            ExprKind::Str(_) => {
+                self.string_literals.insert(e.id);
+                Ty::Str
+            }
             ExprKind::Bool(_) => Ty::Bool,
             ExprKind::Unit => Ty::Void,
             ExprKind::Error => Ty::Error,
@@ -1289,8 +1306,18 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     Ty::Var(v) => self.infer.kind(*v) != VarKind::General,
                     _ => false,
                 };
+                if !ok
+                    && matches!(op, Eq | Ne)
+                    && matches!(inner, Ty::Adt(..) | Ty::Param(_))
+                    && let Some(eq) = self.env.decls.eq
+                    && self.implements(&inner, eq)
+                    && let Some(method) = self.env.r.member(eq, "eq")
+                {
+                    self.tables.eq_ops.insert(e.id, method);
+                    return Ty::Bool;
+                }
                 if !ok {
-                    return fail(self, "v0 compares only numbers, strings and booleans (`==`/`!=`); use `match` for enums");
+                    return fail(self, "`==`/`!=` need numbers, strings, booleans or a type implementing `Eq`; implement `Eq` or use `match`");
                 }
                 Ty::Bool
             }
@@ -1741,8 +1768,25 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 }
                 self.lookup_method(*s, targs, &name.name)
             }
-            Ty::Param(p) => self.interface_method(self.env.decls.bounds.get(p).cloned().unwrap_or_default(), &name.name),
-            Ty::Any(i) => self.interface_method(vec![*i], &name.name),
+            Ty::Param(p) => self.interface_method(self.env.decls.bounds.get(p).cloned().unwrap_or_default(), &name.name, &inner),
+            Ty::Any(i) => {
+                let found = self.interface_method(vec![*i], &name.name, &inner);
+                // `Self` beyond the receiver needs the concrete type, which a
+                // dynamic object does not have (Phase 26C).
+                if let Some((_, sig, _)) = &found
+                    && let Some(this) = self.env.r.interface_self.get(i)
+                    && sig.params.iter().chain(std::iter::once(&sig.ret)).any(|t| mentions(t, ParamId(this.0)))
+                {
+                    let iname = self.env.r.symbol(*i).name.clone();
+                    self.err(
+                        Diagnostic::error("E3073", "self_through_dynamic_interface", format!("method `{}` of `{iname}` uses `Self`, which `any {iname}` cannot provide", name.name))
+                            .primary(name.span, "")
+                            .help(format!("use a generic parameter instead: `<T: {iname}>`")),
+                    );
+                    return Ty::Error;
+                }
+                found
+            }
             // Methods of primitive types are declared in `core` (ADR 0020).
             Ty::Str | Ty::Int(_) | Ty::Float(_) | Ty::Bool => {
                 let pname = crate::display_vars(&inner, self.env, &self.infer);
@@ -1842,12 +1886,14 @@ impl<'e, 'a> FnCx<'e, 'a> {
         Some((m, sig, fixed))
     }
 
-    fn interface_method(&self, ifaces: Vec<SymbolId>, name: &str) -> Option<(SymbolId, FnSig, HashMap<ParamId, Ty>)> {
+    /// A method declared by one of `ifaces`; its `Self` is the receiver type.
+    fn interface_method(&self, ifaces: Vec<SymbolId>, name: &str, receiver: &Ty) -> Option<(SymbolId, FnSig, HashMap<ParamId, Ty>)> {
         for i in ifaces {
             if let Some(m) = self.env.r.member(i, name)
                 && let Some(sig) = self.env.decls.fns.get(&m)
             {
-                return Some((m, sig.clone(), HashMap::new()));
+                let fixed = self.env.r.interface_self.get(&i).map(|this| HashMap::from([(ParamId(this.0), receiver.clone())])).unwrap_or_default();
+                return Some((m, sig.clone(), fixed));
             }
         }
         None
@@ -1970,4 +2016,15 @@ fn if_has_break(i: &IfStmt) -> bool {
             Some(ElseBranch::Block(b)) => has_break(&b.stmts),
             None => false,
         }
+}
+
+/// Whether `t` mentions the type parameter `p` anywhere.
+fn mentions(t: &Ty, p: ParamId) -> bool {
+    match t {
+        Ty::Param(q) => *q == p,
+        Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Async(x) => mentions(x, p),
+        Ty::Adt(_, args) => args.iter().any(|a| mentions(a, p)),
+        Ty::Fn(_, ps, r) => ps.iter().any(|a| mentions(a, p)) || mentions(r, p),
+        _ => false,
+    }
 }

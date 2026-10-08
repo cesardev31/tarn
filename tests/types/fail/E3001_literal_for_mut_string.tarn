@@ -1,0 +1,7 @@
+// A string literal is borrowed only where a shared `&string` is expected;
+// it never becomes a mutable reference (Phase 26B).
+fn clear(text &mut string) {
+}
+fn main() {
+    clear("fixed")
+}

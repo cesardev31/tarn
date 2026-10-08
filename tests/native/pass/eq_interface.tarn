@@ -1,0 +1,55 @@
+// Phase 26C: `==`/`!=` through core.Eq with `Self`, on structs, enums,
+// references, temporaries, a generic bound and io.ErrorKind.
+import "io"
+struct Point {
+    x i64
+    y i64
+    label string
+}
+// Equality ignores the label: the author decides what equality means.
+impl Eq for Point {
+    fn eq(&self, other &Self) bool { return self.x == other.x && self.y == other.y }
+}
+enum Shape {
+    Circle(i64)
+    Empty
+}
+impl Eq for Shape {
+    fn eq(&self, other &Shape) bool {
+        match self {
+            Shape.Circle(r) => match other {
+                Shape.Circle(s) => { return r == s }
+                _ => { return false }
+            }
+            Shape.Empty => match other {
+                Shape.Empty => { return true }
+                _ => { return false }
+            }
+        }
+    }
+}
+fn count<T: Eq>(items &[]T, wanted &T) usize {
+    var n: usize = 0
+    for item in items {
+        if item == wanted { n = n + 1 }
+    }
+    return n
+}
+fn make(x i64) Point { return Point{x: x, y: 0, label: "made"} }
+fn main() {
+    a := Point{x: 1, y: 2, label: "a"}
+    b := Point{x: 1, y: 2, label: "b"}
+    c := Point{x: 3, y: 2, label: "c"}
+    print(a == b)
+    print(a != c)
+    print(&a == &b)
+    print(make(3) == c)
+    print(Shape.Circle(2) == Shape.Circle(2))
+    print(Shape.Circle(2) != Shape.Empty)
+    shapes := [3]Shape{Shape.Empty, Shape.Circle(1), Shape.Empty}
+    print(count(&shapes, &Shape.Empty))
+    print(a.label + &b.label)
+    kind := io.ErrorKind.NotFound
+    print(kind == io.ErrorKind.NotFound)
+    print(kind != io.ErrorKind.NotFound)
+}

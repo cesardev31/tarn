@@ -428,7 +428,10 @@ impl<'a, 'l> Builder<'a, 'l> {
                 // `r := &make()` keeps the temporary alive as long as `r`'s
                 // scope; a temporary only borrowed *inside* the initializer
                 // (`n := len(&make())`) dies at the end of the statement.
-                self.extend_temps = matches!(value.kind, ExprKind::Unary { op: ast::UnaryOp::Ref | ast::UnaryOp::RefMut, .. });
+                // A literal borrowed by coercion (`r: &string := "x"`) is the
+                // same initializer as `r := &"x"` (Phase 26B).
+                let borrowed_literal = self.tables().coercions.get(&value.id).is_some_and(|c| c.kind == CoercionKind::BorrowLiteral);
+                self.extend_temps = borrowed_literal || matches!(value.kind, ExprKind::Unary { op: ast::UnaryOp::Ref | ast::UnaryOp::RefMut, .. });
                 let op = self.operand(value);
                 self.extend_temps = false;
                 let l = self.declare_user(sym, span);
@@ -1001,6 +1004,13 @@ impl<'a, 'l> Builder<'a, 'l> {
         {
             return op;
         }
+        if c.kind == CoercionKind::BorrowLiteral {
+            let target = Ty::Ref(false, Box::new(Ty::Str));
+            let rv = self.borrow(e, e);
+            let t = self.new_local(target.clone(), LocalKind::Temp, None, None, false, e.span);
+            self.assign(Place::local(t), rv, e.span);
+            return self.read(Place::local(t), &target);
+        }
         let op = self.operand_raw(e);
         if c.kind == CoercionKind::Poller {
             let Ty::Async(output) = self.ty(e) else { return op };
@@ -1227,7 +1237,13 @@ impl<'a, 'l> Builder<'a, 'l> {
                 ts.push(t);
             }
         }
-        self.expr_into(operand, Place::local(t));
+        // An auto-borrowed literal (BorrowLiteral) is its own operand; storing
+        // it raw avoids applying the same coercion again.
+        if std::ptr::eq(e, operand) {
+            self.expr_into_raw(operand, Place::local(t));
+        } else {
+            self.expr_into(operand, Place::local(t));
+        }
         Rvalue::Ref(mutable, Place::local(t))
     }
 
@@ -1270,6 +1286,29 @@ impl<'a, 'l> Builder<'a, 'l> {
             B::And | B::Or => unreachable!(),
         };
         let lt = self.ty(lhs);
+        if let Some(method) = self.tables().eq_ops.get(&e.id).copied() {
+            // `a == b` is `Eq.eq(&a, &b)`; `a != b` negates it (Phase 26C).
+            let a = self.value_ref(lhs);
+            let b = self.value_ref(rhs);
+            let result = if bop == BinOp::Ne { Place::local(self.new_local(Ty::Bool, LocalKind::Temp, None, None, false, span)) } else { dest.clone() };
+            let next = self.new_block();
+            self.terminate(
+                Terminator::Call {
+                    callee: Callee::Virtual { method, type_args: Vec::new() },
+                    args: vec![a, b],
+                    arg_spans: vec![lhs.span, rhs.span],
+                    dest: result.clone(),
+                    next: Some(next),
+                    spawn: false,
+                },
+                span,
+            );
+            self.switch_to(next);
+            if bop == BinOp::Ne {
+                self.assign(dest, Rvalue::Unary(UnOp::Not, Operand::Copy(result)), span);
+            }
+            return;
+        }
         if matches!(peel_ty(&lt), Ty::Str) {
             // String operators borrow their operands: `string.add(&a, &b)`.
             let a = self.str_ref(lhs);
@@ -1295,6 +1334,19 @@ impl<'a, 'l> Builder<'a, 'l> {
     }
 
     /// `&string` operand for a string-typed expression (borrowing places).
+    /// A shared reference to the value of `e` (an `Eq` operand): references
+    /// are passed through, other values are borrowed in place.
+    fn value_ref(&mut self, e: &Expr) -> Operand {
+        let ty = self.ty(e);
+        if matches!(ty, Ty::Ref(..)) {
+            return self.operand(e);
+        }
+        let p = self.place(e);
+        let t = self.new_local(Ty::Ref(false, Box::new(ty)), LocalKind::Temp, None, None, false, e.span);
+        self.assign(Place::local(t), Rvalue::Ref(false, p), e.span);
+        Operand::Copy(Place::local(t))
+    }
+
     fn str_ref(&mut self, e: &Expr) -> Operand {
         if matches!(self.ty(e), Ty::Ref(..)) {
             return self.operand(e);

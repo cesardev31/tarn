@@ -1,6 +1,7 @@
 # ADR 0022 — Equality of user-defined types goes through a capability
 
-Status: accepted (2026-10-05) — decision of *direction*; not implemented.
+Status: accepted (2026-10-05); implemented in Phase 26 (ADR 0054) with
+`core.Eq` and `Self` in interfaces.
 
 - `==` / `!=` are defined in v0 for numbers, strings and `bool` only.
   Structs and enums are rejected (E3006).

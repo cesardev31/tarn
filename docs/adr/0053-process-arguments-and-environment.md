@@ -40,3 +40,23 @@ because no process-arguments API existed, and the `xlinux doctor` port needs
 
 `os.args()` costs one file read per call. Programs without `/proc` (rare
 containers) get an io.Error rather than empty arguments.
+
+## Phase 25 extension
+
+Evidence from the `xlinux doctor` port (Phase 24 report) added:
+
+- `os.exit(code u8)`: flushes C stdio, then `_exit`. No Tarn value is
+  destroyed (same contract as `panic`, but with a chosen status and no
+  message). libc `exit` cannot be declared beside it because a Tarn function
+  name is also its C symbol; a link-name alias would remove the workaround.
+- `os.can_execute(path)` (`access` X_OK) and `os.disk_space(path)`
+  (`statvfs`: total, free, available bytes), over `ffi`.
+- `io.Error.from_os(code)`: an errno from C code mapped with the filesystem
+  kinds, native code preserved, so FFI wrappers report real errors.
+- `process.Command.env(key, value)`: per-child overrides on top of the
+  inherited environment through the verified spawn bridge (`_spawn` gained an
+  environment slice; ABI verifier, backend symbol and C runtime updated
+  together). The last value for a key wins; empty keys, keys with `=` and
+  values with NUL fail to spawn with InvalidInput; the parent's environment
+  never changes.
+

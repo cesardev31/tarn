@@ -1,0 +1,10 @@
+// Without an `Eq` implementation, `==` on a struct is rejected: Tarn never
+// compares fields structurally (ADR 0022).
+struct Handle {
+    id i64
+}
+fn main() {
+    a := Handle{id: 1}
+    b := Handle{id: 1}
+    print(&a == &b)
+}

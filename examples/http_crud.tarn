@@ -15,8 +15,8 @@ struct Item {
 impl json.Encode for Item {
     fn encode(&self, out &mut json.Writer) {
         out.begin_object()
-        out.field_u64(&"id", self.id)
-        out.field_string(&"name", &self.name)
+        out.field_u64("id", self.id)
+        out.field_string("name", &self.name)
         out.end_object()
     }
 }
@@ -33,8 +33,8 @@ fn Store.load(path &string) Store {
         Ok(data) => match json.parse_bytes(data.as_slice()) {
             Ok(document) => {
                 for value in document.into_list().as_slice() {
-                    match value.u64(&"id") {
-                        Some(id) => match value.text(&"name") {
+                    match value.u64("id") {
+                        Some(id) => match value.text("name") {
                             Some(name) => {
                                 store.items.push(Item{id: id, name: name})
                                 if id >= store.next { store.next = id + 1 }
@@ -68,7 +68,7 @@ fn Store.find(&self, id u64) Option<usize> {
 // The request body must be {"name": "..."} with a non-empty name.
 fn name_of(request &http.Request) Option<string> {
     match json.parse_bytes(request.body()) {
-        Ok(body) => match body.text(&"name") {
+        Ok(body) => match body.text("name") {
             Some(name) => {
                 if string.trim(&name).is_empty() { return None }
                 return Some(name)
@@ -91,7 +91,7 @@ fn items(store &mut Store, request &http.Request) Result<http.Response, http.Err
             try store.save().map_err(http.Error.Io)
             return http.Response.json(201, body)
         }
-        None => { return http.Response.text(400, &"expected {\"name\": \"...\"}\n") }
+        None => { return http.Response.text(400, "expected {\"name\": \"...\"}\n") }
     }
 }
 
@@ -99,7 +99,7 @@ fn by_id(store &mut Store, request &http.Request, id u64) Result<http.Response, 
     var index: usize = 0
     match store.find(id) {
         Some(found) => { index = found }
-        None => { return http.Response.text(404, &"item not found\n") }
+        None => { return http.Response.text(404, "item not found\n") }
     }
     method := request.method()
     if method == &"GET" { return http.Response.json(200, json.encode(store.items.get(index))) }
@@ -111,7 +111,7 @@ fn by_id(store &mut Store, request &http.Request, id u64) Result<http.Response, 
     if method != &"PUT" { return http.Response.method_not_allowed(&"GET, PUT, DELETE") }
     match name_of(request) {
         Some(name) => { store.items.get_mut(index).name = name }
-        None => { return http.Response.text(400, &"expected {\"name\": \"...\"}\n") }
+        None => { return http.Response.text(400, "expected {\"name\": \"...\"}\n") }
     }
     try store.save().map_err(http.Error.Io)
     return http.Response.json(200, json.encode(store.items.get(index)))
@@ -119,19 +119,19 @@ fn by_id(store &mut Store, request &http.Request, id u64) Result<http.Response, 
 
 fn route(store &mut Store, request &http.Request) Result<http.Response, http.Error> {
     if request.target() == &"/items" { return items(store, request) }
-    match string.strip_prefix(request.target(), &"/items/") {
+    match string.strip_prefix(request.target(), "/items/") {
         Some(rest) => match string.parse_u64(&rest) {
             Some(id) => { return by_id(store, request, id) }
             None => {}
         }
         None => {}
     }
-    return http.Response.text(404, &"not found\n")
+    return http.Response.text(404, "not found\n")
 }
 
 fn main() Result<void, io.Error> {
-    var store = Store.load(&"items.json")
-    return http.serve(&"127.0.0.1:8080", fn(request &http.Request) Result<http.Response, http.Error> {
+    var store = Store.load("items.json")
+    return http.serve("127.0.0.1:8080", fn(request &http.Request) Result<http.Response, http.Error> {
         return route(&mut store, request)
     })
 }

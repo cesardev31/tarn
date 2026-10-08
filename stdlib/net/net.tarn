@@ -33,13 +33,13 @@ extern "intrinsic" fn _shutdown(fd i32, how i32) io._Raw
 extern "intrinsic" fn _close_listener(value TcpListener) io._Raw
 extern "intrinsic" fn _close_stream(value TcpStream) io._Raw
 extern "intrinsic" fn _close_udp(value UdpSocket) io._Raw
-pub fn SocketAddr.port(&self) u16 { return u16(self.data[16]) * u16(256) + u16(self.data[17]) }
-pub fn SocketAddr.is_ipv4(&self) bool { return self.data[18] == u8(4) }
-pub fn SocketAddr.is_ipv6(&self) bool { return self.data[18] == u8(6) }
+pub fn SocketAddr.port(&self) u16 { return u16(self.data[16]) * 256 + u16(self.data[17]) }
+pub fn SocketAddr.is_ipv4(&self) bool { return self.data[18] == 4 }
+pub fn SocketAddr.is_ipv6(&self) bool { return self.data[18] == 6 }
 pub fn SocketAddr.with_port(self, port u16) SocketAddr {
     var result = self
-    result.data[16] = u8(port / u16(256))
-    result.data[17] = u8(port % u16(256))
+    result.data[16] = u8(port / 256)
+    result.data[17] = u8(port % 256)
     return result
 }
 pub fn SocketAddr.ip(&self) IpAddr {
@@ -93,7 +93,7 @@ pub fn TcpStream.write_all(&mut self, buffer &[]u8) Result<void, io.Error> {
     var offset = usize(0)
     for offset < buffer.len() {
         count := try self.write(&buffer[offset..])
-        if count == usize(0) { return Err(io.Error{kind: io.ErrorKind.WriteZero, code: 0, domain: 0}) }
+        if count == 0 { return Err(io.Error{kind: io.ErrorKind.WriteZero, code: 0, domain: 0}) }
         offset = offset + count
     }
     return Ok(())
@@ -101,8 +101,8 @@ pub fn TcpStream.write_all(&mut self, buffer &[]u8) Result<void, io.Error> {
 pub fn TcpStream.shutdown(&mut self, how Shutdown) Result<void, io.Error> {
     var direction = i32(2)
     match how {
-        Shutdown.Read => { direction = i32(0) }
-        Shutdown.Write => { direction = i32(1) }
+        Shutdown.Read => { direction = 0 }
+        Shutdown.Write => { direction = 1 }
         Shutdown.Both => {}
     }
     for {
@@ -245,7 +245,7 @@ extern "intrinsic" fn _poll_ctl(handle usize, fd i32, operation i32, interest i3
 extern "intrinsic" fn _poll_wait(handle usize, events &mut []Event, timeout i32) io._Raw
 extern "intrinsic" fn _close_poll(value Poll) io._Raw
 pub fn Event.empty() Event {
-    return Event{token: Token{value: u64(0)}, readable: false, writable: false, error: false, hangup: false}
+    return Event{token: Token{value: 0}, readable: false, writable: false, error: false, hangup: false}
 }
 pub fn Token.same(self, other Token) bool { return self.value == other.value }
 fn _set_nonblocking(fd i32, enabled bool) Result<void, io.Error> {
@@ -310,10 +310,10 @@ fn _registration(handle usize, fd i32, op i32, interest Interest, token Token) R
         return Ok(Token{value: u64(checked.value)})
     }
 }
-pub fn Poll.register_listener(&mut self, socket &TcpListener, interest Interest) Result<Token, io.Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
-pub fn Poll.register_stream(&mut self, socket &TcpStream, interest Interest) Result<Token, io.Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
-pub fn Poll.register_udp(&mut self, socket &UdpSocket, interest Interest) Result<Token, io.Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: u64(0)}) }
-pub fn Poll.register_connecting(&mut self, socket &Connecting) Result<Token, io.Error> { return _registration(self.handle, socket.stream.fd, 0, Interest.Writable, Token{value: u64(0)}) }
+pub fn Poll.register_listener(&mut self, socket &TcpListener, interest Interest) Result<Token, io.Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: 0}) }
+pub fn Poll.register_stream(&mut self, socket &TcpStream, interest Interest) Result<Token, io.Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: 0}) }
+pub fn Poll.register_udp(&mut self, socket &UdpSocket, interest Interest) Result<Token, io.Error> { return _registration(self.handle, socket.fd, 0, interest, Token{value: 0}) }
+pub fn Poll.register_connecting(&mut self, socket &Connecting) Result<Token, io.Error> { return _registration(self.handle, socket.stream.fd, 0, Interest.Writable, Token{value: 0}) }
 pub fn Poll.modify_listener(&mut self, socket &TcpListener, token Token, interest Interest) Result<void, io.Error> {
     try _registration(self.handle, socket.fd, 1, interest, token)
     return Ok(())
@@ -343,7 +343,7 @@ pub fn Poll.deregister_connecting(&mut self, socket &Connecting, token Token) Re
     return Ok(())
 }
 pub fn Poll.wait(&mut self, events &mut []Event, timeout i32) Result<usize, io.Error> {
-    if timeout < -1 || events.len() == usize(0) { return Err(io.Error{kind: io.ErrorKind.InvalidAddress, code: 22, domain: 0}) }
+    if timeout < -1 || events.len() == 0 { return Err(io.Error{kind: io.ErrorKind.InvalidAddress, code: 22, domain: 0}) }
     var remaining = timeout
     var deadline = i64(0)
     if timeout > 0 { deadline = (try io._check(io._now())).value + i64(timeout) }
@@ -352,7 +352,7 @@ pub fn Poll.wait(&mut self, events &mut []Event, timeout i32) Result<usize, io.E
         if raw.domain == 0 && raw.code == 4 {
             if timeout > 0 {
                 now := (try io._check(io._now())).value
-                if now >= deadline { return Ok(usize(0)) }
+                if now >= deadline { return Ok(0) }
                 remaining = i32(deadline - now)
             }
             continue
@@ -486,7 +486,7 @@ pub async fn TcpStream.write_all_async(&mut self, buffer &[]u8) Result<void, io.
             match io._leaf(waker, poll_write(waker, self, &buffer[offset..])) {
                 io.Progress.Ready(result) => match result {
                     Ok(count) => {
-                        if count != usize(0) && offset + count != buffer.len() { io._wake(waker) }
+                        if count != 0 && offset + count != buffer.len() { io._wake(waker) }
                         return io.Progress.Ready(Ok(count))
                     }
                     Err(error) => { return io.Progress.Ready(Err(error)) }
@@ -496,7 +496,7 @@ pub async fn TcpStream.write_all_async(&mut self, buffer &[]u8) Result<void, io.
         }) {
             io.Progress.Ready(result) => {
                 count := try result
-                if count == usize(0) { return Err(io.Error{kind: io.ErrorKind.WriteZero, code: 0, domain: 0}) }
+                if count == 0 { return Err(io.Error{kind: io.ErrorKind.WriteZero, code: 0, domain: 0}) }
                 offset = offset + count
             }
             io.Progress.Pending => {}
@@ -534,7 +534,7 @@ pub async fn UdpSocket.recv_from_async(&mut self, buffer &mut []u8) Result<RecvF
 fn _zero_fill(buffer &mut Vec<u8>, size usize) {
     for {
         if buffer.len() >= size { return }
-        buffer.push(u8(0))
+        buffer.push(0)
     }
 }
 fn _copy_bytes(target &mut []u8, source &[]u8) {
@@ -542,7 +542,7 @@ fn _copy_bytes(target &mut []u8, source &[]u8) {
     for {
         if index == source.len() { return }
         target[index] = source[index]
-        index = index + usize(1)
+        index = index + 1
     }
 }
 /// Owned read buffer. Buffered bytes are `buffer[start..end]`.
@@ -553,10 +553,10 @@ pub struct BufferedReader {
 }
 /// A zero capacity aborts.
 pub fn BufferedReader.new(capacity usize) BufferedReader {
-    if capacity == usize(0) { panic("buffer capacity must be positive") }
+    if capacity == 0 { panic("buffer capacity must be positive") }
     var buffer = Vec.new()
     _zero_fill(&mut buffer, capacity)
-    return BufferedReader{buffer: buffer, start: usize(0), end: usize(0)}
+    return BufferedReader{buffer: buffer, start: 0, end: 0}
 }
 pub fn BufferedReader.buffered(&self) usize { return self.end - self.start }
 pub fn BufferedReader.capacity(&self) usize { return self.buffer.len() }
@@ -564,14 +564,14 @@ pub fn BufferedReader.capacity(&self) usize { return self.buffer.len() }
 // front, or grow geometrically when the buffer is full of unread bytes.
 fn BufferedReader._reserve(&mut self) {
     if self.start == self.end {
-        self.start = usize(0)
-        self.end = usize(0)
+        self.start = 0
+        self.end = 0
     }
     if self.end != self.buffer.len() { return }
     start := self.start
     count := self.end - start
-    if start == usize(0) {
-        size := self.buffer.len() * usize(2)
+    if start == 0 {
+        size := self.buffer.len() * 2
         _zero_fill(&mut self.buffer, size)
         return
     }
@@ -580,9 +580,9 @@ fn BufferedReader._reserve(&mut self) {
     for {
         if index == count { break }
         data[index] = data[start + index]
-        index = index + usize(1)
+        index = index + 1
     }
-    self.start = usize(0)
+    self.start = 0
     self.end = count
 }
 // One read into free space; Ok(0) is end of stream.
@@ -607,7 +607,7 @@ fn BufferedReader._split(&mut self, end usize) Vec<u8> {
     for {
         if index == end { break }
         line.push(self.buffer.at(index))
-        index = index + usize(1)
+        index = index + 1
     }
     self.start = end
     return line
@@ -615,11 +615,11 @@ fn BufferedReader._split(&mut self, end usize) Vec<u8> {
 /// Buffered bytes first; otherwise at most one read. A request at least as
 /// large as the buffer bypasses it. Ok(0) is end of stream.
 pub async fn BufferedReader.read(&mut self, stream &mut TcpStream, target &mut []u8) Result<usize, io.Error> {
-    if target.len() == usize(0) { return Ok(usize(0)) }
+    if target.len() == 0 { return Ok(0) }
     if self.start == self.end {
         if target.len() >= self.buffer.len() { return await stream.read_async(target) }
         count := try await self._fill(stream)
-        if count == usize(0) { return Ok(usize(0)) }
+        if count == 0 { return Ok(0) }
     }
     return Ok(self._take(target))
 }
@@ -631,7 +631,7 @@ pub async fn BufferedReader.read_exact(&mut self, stream &mut TcpStream, target 
         if done == target.len() { return Ok(()) }
         if self.start == self.end {
             count := try await self._fill(stream)
-            if count == usize(0) { return Err(io._fail(io.ErrorKind.UnexpectedEof)) }
+            if count == 0 { return Err(io._fail(io.ErrorKind.UnexpectedEof)) }
         }
         done = done + self._take(&mut target[done..])
     }
@@ -647,15 +647,15 @@ pub async fn BufferedReader.read_until(&mut self, stream &mut TcpStream, delimit
         for {
             if index == self.end { break }
             if self.buffer.at(index) == delimiter {
-                if index + usize(1) - self.start > max { return Err(io._fail(io.ErrorKind.LimitExceeded)) }
-                return Ok(self._split(index + usize(1)))
+                if index + 1 - self.start > max { return Err(io._fail(io.ErrorKind.LimitExceeded)) }
+                return Ok(self._split(index + 1))
             }
-            index = index + usize(1)
+            index = index + 1
         }
         scanned = self.end - self.start
         if scanned >= max { return Err(io._fail(io.ErrorKind.LimitExceeded)) }
         count := try await self._fill(stream)
-        if count == usize(0) { return Ok(self._split(self.end)) }
+        if count == 0 { return Ok(self._split(self.end)) }
     }
 }
 /// Owned write buffer. Pending bytes are `buffer[start..end]`. Writes are
@@ -669,17 +669,17 @@ pub struct BufferedWriter {
 }
 /// A zero capacity aborts.
 pub fn BufferedWriter.new(capacity usize) BufferedWriter {
-    if capacity == usize(0) { panic("buffer capacity must be positive") }
+    if capacity == 0 { panic("buffer capacity must be positive") }
     var buffer = Vec.new()
     _zero_fill(&mut buffer, capacity)
-    return BufferedWriter{buffer: buffer, start: usize(0), end: usize(0)}
+    return BufferedWriter{buffer: buffer, start: 0, end: 0}
 }
 pub fn BufferedWriter.pending(&self) usize { return self.end - self.start }
 pub fn BufferedWriter.capacity(&self) usize { return self.buffer.len() }
 /// Accepts at least one byte of a non-empty `data`. Flushes first only when
 /// the buffer is full; an empty buffer and a large `data` write directly.
 pub async fn BufferedWriter.write(&mut self, stream &mut TcpStream, data &[]u8) Result<usize, io.Error> {
-    if data.len() == usize(0) { return Ok(usize(0)) }
+    if data.len() == 0 { return Ok(0) }
     if self.end == self.buffer.len() { try await self.flush(stream) }
     if self.start == self.end && data.len() >= self.buffer.len() { return await stream.write_async(data) }
     end := self.end
@@ -694,7 +694,7 @@ pub async fn BufferedWriter.write_all(&mut self, stream &mut TcpStream, data &[]
     for {
         if offset == data.len() { return Ok(()) }
         count := try await self.write(stream, &data[offset..])
-        if count == usize(0) { return Err(io._fail(io.ErrorKind.WriteZero)) }
+        if count == 0 { return Err(io._fail(io.ErrorKind.WriteZero)) }
         offset = offset + count
     }
 }
@@ -703,14 +703,14 @@ pub async fn BufferedWriter.write_all(&mut self, stream &mut TcpStream, data &[]
 pub async fn BufferedWriter.flush(&mut self, stream &mut TcpStream) Result<void, io.Error> {
     for {
         if self.start == self.end {
-            self.start = usize(0)
-            self.end = usize(0)
+            self.start = 0
+            self.end = 0
             return Ok(())
         }
         start := self.start
         end := self.end
         count := try await stream.write_async(&self.buffer.as_slice()[start..end])
-        if count == usize(0) { return Err(io._fail(io.ErrorKind.WriteZero)) }
+        if count == 0 { return Err(io._fail(io.ErrorKind.WriteZero)) }
         self.start = start + count
     }
 }

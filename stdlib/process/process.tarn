@@ -42,7 +42,7 @@ pub fn Command.env(self, key string, value string) Command {
         if byte == 61 { valid = false }
     }
     // An invalid key is stored as "=..." so the native bridge rejects it.
-    if valid { command.environment.push(key + &"=" + &value) } else { command.environment.push("=" + &key) }
+    if valid { command.environment.push(key + "=" + &value) } else { command.environment.push("=" + &key) }
     return command
 }
 pub fn Command.arg(self, value string) Command {
@@ -69,8 +69,8 @@ fn _launch(command &Command, capture bool) Result<_Launch, io.Error> {
     raw := try io._check(_spawn(&command.program, command.arguments.as_slice(), command.environment.as_slice(), &command.directory, command.use_directory, capture))
     child := Process{pid: i32(raw.value)}
     if capture {
-        stdout := _Pipe{fd: _descriptor(raw, usize(0))}
-        stderr := _Pipe{fd: _descriptor(raw, usize(4))}
+        stdout := _Pipe{fd: _descriptor(raw, 0)}
+        stderr := _Pipe{fd: _descriptor(raw, 4)}
         return Ok(_Launch{child: child, stdout: Some(stdout), stderr: Some(stderr)})
     }
     return Ok(_Launch{child: child, stdout: None, stderr: None})
@@ -91,14 +91,14 @@ fn _Pipe.read_all(self) Result<Vec<u8>, io.Error> {
     var output: Vec<u8> = Vec.new()
     var buffer: Vec<u8> = Vec.new()
     var index: usize = 0
-    for index < usize(4096) { buffer.push(u8(0))
+    for index < 4096 { buffer.push(0)
         index = index + 1 }
     for {
         raw := _read(self.fd, buffer.as_mut_slice())
         if raw.domain == 4 && raw.code == 4 { continue }
         checked := try io._check(raw)
         count := usize(checked.value)
-        if count == usize(0) { _close(self)
+        if count == 0 { _close(self)
             return Ok(output) }
         data := buffer.as_slice()
         for byte in &data[..count] { output.push(byte) }
@@ -124,7 +124,7 @@ pub fn Process.id(&self) u32 { return u32(self.pid) }
 /// inside the native consuming bridge, so ownership is never duplicated.
 pub fn Process.wait(self) Result<ExitStatus, io.Error> {
     raw := try io._check(_wait(self))
-    if raw.address[0] == u8(0) { return Ok(ExitStatus.Exited(i32(raw.value))) }
+    if raw.address[0] == 0 { return Ok(ExitStatus.Exited(i32(raw.value))) }
     return Ok(ExitStatus.Signaled(i32(raw.value)))
 }
 /// Requests SIGKILL for this child; it still must be waited/reaped.

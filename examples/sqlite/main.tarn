@@ -3,9 +3,9 @@
 import "sqlite"
 
 fn demo() Result<void, sqlite.Error> {
-    var db = try sqlite.open(&":memory:")
-    try db.exec(&"CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
-    var insert = try db.prepare(&"INSERT INTO items (name) VALUES (?1)")
+    var db = try sqlite.open(":memory:")
+    try db.exec("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+    var insert = try db.prepare("INSERT INTO items (name) VALUES (?1)")
     for name in [3]string{"pan", "leche ñ", "café 😀"} {
         try insert.bind_text(1, &name)
         try insert.run()
@@ -13,19 +13,19 @@ fn demo() Result<void, sqlite.Error> {
     }
     try insert.finalize()
     print(db.last_insert_id())
-    var update = try db.prepare(&"UPDATE items SET name = ?1 WHERE id = ?2")
-    try update.bind_text(1, &"pan integral")
+    var update = try db.prepare("UPDATE items SET name = ?1 WHERE id = ?2")
+    try update.bind_text(1, "pan integral")
     try update.bind_i64(2, 1)
     try update.run()
     try update.finalize()
     print(db.changes())
-    var query = try db.prepare(&"SELECT id, name FROM items ORDER BY id")
+    var query = try db.prepare("SELECT id, name FROM items ORDER BY id")
     for try query.step() {
         print(query.column_i64(0))
         print(try query.column_text(1))
     }
     try query.finalize()
-    match db.exec(&"SELECT * FROM missing") {
+    match db.exec("SELECT * FROM missing") {
         Ok(done) => { print("unexpected success") }
         Err(error) => { print(error.message) }
     }

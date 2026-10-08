@@ -39,14 +39,14 @@ pub fn Path.strip_prefix(&self, base &string) Option<Path> {
 }
 pub fn is_absolute(value &string) bool {
     data := value.bytes()
-    return data.len() > usize(0) && data[0] == u8(47)
+    return data.len() > 0 && data[0] == 47
 }
 /// Valid nonempty POSIX filesystem input: no embedded NUL. Pure operations
 /// still accept other strings; fs enforces its own syscall boundary.
 pub fn is_valid(value &string) bool {
     data := value.bytes()
-    if data.len() == usize(0) { return false }
-    for byte in data { if byte == u8(0) { return false } }
+    if data.len() == 0 { return false }
+    for byte in data { if byte == 0 { return false } }
     return true
 }
 /// Absolute children replace the base. Empty children preserve it. No '..'
@@ -55,7 +55,7 @@ pub fn join(base &string, child &string) string {
     if is_absolute(child) || base.is_empty() { return child.clone() }
     if child.is_empty() { return base.clone() }
     data := base.bytes()
-    if data[data.len() - 1] == u8(47) { return base + child }
+    if data[data.len() - 1] == 47 { return base + child }
     return base + "/" + child
 }
 fn _range(value &string, start usize, end usize) string {
@@ -73,7 +73,7 @@ pub fn components(value &string) Vec<string> {
     var start: usize = 0
     var index: usize = 0
     for index <= data.len() {
-        if index == data.len() || data[index] == u8(47) {
+        if index == data.len() || data[index] == 47 {
             if start < index {
                 part := _range(value, start, index)
                 if part != "." { result.push(part) }
@@ -111,13 +111,13 @@ pub fn normalize(value &string) string {
         stack.push(part.clone())
     }
     if stack.is_empty() { return "." }
-    return _assemble(stack.as_slice(), usize(0), stack.len())
+    return _assemble(stack.as_slice(), 0, stack.len())
 }
 pub fn parent(value &string) Option<string> {
     parts := components(value)
     if parts.is_empty() { return None }
-    if parts.len() == usize(1) && parts.get(usize(0)) == &"/" { return None }
-    return Some(_assemble(parts.as_slice(), usize(0), parts.len() - 1))
+    if parts.len() == 1 && parts.get(0) == &"/" { return None }
+    return Some(_assemble(parts.as_slice(), 0, parts.len() - 1))
 }
 pub fn file_name(value &string) Option<string> {
     parts := components(value)
@@ -131,14 +131,14 @@ fn _dot(name &string) usize {
     var found = data.len()
     var index: usize = 1
     for index < data.len() {
-        if data[index] == u8(46) { found = index }
+        if data[index] == 46 { found = index }
         index = index + 1
     }
     return found
 }
 pub fn file_stem(value &string) Option<string> {
     match file_name(value) {
-        Some(name) => { return Some(_range(&name, usize(0), _dot(&name))) }
+        Some(name) => { return Some(_range(&name, 0, _dot(&name))) }
         None => { return None }
     }
 }
@@ -156,11 +156,11 @@ pub fn extension(value &string) Option<string> {
 /// root/parent-only paths have no replaceable file name.
 pub fn with_extension(value &string, suffix &string) Option<string> {
     for byte in suffix.bytes() {
-        if byte == u8(47) || byte == u8(0) { return None }
+        if byte == 47 || byte == 0 { return None }
     }
     match file_name(value) {
         Some(name) => {
-            stem := _range(&name, usize(0), _dot(&name))
+            stem := _range(&name, 0, _dot(&name))
             var replacement = stem
             if !suffix.is_empty() { replacement = replacement + "." + suffix }
             match parent(value) {

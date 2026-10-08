@@ -14,8 +14,8 @@ struct Item {
 impl json.Encode for Item {
     fn encode(&self, out &mut json.Writer) {
         out.begin_object()
-        out.field_u64(&"id", self.id)
-        out.field_string(&"name", &self.name)
+        out.field_u64("id", self.id)
+        out.field_string("name", &self.name)
         out.end_object()
     }
 }
@@ -23,7 +23,7 @@ impl json.Encode for Item {
 // The request body must be {"name": "..."} with a non-empty name.
 fn name_of(request &http.Request) Option<string> {
     match json.parse_bytes(request.body()) {
-        Ok(body) => match body.text(&"name") {
+        Ok(body) => match body.text("name") {
             Some(name) => {
                 if string.trim(&name).is_empty() { return None }
                 return Some(name)
@@ -60,62 +60,62 @@ fn handle(db &mut sqlite.Db, request &http.Request) Result<http.Response, sqlite
     method := request.method()
     if request.target() == &"/items" {
         if method == &"GET" {
-            items := try select(db, &"SELECT id, name FROM items ORDER BY id", 0)
+            items := try select(db, "SELECT id, name FROM items ORDER BY id", 0)
             return Ok(http.json(200, json.encode_list(items.as_slice())))
         }
         if method != &"POST" { return Ok(http.method_not_allowed(&"GET, POST")) }
         match name_of(request) {
             Some(name) => {
-                changed := try change(db, &"INSERT INTO items (name) VALUES (?1)", &name, 0)
+                changed := try change(db, "INSERT INTO items (name) VALUES (?1)", &name, 0)
                 item := Item{id: u64(db.last_insert_id()), name: name}
                 return Ok(http.json(201, json.encode(&item)))
             }
-            None => { return Ok(http.text(400, &"expected {\"name\": \"...\"}\n")) }
+            None => { return Ok(http.text(400, "expected {\"name\": \"...\"}\n")) }
         }
     }
     var id: i64 = 0
-    match string.strip_prefix(request.target(), &"/items/") {
+    match string.strip_prefix(request.target(), "/items/") {
         Some(rest) => match string.parse_i64(&rest) {
             Some(n) => { id = n }
             None => {}
         }
         None => {}
     }
-    if id <= 0 { return Ok(http.text(404, &"not found\n")) }
+    if id <= 0 { return Ok(http.text(404, "not found\n")) }
     if method == &"DELETE" {
-        if try change(db, &"DELETE FROM items WHERE id = ?2", &"", id) == 0 { return Ok(http.text(404, &"item not found\n")) }
+        if try change(db, "DELETE FROM items WHERE id = ?2", "", id) == 0 { return Ok(http.text(404, "item not found\n")) }
         return Ok(http.empty(204))
     }
     if method == &"PUT" {
         match name_of(request) {
-            Some(name) => { if try change(db, &"UPDATE items SET name = ?1 WHERE id = ?2", &name, id) == 0 { return Ok(http.text(404, &"item not found\n")) } }
-            None => { return Ok(http.text(400, &"expected {\"name\": \"...\"}\n")) }
+            Some(name) => { if try change(db, "UPDATE items SET name = ?1 WHERE id = ?2", &name, id) == 0 { return Ok(http.text(404, "item not found\n")) } }
+            None => { return Ok(http.text(400, "expected {\"name\": \"...\"}\n")) }
         }
     } else if method != &"GET" {
-        return Ok(http.method_not_allowed(&"GET, PUT, DELETE"))
+        return Ok(http.method_not_allowed("GET, PUT, DELETE"))
     }
-    items := try select(db, &"SELECT id, name FROM items WHERE id = ?1", id)
-    if items.is_empty() { return Ok(http.text(404, &"item not found\n")) }
+    items := try select(db, "SELECT id, name FROM items WHERE id = ?1", id)
+    if items.is_empty() { return Ok(http.text(404, "item not found\n")) }
     return Ok(http.json(200, json.encode(items.get(0))))
 }
 
 fn main() Result<void, io.Error> {
     var db: sqlite.Db
-    match sqlite.open(&"items.sqlite") {
+    match sqlite.open("items.sqlite") {
         Ok(value) => { db = value }
         Err(error) => {
             print(error.message)
             return Ok(())
         }
     }
-    match db.exec(&"CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)") {
+    match db.exec("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)") {
         Ok(done) => {}
         Err(error) => { print(error.message) }
     }
-    return http.serve(&"127.0.0.1:8080", fn(request &http.Request) Result<http.Response, http.Error> {
+    return http.serve("127.0.0.1:8080", fn(request &http.Request) Result<http.Response, http.Error> {
         match handle(&mut db, request) {
             Ok(response) => { return Ok(response) }
-            Err(error) => { return Ok(http.text(500, &(error.message + &"\n"))) }
+            Err(error) => { return Ok(http.text(500, &(error.message + "\n"))) }
         }
     })
 }

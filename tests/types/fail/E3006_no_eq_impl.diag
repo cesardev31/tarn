@@ -1,0 +1,8 @@
+error[E3006]: cannot apply `==` to `&Handle` and `&Handle`
+ --> tests/types/fail/E3006_no_eq_impl.tarn:9:11
+  |
+9 |     print(&a == &b)
+  |           ^^^^^^^^
+  |
+  = note: `==`/`!=` need numbers, strings, booleans or a type implementing `Eq`; implement `Eq` or use `match`
+

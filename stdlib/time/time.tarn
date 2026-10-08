@@ -5,7 +5,7 @@ import "io"
 pub copy struct Duration { millis u64 }
 pub fn Duration.milliseconds(count u64) Duration { return Duration{millis: count} }
 /// Overflow aborts (checked arithmetic).
-pub fn Duration.seconds(count u64) Duration { return Duration{millis: count * u64(1000)} }
+pub fn Duration.seconds(count u64) Duration { return Duration{millis: count * 1000} }
 pub fn Duration.as_millis(self) u64 { return self.millis }
 /// One-shot monotonic timer: an owned Linux timerfd on the shared readiness
 /// Poll. Not Share; moving it moves the descriptor; destruction closes it once.

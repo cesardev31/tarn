@@ -37,7 +37,7 @@ extern "intrinsic" fn _dir_next(native usize, data &mut []u8) io._Raw
 
 fn _interrupted(raw io._Raw) bool { return raw.domain == 3 && raw.code == 4 }
 fn _info(raw io._Raw) Metadata {
-    return Metadata{len: u64(raw.value), is_file: raw.address[0] == u8(1), is_dir: raw.address[0] == u8(2)}
+    return Metadata{len: u64(raw.value), is_file: raw.address[0] == 1, is_dir: raw.address[0] == 2}
 }
 fn _opening(path &string, mode i32) Result<File, io.Error> {
     for {
@@ -52,13 +52,13 @@ fn _opening(path &string, mode i32) Result<File, io.Error> {
     }
 }
 pub fn open(path &string) Result<File, io.Error> { return File.open(path) }
-pub fn File.open(path &string) Result<File, io.Error> { return _opening(path, i32(0)) }
+pub fn File.open(path &string) Result<File, io.Error> { return _opening(path, 0) }
 /// Read/write, create if absent, truncate if present. Permissions respect umask.
-pub fn File.create(path &string) Result<File, io.Error> { return _opening(path, i32(1)) }
-pub fn File.append(path &string) Result<File, io.Error> { return _opening(path, i32(2)) }
-pub fn File.open_read_write(path &string) Result<File, io.Error> { return _opening(path, i32(3)) }
+pub fn File.create(path &string) Result<File, io.Error> { return _opening(path, 1) }
+pub fn File.append(path &string) Result<File, io.Error> { return _opening(path, 2) }
+pub fn File.open_read_write(path &string) Result<File, io.Error> { return _opening(path, 3) }
 /// Atomic create-if-absent; existing paths return AlreadyExists.
-pub fn File.create_new(path &string) Result<File, io.Error> { return _opening(path, i32(4)) }
+pub fn File.create_new(path &string) Result<File, io.Error> { return _opening(path, 4) }
 pub fn File.read(&mut self, data &mut []u8) Result<usize, io.Error> {
     for {
         raw := _read(self.fd, data)
@@ -79,7 +79,7 @@ pub fn File.write_all(&mut self, data &[]u8) Result<void, io.Error> {
     var offset: usize = 0
     for offset < data.len() {
         count := try self.write(&data[offset..])
-        if count == usize(0) { return Err(io._fail(io.ErrorKind.WriteZero)) }
+        if count == 0 { return Err(io._fail(io.ErrorKind.WriteZero)) }
         offset = offset + count
     }
     return Ok(())
@@ -88,7 +88,7 @@ pub fn File.read_exact(&mut self, data &mut []u8) Result<void, io.Error> {
     var offset: usize = 0
     for offset < data.len() {
         count := try self.read(&mut data[offset..])
-        if count == usize(0) { return Err(io._fail(io.ErrorKind.UnexpectedEof)) }
+        if count == 0 { return Err(io._fail(io.ErrorKind.UnexpectedEof)) }
         offset = offset + count
     }
     return Ok(())
@@ -98,7 +98,7 @@ pub fn File.seek(&mut self, position SeekFrom) Result<u64, io.Error> {
     var origin: i32 = 0
     match position {
         SeekFrom.Start(value) => {
-            if value > u64(9223372036854775807) { return Err(io._fail(io.ErrorKind.InvalidInput)) }
+            if value > 9223372036854775807 { return Err(io._fail(io.ErrorKind.InvalidInput)) }
             offset = i64(value)
         }
         SeekFrom.Current(value) => { offset = value
@@ -135,15 +135,15 @@ pub fn File.close(self) Result<void, io.Error> {
 }
 fn _buffer(size usize) Vec<u8> {
     var bytes: Vec<u8> = Vec.new()
-    for bytes.len() < size { bytes.push(u8(0)) }
+    for bytes.len() < size { bytes.push(0) }
     return bytes
 }
 pub fn File.read_all(&mut self) Result<Vec<u8>, io.Error> {
     var result: Vec<u8> = Vec.new()
-    var buffer = _buffer(usize(4096))
+    var buffer = _buffer(4096)
     for {
         count := try self.read(buffer.as_mut_slice())
-        if count == usize(0) { return Ok(result) }
+        if count == 0 { return Ok(result) }
         data := buffer.as_slice()
         var index: usize = 0
         for index < count { result.push(data[index])
@@ -236,7 +236,7 @@ fn _directory(path &string) Result<_Directory, io.Error> {
 /// Non-UTF-8 names return InvalidData; no lossy conversion is performed.
 pub fn read_dir(path &string) Result<Vec<DirEntry>, io.Error> {
     directory := try _directory(path)
-    var buffer = _buffer(usize(256))
+    var buffer = _buffer(256)
     var entries: Vec<DirEntry> = Vec.new()
     for {
         raw := _dir_next(directory.native, buffer.as_mut_slice())

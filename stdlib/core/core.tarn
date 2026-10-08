@@ -81,6 +81,13 @@ pub fn Result<T, E>.map_err<F>(self, f once fn(E) F) Result<T, F> {
     }
 }
 
+/// Equality chosen by the type's author (ADR 0022, Phase 26C): `a == b`
+/// means `a.eq(&b)` and `a != b` its negation. There is no structural
+/// default and no derive; implement it explicitly.
+pub interface Eq {
+    fn eq(&self, other &Self) bool
+}
+
 /// Capability: values of this type are copied instead of moved.
 ///
 /// Not implemented with `impl`: primitives are `Copy`, and a struct or enum is

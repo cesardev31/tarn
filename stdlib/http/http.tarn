@@ -42,21 +42,21 @@ pub copy enum Error {
 pub fn Error.status(self) u16 {
     match self {
         Error.Protocol(problem) => match problem {
-            ProtocolError.Version => { return u16(505) }
-            ProtocolError.Expect => { return u16(417) }
-            ProtocolError.Unsupported => { return u16(501) }
-            _ => { return u16(400) }
+            ProtocolError.Version => { return 505 }
+            ProtocolError.Expect => { return 417 }
+            ProtocolError.Unsupported => { return 501 }
+            _ => { return 400 }
         }
         Error.Limit(kind) => match kind {
-            LimitKind.RequestLine => { return u16(414) }
-            LimitKind.Headers => { return u16(431) }
-            LimitKind.Trailers => { return u16(431) }
-            LimitKind.Body => { return u16(413) }
-            LimitKind.ChunkMetadata => { return u16(413) }
-            LimitKind.Response => { return u16(500) }
+            LimitKind.RequestLine => { return 414 }
+            LimitKind.Headers => { return 431 }
+            LimitKind.Trailers => { return 431 }
+            LimitKind.Body => { return 413 }
+            LimitKind.ChunkMetadata => { return 413 }
+            LimitKind.Response => { return 500 }
         }
-        Error.Timeout(stage) => { return u16(408) }
-        _ => { return u16(500) }
+        Error.Timeout(stage) => { return 408 }
+        _ => { return 500 }
     }
 }
 pub copy struct Limits {
@@ -75,7 +75,7 @@ pub copy struct Limits {
     pub requests usize
 }
 pub fn Limits.defaults() Limits {
-    return Limits{request_line: usize(8192), line: usize(8192), head: usize(32768), headers: usize(100), body: usize(1048576), response_body: usize(1048576), response_head: usize(32768), response_headers: usize(100), chunk_metadata: usize(65536), chunks: usize(4096), trailers: usize(20), buffer: usize(8192), requests: usize(100)}
+    return Limits{request_line: 8192, line: 8192, head: 32768, headers: 100, body: 1048576, response_body: 1048576, response_head: 32768, response_headers: 100, chunk_metadata: 65536, chunks: 4096, trailers: 20, buffer: 8192, requests: 100}
 }
 pub copy struct Timeouts {
     pub head time.Duration
@@ -83,12 +83,12 @@ pub copy struct Timeouts {
     pub write time.Duration
 }
 pub fn Timeouts.defaults() Timeouts {
-    return Timeouts{head: time.Duration.seconds(u64(10)), body: time.Duration.seconds(u64(30)), write: time.Duration.seconds(u64(10))}
+    return Timeouts{head: time.Duration.seconds(10), body: time.Duration.seconds(30), write: time.Duration.seconds(10)}
 }
-fn _duration_valid(value time.Duration) bool { return value.as_millis() > u64(0) && value.as_millis() <= u64(4294967295) }
+fn _duration_valid(value time.Duration) bool { return value.as_millis() > 0 && value.as_millis() <= 4294967295 }
 fn _config_valid(l Limits, t Timeouts) bool {
     // Bounds avoid reserve doubling and arithmetic overflow; not allocation promises.
-    return l.request_line >= usize(2) && l.line >= usize(2) && l.head >= l.request_line && l.headers > usize(0) && l.body > usize(0) && l.response_body > usize(0) && l.response_head >= usize(64) && l.response_headers > usize(0) && l.chunk_metadata >= l.line && l.chunks > usize(0) && l.trailers > usize(0) && l.buffer > usize(0) && l.requests > usize(0) && l.head <= usize(1073741824) && l.line <= l.head && l.body <= usize(1073741824) && l.response_body <= usize(1073741824) && l.response_head <= usize(1073741824) && l.chunk_metadata <= usize(1073741824) && l.buffer <= usize(1073741824) && _duration_valid(t.head) && _duration_valid(t.body) && _duration_valid(t.write)
+    return l.request_line >= 2 && l.line >= 2 && l.head >= l.request_line && l.headers > 0 && l.body > 0 && l.response_body > 0 && l.response_head >= 64 && l.response_headers > 0 && l.chunk_metadata >= l.line && l.chunks > 0 && l.trailers > 0 && l.buffer > 0 && l.requests > 0 && l.head <= 1073741824 && l.line <= l.head && l.body <= 1073741824 && l.response_body <= 1073741824 && l.response_head <= 1073741824 && l.chunk_metadata <= 1073741824 && l.buffer <= 1073741824 && _duration_valid(t.head) && _duration_valid(t.body) && _duration_valid(t.write)
 }
 fn _copy(data &[]u8) Vec<u8> {
     var out = Vec.new()
@@ -104,51 +104,51 @@ fn _text(data &[]u8) Result<string, Error> {
 }
 fn _eq(a &[]u8, b &[]u8) bool {
     if a.len() != b.len() { return false }
-    for i in usize(0)..a.len() { if a[i] != b[i] { return false } }
+    for i in 0..a.len() { if a[i] != b[i] { return false } }
     return true
 }
 fn _lower(b u8) u8 {
-    if b >= u8(65) && b <= u8(90) { return b + u8(32) }
+    if b >= 65 && b <= 90 { return b + 32 }
     return b
 }
 fn _ieq(a &[]u8, b &[]u8) bool {
     if a.len() != b.len() { return false }
-    for i in usize(0)..a.len() { if _lower(a[i]) != _lower(b[i]) { return false } }
+    for i in 0..a.len() { if _lower(a[i]) != _lower(b[i]) { return false } }
     return true
 }
 fn _token(b u8) bool {
-    return (b >= u8(65) && b <= u8(90)) || (b >= u8(97) && b <= u8(122)) || (b >= u8(48) && b <= u8(57)) || b == u8(33) || b == u8(35) || b == u8(36) || b == u8(37) || b == u8(38) || b == u8(39) || b == u8(42) || b == u8(43) || b == u8(45) || b == u8(46) || b == u8(94) || b == u8(95) || b == u8(96) || b == u8(124) || b == u8(126)
+    return (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 33 || b == 35 || b == 36 || b == 37 || b == 38 || b == 39 || b == 42 || b == 43 || b == 45 || b == 46 || b == 94 || b == 95 || b == 96 || b == 124 || b == 126
 }
 fn _tokens(data &[]u8) bool {
-    if data.len() == usize(0) { return false }
+    if data.len() == 0 { return false }
     for b in data { if !_token(b) { return false } }
     return true
 }
 fn _trim(data &[]u8) &[]u8 {
     var first = usize(0)
     var last = data.len()
-    for first < last && (data[first] == u8(32) || data[first] == u8(9)) { first = first + usize(1) }
-    for last > first && (data[last - usize(1)] == u8(32) || data[last - usize(1)] == u8(9)) { last = last - usize(1) }
+    for first < last && (data[first] == 32 || data[first] == 9) { first = first + 1 }
+    for last > first && (data[last - 1] == 32 || data[last - 1] == 9) { last = last - 1 }
     return &data[first..last]
 }
 fn _find(data &[]u8, byte u8) usize {
-    for i in usize(0)..data.len() { if data[i] == byte { return i } }
+    for i in 0..data.len() { if data[i] == byte { return i } }
     return data.len()
 }
 fn _hex(b u8) usize {
-    if b >= u8(48) && b <= u8(57) { return usize(b - u8(48)) }
+    if b >= 48 && b <= 57 { return usize(b - 48) }
     c := _lower(b)
-    if c >= u8(97) && c <= u8(102) { return usize(c - u8(97)) + usize(10) }
-    return usize(16)
+    if c >= 97 && c <= 102 { return usize(c - 97) + 10 }
+    return 16
 }
 fn _decimal(data &[]u8, max usize) Option<usize> {
-    if data.len() == usize(0) { return None }
+    if data.len() == 0 { return None }
     var n = usize(0)
     for b in data {
-        if b < u8(48) || b > u8(57) { return None }
-        d := usize(b - u8(48))
-        if d > max || n > (max - d) / usize(10) { return None }
-        n = n * usize(10) + d
+        if b < 48 || b > 57 { return None }
+        d := usize(b - 48)
+        if d > max || n > (max - d) / 10 { return None }
+        n = n * 10 + d
     }
     return Some(n)
 }
@@ -160,7 +160,7 @@ pub fn Header.new(name &string, value &[]u8) Result<Header, Error> {
     if !_tokens(name.bytes()) { return Err(Error.InvalidResponse) }
     var lower = Vec.new()
     for b in name.bytes() { lower.push(_lower(b)) }
-    for b in value { if (b < u8(32) && b != u8(9)) || b == u8(127) { return Err(Error.InvalidResponse) } }
+    for b in value { if (b < 32 && b != 9) || b == 127 { return Err(Error.InvalidResponse) } }
     return Ok(Header{_name: try _text(lower.as_slice()), _value: _copy(_trim(value))})
 }
 pub fn Header.text(name &string, value &string) Result<Header, Error> { return Header.new(name, value.bytes()) }
@@ -192,11 +192,11 @@ pub struct Response {
     close bool
 }
 pub fn Response.bytes(status u16, body Vec<u8>) Result<Response, Error> {
-    if status < u16(200) || status > u16(599) { return Err(Error.InvalidResponse) }
+    if status < 200 || status > 599 { return Err(Error.InvalidResponse) }
     return Ok(Response{_status: status, _headers: Vec.new(), _body: body, close: false})
 }
 pub fn Response.text(status u16, body &string) Result<Response, Error> {
-    return (try Response.bytes(status, _copy(body.bytes()))).header(try Header.text(&"content-type", &"text/plain; charset=utf-8"))
+    return (try Response.bytes(status, _copy(body.bytes()))).header(try Header.text("content-type", "text/plain; charset=utf-8"))
 }
 fn _reserved(name &[]u8) bool {
     return _eq(name, "content-length".bytes()) || _eq(name, "transfer-encoding".bytes()) || _eq(name, "connection".bytes()) || _eq(name, "trailer".bytes()) || _eq(name, "upgrade".bytes())
@@ -216,13 +216,13 @@ pub fn Response.status(&self) u16 { return self._status }
 /// Already-encoded JSON text (for example from json.encode) with
 /// content-type application/json. http does not depend on the json module.
 pub fn Response.json(status u16, body string) Result<Response, Error> {
-    return (try Response.bytes(status, _copy(body.bytes()))).header(try Header.text(&"content-type", &"application/json"))
+    return (try Response.bytes(status, _copy(body.bytes()))).header(try Header.text("content-type", "application/json"))
 }
 /// No body, such as 204 or an error status without detail.
 pub fn Response.empty(status u16) Result<Response, Error> { return Response.bytes(status, Vec.new()) }
-/// 405 with the required Allow header, e.g. `&"GET, POST"`.
+/// 405 with the required Allow header, e.g. `"GET, POST"`.
 pub fn Response.method_not_allowed(allow &string) Result<Response, Error> {
-    return (try Response.empty(405)).header(try Header.text(&"allow", allow))
+    return (try Response.empty(405)).header(try Header.text("allow", allow))
 }
 
 // Infallible shorthands for handlers whose statuses and headers are fixed in
@@ -241,99 +241,99 @@ pub fn json(status u16, body string) Response { return _fixed(Response.json(stat
 pub fn text(status u16, body &string) Response { return _fixed(Response.text(status, body)) }
 /// No body.
 pub fn empty(status u16) Response { return _fixed(Response.empty(status)) }
-/// 405 with Allow; `allow` is normally a literal such as `&"GET, POST"`.
+/// 405 with Allow; `allow` is normally a literal such as `"GET, POST"`.
 pub fn method_not_allowed(allow &string) Response { return _fixed(Response.method_not_allowed(allow)) }
 
 // Strict authority validation never performs DNS. IPv6 compression is lexical.
 fn _ipv4(data &[]u8) bool {
     var start = usize(0)
     var parts = usize(0)
-    for i in usize(0)..data.len() + usize(1) {
-        if i == data.len() || data[i] == u8(46) {
+    for i in 0..data.len() + 1 {
+        if i == data.len() || data[i] == 46 {
             segment := &data[start..i]
-            if segment.len() > usize(3) || (segment.len() > usize(1) && segment[0] == u8(48)) { return false }
-            match _decimal(segment, usize(255)) { Some(n) => {}
+            if segment.len() > 3 || (segment.len() > 1 && segment[0] == 48) { return false }
+            match _decimal(segment, 255) { Some(n) => {}
                 None => { return false } }
-            parts = parts + usize(1)
-            start = i + usize(1)
+            parts = parts + 1
+            start = i + 1
         }
     }
-    return parts == usize(4)
+    return parts == 4
 }
 fn _ipv6(data &[]u8) bool {
-    if data.len() < usize(2) { return false }
+    if data.len() < 2 { return false }
     var i = usize(0)
     var groups = usize(0)
     var compressed = false
-    if data[0] == u8(58) {
-        if data[1] != u8(58) { return false }
+    if data[0] == 58 {
+        if data[1] != 58 { return false }
         compressed = true
-        i = usize(2)
+        i = 2
     }
     for i < data.len() {
         start := i
-        for i < data.len() && data[i] != u8(58) { i = i + usize(1) }
+        for i < data.len() && data[i] != 58 { i = i + 1 }
         part := &data[start..i]
-        if _find(part, u8(46)) < part.len() {
+        if _find(part, 46) < part.len() {
             if i != data.len() || !_ipv4(part) { return false }
-            groups = groups + usize(2)
+            groups = groups + 2
         } else {
-            if part.len() == usize(0) || part.len() > usize(4) { return false }
-            for b in part { if _hex(b) == usize(16) { return false } }
-            groups = groups + usize(1)
+            if part.len() == 0 || part.len() > 4 { return false }
+            for b in part { if _hex(b) == 16 { return false } }
+            groups = groups + 1
         }
-        if groups > usize(8) { return false }
+        if groups > 8 { return false }
         if i < data.len() {
-            i = i + usize(1)
+            i = i + 1
             if i == data.len() { return false }
-            if data[i] == u8(58) {
+            if data[i] == 58 {
                 if compressed { return false }
                 compressed = true
-                i = i + usize(1)
+                i = i + 1
             }
         }
     }
-    if compressed { return groups < usize(8) }
-    return groups == usize(8)
+    if compressed { return groups < 8 }
+    return groups == 8
 }
 fn _host(data &[]u8) bool {
-    if data.len() == usize(0) { return false }
+    if data.len() == 0 { return false }
     var end = data.len()
     var port = end
-    if data[0] == u8(91) {
-        end = _find(data, u8(93))
-        if end == data.len() || !_ipv6(&data[usize(1)..end]) { return false }
-        if end + usize(1) < data.len() {
-            if data[end + usize(1)] != u8(58) { return false }
-            port = end + usize(2)
+    if data[0] == 91 {
+        end = _find(data, 93)
+        if end == data.len() || !_ipv6(&data[1..end]) { return false }
+        if end + 1 < data.len() {
+            if data[end + 1] != 58 { return false }
+            port = end + 2
         }
     } else {
-        end = _find(data, u8(58))
-        if end < data.len() { port = end + usize(1) }
-        if end == usize(0) { return false }
+        end = _find(data, 58)
+        if end < data.len() { port = end + 1 }
+        if end == 0 { return false }
         host := &data[..end]
         var numeric = true
-        for b in host { if !(b >= u8(48) && b <= u8(57)) && b != u8(46) { numeric = false } }
+        for b in host { if !(b >= 48 && b <= 57) && b != 46 { numeric = false } }
         if numeric {
             if !_ipv4(host) { return false }
         } else {
-            if host.len() > usize(253) { return false }
+            if host.len() > 253 { return false }
             var start = usize(0)
-            for i in usize(0)..host.len() + usize(1) {
-                if i == host.len() || host[i] == u8(46) {
-                    if i == start || i - start > usize(63) || host[start] == u8(45) || host[i - usize(1)] == u8(45) { return false }
-                    start = i + usize(1)
+            for i in 0..host.len() + 1 {
+                if i == host.len() || host[i] == 46 {
+                    if i == start || i - start > 63 || host[start] == 45 || host[i - 1] == 45 { return false }
+                    start = i + 1
                 } else {
                     b := _lower(host[i])
-                    if !((b >= u8(97) && b <= u8(122)) || (b >= u8(48) && b <= u8(57)) || b == u8(45)) { return false }
+                    if !((b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 45) { return false }
                 }
             }
         }
     }
-    if port < data.len() { match _decimal(&data[port..], usize(65535)) { Some(n) => {}
+    if port < data.len() { match _decimal(&data[port..], 65535) { Some(n) => {}
                 None => { return false } } }
     // A colon with an empty port is invalid.
-    if data[data.len() - usize(1)] == u8(58) { return false }
+    if data[data.len() - 1] == 58 { return false }
     return true
 }
 fn _forbidden_trailer(name &[]u8) bool {
@@ -343,8 +343,8 @@ fn _forbidden_trailer(name &[]u8) bool {
 fn _list(data &[]u8, trailer bool) Result<bool, Error> {
     var start = usize(0)
     var close = false
-    for i in usize(0)..data.len() + usize(1) {
-        if i == data.len() || data[i] == u8(44) {
+    for i in 0..data.len() + 1 {
+        if i == data.len() || data[i] == 44 {
             part := _trim(&data[start..i])
             if !_tokens(part) { return Err(Error.Protocol(ProtocolError.Syntax)) }
             var lower = Vec.new()
@@ -357,7 +357,7 @@ fn _list(data &[]u8, trailer bool) Result<bool, Error> {
                 if _eq(name, "upgrade".bytes()) { return Err(Error.Protocol(ProtocolError.Unsupported)) }
                 if _forbidden_trailer(name) { return Err(Error.Protocol(ProtocolError.Framing)) }
             }
-            start = i + usize(1)
+            start = i + 1
         }
     }
     return Ok(close)
@@ -366,26 +366,26 @@ fn _transfer(data &[]u8) Result<bool, Error> {
     var start = usize(0)
     var count = usize(0)
     var chunked = usize(0)
-    for i in usize(0)..data.len() + usize(1) {
-        if i == data.len() || data[i] == u8(44) {
+    for i in 0..data.len() + 1 {
+        if i == data.len() || data[i] == 44 {
             part := _trim(&data[start..i])
             if !_tokens(part) { return Err(Error.Protocol(ProtocolError.Framing)) }
-            count = count + usize(1)
-            if _ieq(part, "chunked".bytes()) { chunked = chunked + usize(1) }
-            start = i + usize(1)
+            count = count + 1
+            if _ieq(part, "chunked".bytes()) { chunked = chunked + 1 }
+            start = i + 1
         }
     }
-    if chunked > usize(1) { return Err(Error.Protocol(ProtocolError.Framing)) }
-    return Ok(count == usize(1) && chunked == usize(1))
+    if chunked > 1 { return Err(Error.Protocol(ProtocolError.Framing)) }
+    return Ok(count == 1 && chunked == 1)
 }
 fn _uri(b u8) bool {
-    return (b >= u8(65) && b <= u8(90)) || (b >= u8(97) && b <= u8(122)) || (b >= u8(48) && b <= u8(57)) || b == u8(45) || b == u8(46) || b == u8(95) || b == u8(126) || b == u8(33) || b == u8(36) || b == u8(38) || b == u8(39) || b == u8(40) || b == u8(41) || b == u8(42) || b == u8(43) || b == u8(44) || b == u8(59) || b == u8(61) || b == u8(58) || b == u8(64) || b == u8(47) || b == u8(63) || b == u8(37)
+    return (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 45 || b == 46 || b == 95 || b == 126 || b == 33 || b == 36 || b == 38 || b == 39 || b == 40 || b == 41 || b == 42 || b == 43 || b == 44 || b == 59 || b == 61 || b == 58 || b == 64 || b == 47 || b == 63 || b == 37
 }
 fn _header(line &[]u8) Result<Header, Error> {
-    colon := _find(line, u8(58))
+    colon := _find(line, 58)
     if colon == line.len() || !_tokens(&line[..colon]) { return Err(Error.Protocol(ProtocolError.Syntax)) }
     name := try _text(&line[..colon])
-    match Header.new(&name, &line[colon + usize(1)..]) {
+    match Header.new(&name, &line[colon + 1..]) {
         Ok(h) => { return Ok(h) }
         Err(error) => { return Err(Error.Protocol(ProtocolError.Syntax)) }
     }
@@ -401,34 +401,34 @@ struct _Head {
 }
 fn _parse_head(data &[]u8, limits Limits) Result<_Head, Error> {
     if data.len() > limits.head { return Err(Error.Limit(LimitKind.Headers)) }
-    var end = _find(data, u8(10))
-    if end == data.len() || end == usize(0) || data[end - usize(1)] != u8(13) { return Err(Error.Protocol(ProtocolError.Syntax)) }
-    if end + usize(1) > limits.request_line { return Err(Error.Limit(LimitKind.RequestLine)) }
-    line := &data[..end - usize(1)]
-    first := _find(line, u8(32))
+    var end = _find(data, 10)
+    if end == data.len() || end == 0 || data[end - 1] != 13 { return Err(Error.Protocol(ProtocolError.Syntax)) }
+    if end + 1 > limits.request_line { return Err(Error.Limit(LimitKind.RequestLine)) }
+    line := &data[..end - 1]
+    first := _find(line, 32)
     if first == line.len() || !_tokens(&line[..first]) { return Err(Error.Protocol(ProtocolError.Syntax)) }
-    rest := &line[first + usize(1)..]
-    second := _find(rest, u8(32))
+    rest := &line[first + 1..]
+    second := _find(rest, 32)
     if second == rest.len() { return Err(Error.Protocol(ProtocolError.Syntax)) }
     method := &line[..first]
     target := &rest[..second]
-    version := &rest[second + usize(1)..]
+    version := &rest[second + 1..]
     if !_eq(version, "HTTP/1.1".bytes()) {
-        if version.len() == usize(8) && _eq(&version[..usize(5)], "HTTP/".bytes()) && version[5] >= u8(48) && version[5] <= u8(57) && version[6] == u8(46) && version[7] >= u8(48) && version[7] <= u8(57) { return Err(Error.Protocol(ProtocolError.Version)) }
+        if version.len() == 8 && _eq(&version[..5], "HTTP/".bytes()) && version[5] >= 48 && version[5] <= 57 && version[6] == 46 && version[7] >= 48 && version[7] <= 57 { return Err(Error.Protocol(ProtocolError.Version)) }
         return Err(Error.Protocol(ProtocolError.Syntax))
     }
     if _eq(method, "CONNECT".bytes()) { return Err(Error.Protocol(ProtocolError.Unsupported)) }
-    if target.len() == usize(0) { return Err(Error.Protocol(ProtocolError.Syntax)) }
-    if target[0] != u8(47) && !(_eq(method, "OPTIONS".bytes()) && _eq(target, "*".bytes())) { return Err(Error.Protocol(ProtocolError.Syntax)) }
+    if target.len() == 0 { return Err(Error.Protocol(ProtocolError.Syntax)) }
+    if target[0] != 47 && !(_eq(method, "OPTIONS".bytes()) && _eq(target, "*".bytes())) { return Err(Error.Protocol(ProtocolError.Syntax)) }
     var i = usize(0)
     for i < target.len() {
         b := target[i]
         if !_uri(b) { return Err(Error.Protocol(ProtocolError.Syntax)) }
-        if b == u8(37) {
-            if target.len() - i < usize(3) || _hex(target[i + usize(1)]) == usize(16) || _hex(target[i + usize(2)]) == usize(16) { return Err(Error.Protocol(ProtocolError.Syntax)) }
-            i = i + usize(2)
+        if b == 37 {
+            if target.len() - i < 3 || _hex(target[i + 1]) == 16 || _hex(target[i + 2]) == 16 { return Err(Error.Protocol(ProtocolError.Syntax)) }
+            i = i + 2
         }
-        i = i + usize(1)
+        i = i + 1
     }
     var request = Request{_method: try _text(method), _target: try _text(target), _headers: Vec.new(), _body: Vec.new(), _trailers: Vec.new()}
     var hosts = usize(0)
@@ -438,34 +438,34 @@ fn _parse_head(data &[]u8, limits Limits) Result<_Head, Error> {
     var close = false
     var expect = false
     var unsupported = false
-    var framing = _Framing.Length(usize(0))
-    var start = end + usize(1)
+    var framing = _Framing.Length(0)
+    var start = end + 1
     for {
         end = start
-        for end < data.len() && data[end] != u8(10) { end = end + usize(1) }
-        if end == data.len() || end == start || data[end - usize(1)] != u8(13) { return Err(Error.Protocol(ProtocolError.Syntax)) }
-        if end + usize(1) - start > limits.line { return Err(Error.Limit(LimitKind.Headers)) }
-        if end - start == usize(1) {
-            if end + usize(1) != data.len() { return Err(Error.Protocol(ProtocolError.Syntax)) }
+        for end < data.len() && data[end] != 10 { end = end + 1 }
+        if end == data.len() || end == start || data[end - 1] != 13 { return Err(Error.Protocol(ProtocolError.Syntax)) }
+        if end + 1 - start > limits.line { return Err(Error.Limit(LimitKind.Headers)) }
+        if end - start == 1 {
+            if end + 1 != data.len() { return Err(Error.Protocol(ProtocolError.Syntax)) }
             break
         }
         if request._headers.len() == limits.headers { return Err(Error.Limit(LimitKind.Headers)) }
-        h := try _header(&data[start..end - usize(1)])
+        h := try _header(&data[start..end - 1])
         name := h._name.bytes()
         value := h._value.as_slice()
         if _eq(name, "host".bytes()) {
-            hosts = hosts + usize(1)
+            hosts = hosts + 1
             if !_host(value) { return Err(Error.Protocol(ProtocolError.Host)) }
         }
         if _eq(name, "content-length".bytes()) {
-            lengths = lengths + usize(1)
-            match _decimal(value, (usize(9223372036854775807) * usize(2) + usize(1))) {
+            lengths = lengths + 1
+            match _decimal(value, 18446744073709551615) {
                 Some(n) => { length = n }
                 None => { return Err(Error.Protocol(ProtocolError.Framing)) }
             }
         }
         if _eq(name, "transfer-encoding".bytes()) {
-            transfers = transfers + usize(1)
+            transfers = transfers + 1
             if !(try _transfer(value)) { unsupported = true }
             framing = _Framing.Chunked
         }
@@ -474,13 +474,13 @@ fn _parse_head(data &[]u8, limits Limits) Result<_Head, Error> {
         if _eq(name, "expect".bytes()) { expect = true }
         if _eq(name, "upgrade".bytes()) { unsupported = true }
         request._headers.push(h)
-        start = end + usize(1)
+        start = end + 1
     }
-    if hosts != usize(1) { return Err(Error.Protocol(ProtocolError.Host)) }
-    if lengths > usize(1) || transfers > usize(1) || (lengths != usize(0) && transfers != usize(0)) { return Err(Error.Protocol(ProtocolError.Framing)) }
+    if hosts != 1 { return Err(Error.Protocol(ProtocolError.Host)) }
+    if lengths > 1 || transfers > 1 || (lengths != 0 && transfers != 0) { return Err(Error.Protocol(ProtocolError.Framing)) }
     if unsupported { return Err(Error.Protocol(ProtocolError.Unsupported)) }
     if expect { return Err(Error.Protocol(ProtocolError.Expect)) }
-    if transfers == usize(0) {
+    if transfers == 0 {
         if length > limits.body { return Err(Error.Limit(LimitKind.Body)) }
         framing = _Framing.Length(length)
     }
@@ -488,7 +488,7 @@ fn _parse_head(data &[]u8, limits Limits) Result<_Head, Error> {
 }
 
 async fn _line(reader &mut net.BufferedReader, stream &mut net.TcpStream, max usize, kind LimitKind) Result<Vec<u8>, Error> {
-    match await reader.read_until(stream, u8(10), max) {
+    match await reader.read_until(stream, 10, max) {
         Ok(line) => { return Ok(line) }
         Err(error) => {
             match error.kind {
@@ -499,12 +499,12 @@ async fn _line(reader &mut net.BufferedReader, stream &mut net.TcpStream, max us
     }
 }
 fn _crlf(data &[]u8) bool {
-    return data.len() >= usize(2) && data[data.len() - usize(2)] == u8(13) && data[data.len() - usize(1)] == u8(10)
+    return data.len() >= 2 && data[data.len() - 2] == 13 && data[data.len() - 1] == 10
 }
 async fn _read_head(reader &mut net.BufferedReader, stream &mut net.TcpStream, limits Limits) Result<Option<_Head>, Error> {
     var bytes = Vec.new()
     first := try await _line(reader, stream, limits.request_line, LimitKind.RequestLine)
-    if first.len() == usize(0) { return Ok(None) }
+    if first.len() == 0 { return Ok(None) }
     if !_crlf(first.as_slice()) { return Err(Error.Protocol(ProtocolError.Incomplete)) }
     _append(&mut bytes, first.as_slice())
     var count = usize(0)
@@ -513,8 +513,8 @@ async fn _read_head(reader &mut net.BufferedReader, stream &mut net.TcpStream, l
         if !_crlf(line.as_slice()) { return Err(Error.Protocol(ProtocolError.Incomplete)) }
         if line.len() > limits.head - bytes.len() { return Err(Error.Limit(LimitKind.Headers)) }
         _append(&mut bytes, line.as_slice())
-        if line.len() == usize(2) { break }
-        count = count + usize(1)
+        if line.len() == 2 { break }
+        count = count + 1
         if count > limits.headers { return Err(Error.Limit(LimitKind.Headers)) }
     }
     return Ok(Some(try _parse_head(bytes.as_slice(), limits)))
@@ -528,48 +528,48 @@ async fn _head_stage(reader &mut net.BufferedReader, stream &mut net.TcpStream, 
 fn _chunk_size(data &[]u8) Result<usize, Error> {
     var i = usize(0)
     var n = usize(0)
-    max := (usize(9223372036854775807) * usize(2) + usize(1))
-    for i < data.len() && _hex(data[i]) < usize(16) {
+    max: usize := 18446744073709551615
+    for i < data.len() && _hex(data[i]) < 16 {
         d := _hex(data[i])
-        if n > (max - d) / usize(16) { return Err(Error.Protocol(ProtocolError.Chunk)) }
-        n = n * usize(16) + d
-        i = i + usize(1)
+        if n > (max - d) / 16 { return Err(Error.Protocol(ProtocolError.Chunk)) }
+        n = n * 16 + d
+        i = i + 1
     }
-    if i == usize(0) { return Err(Error.Protocol(ProtocolError.Chunk)) }
+    if i == 0 { return Err(Error.Protocol(ProtocolError.Chunk)) }
     for i < data.len() {
         // RFC chunk extensions permit bad whitespace around separators.
-        for i < data.len() && (data[i] == u8(32) || data[i] == u8(9)) { i = i + usize(1) }
-        if i == data.len() || data[i] != u8(59) { return Err(Error.Protocol(ProtocolError.Chunk)) }
-        i = i + usize(1)
-        for i < data.len() && (data[i] == u8(32) || data[i] == u8(9)) { i = i + usize(1) }
+        for i < data.len() && (data[i] == 32 || data[i] == 9) { i = i + 1 }
+        if i == data.len() || data[i] != 59 { return Err(Error.Protocol(ProtocolError.Chunk)) }
+        i = i + 1
+        for i < data.len() && (data[i] == 32 || data[i] == 9) { i = i + 1 }
         start := i
-        for i < data.len() && _token(data[i]) { i = i + usize(1) }
+        for i < data.len() && _token(data[i]) { i = i + 1 }
         if i == start { return Err(Error.Protocol(ProtocolError.Chunk)) }
-        for i < data.len() && (data[i] == u8(32) || data[i] == u8(9)) { i = i + usize(1) }
-        if i < data.len() && data[i] == u8(61) {
-            i = i + usize(1)
-            for i < data.len() && (data[i] == u8(32) || data[i] == u8(9)) { i = i + usize(1) }
-            if i < data.len() && data[i] == u8(34) {
-                i = i + usize(1)
+        for i < data.len() && (data[i] == 32 || data[i] == 9) { i = i + 1 }
+        if i < data.len() && data[i] == 61 {
+            i = i + 1
+            for i < data.len() && (data[i] == 32 || data[i] == 9) { i = i + 1 }
+            if i < data.len() && data[i] == 34 {
+                i = i + 1
                 var done = false
                 for i < data.len() {
                     b := data[i]
-                    i = i + usize(1)
-                    if b == u8(34) { done = true
+                    i = i + 1
+                    if b == 34 { done = true
                         break }
-                    if b == u8(92) {
+                    if b == 92 {
                         if i == data.len() { return Err(Error.Protocol(ProtocolError.Chunk)) }
                         b2 := data[i]
-                        if (b2 < u8(32) && b2 != u8(9)) || b2 == u8(127) { return Err(Error.Protocol(ProtocolError.Chunk)) }
-                        i = i + usize(1)
+                        if (b2 < 32 && b2 != 9) || b2 == 127 { return Err(Error.Protocol(ProtocolError.Chunk)) }
+                        i = i + 1
                     } else {
-                        if (b < u8(32) && b != u8(9)) || b == u8(127) { return Err(Error.Protocol(ProtocolError.Chunk)) }
+                        if (b < 32 && b != 9) || b == 127 { return Err(Error.Protocol(ProtocolError.Chunk)) }
                     }
                 }
                 if !done { return Err(Error.Protocol(ProtocolError.Chunk)) }
             } else {
                 begin := i
-                for i < data.len() && _token(data[i]) { i = i + usize(1) }
+                for i < data.len() && _token(data[i]) { i = i + 1 }
                 if begin == i { return Err(Error.Protocol(ProtocolError.Chunk)) }
             }
         }
@@ -588,7 +588,7 @@ async fn _exact(reader &mut net.BufferedReader, stream &mut net.TcpStream, targe
 }
 async fn _bytes(reader &mut net.BufferedReader, stream &mut net.TcpStream, count usize, body &mut Vec<u8>) Result<void, Error> {
     start := body.len()
-    for body.len() - start < count { body.push(u8(0)) }
+    for body.len() - start < count { body.push(0) }
     return await _exact(reader, stream, &mut body.as_mut_slice()[start..])
 }
 async fn _read_body(reader &mut net.BufferedReader, stream &mut net.TcpStream, limits Limits, head &mut _Head) Result<void, Error> {
@@ -603,26 +603,26 @@ async fn _read_body(reader &mut net.BufferedReader, stream &mut net.TcpStream, l
         if !_crlf(line.as_slice()) { return Err(Error.Protocol(ProtocolError.Incomplete)) }
         if line.len() > limits.chunk_metadata - metadata { return Err(Error.Limit(LimitKind.ChunkMetadata)) }
         metadata = metadata + line.len()
-        count := try _chunk_size(&line.as_slice()[..line.len() - usize(2)])
-        if count == usize(0) { break }
-        chunks = chunks + usize(1)
+        count := try _chunk_size(&line.as_slice()[..line.len() - 2])
+        if count == 0 { break }
+        chunks = chunks + 1
         if chunks > limits.chunks { return Err(Error.Limit(LimitKind.ChunkMetadata)) }
         if count > limits.body - head.request._body.len() { return Err(Error.Limit(LimitKind.Body)) }
         try await _bytes(reader, stream, count, &mut head.request._body)
         var ending = [2]u8{0, 0}
         try await _exact(reader, stream, &mut ending[..])
         if !_crlf(&ending[..]) { return Err(Error.Protocol(ProtocolError.Chunk)) }
-        if usize(2) > limits.chunk_metadata - metadata { return Err(Error.Limit(LimitKind.ChunkMetadata)) }
-        metadata = metadata + usize(2)
+        if 2 > limits.chunk_metadata - metadata { return Err(Error.Limit(LimitKind.ChunkMetadata)) }
+        metadata = metadata + 2
     }
     for {
         line := try await _line(reader, stream, limits.line, LimitKind.Trailers)
         if !_crlf(line.as_slice()) { return Err(Error.Protocol(ProtocolError.Incomplete)) }
         if line.len() > limits.chunk_metadata - metadata { return Err(Error.Limit(LimitKind.ChunkMetadata)) }
         metadata = metadata + line.len()
-        if line.len() == usize(2) { return Ok(()) }
+        if line.len() == 2 { return Ok(()) }
         if head.request._trailers.len() == limits.trailers { return Err(Error.Limit(LimitKind.Trailers)) }
-        h := try _header(&line.as_slice()[..line.len() - usize(2)])
+        h := try _header(&line.as_slice()[..line.len() - 2])
         if _forbidden_trailer(h._name.bytes()) { return Err(Error.Protocol(ProtocolError.Trailer)) }
         head.request._trailers.push(h)
     }
@@ -654,9 +654,9 @@ fn _reason(status u16) string {
     }
 }
 fn _encode(response &Response, limits Limits, head bool, close bool) Result<Vec<u8>, Error> {
-    if response._status < u16(200) || response._status > u16(599) { return Err(Error.InvalidResponse) }
-    forbidden := response._status == u16(204) || response._status == u16(304)
-    if (forbidden || response._status == u16(205)) && response._body.len() != usize(0) { return Err(Error.InvalidResponse) }
+    if response._status < 200 || response._status > 599 { return Err(Error.InvalidResponse) }
+    forbidden := response._status == 204 || response._status == 304
+    if (forbidden || response._status == 205) && response._body.len() != 0 { return Err(Error.InvalidResponse) }
     if response._body.len() > limits.response_body || response._headers.len() > limits.response_headers { return Err(Error.Limit(LimitKind.Response)) }
     var bytes = Vec.new()
     line := "HTTP/1.1 " + string.from_u64(u64(response._status)) + " " + _reason(response._status) + "\r\n"
@@ -666,17 +666,17 @@ fn _encode(response &Response, limits Limits, head bool, close bool) Result<Vec<
         _append(&mut bytes, length.bytes())
     }
     if close { _append(&mut bytes, "connection: close\r\n".bytes()) }
-    if bytes.len() > limits.response_head - usize(2) { return Err(Error.Limit(LimitKind.Response)) }
+    if bytes.len() > limits.response_head - 2 { return Err(Error.Limit(LimitKind.Response)) }
     for h in response._headers.as_slice() {
         if _reserved(h._name.bytes()) { return Err(Error.InvalidResponse) }
         // Header construction already validated all byte controls.
-        if h._name.len() + h._value.len() + usize(4) > limits.response_head - bytes.len() { return Err(Error.Limit(LimitKind.Response)) }
+        if h._name.len() + h._value.len() + 4 > limits.response_head - bytes.len() { return Err(Error.Limit(LimitKind.Response)) }
         _append(&mut bytes, h._name.bytes())
         _append(&mut bytes, ": ".bytes())
         _append(&mut bytes, h._value.as_slice())
         _append(&mut bytes, "\r\n".bytes())
     }
-    if bytes.len() > limits.response_head - usize(2) { return Err(Error.Limit(LimitKind.Response)) }
+    if bytes.len() > limits.response_head - 2 { return Err(Error.Limit(LimitKind.Response)) }
     _append(&mut bytes, "\r\n".bytes())
     if !head && !forbidden { _append(&mut bytes, response._body.as_slice()) }
     return Ok(bytes)
@@ -708,7 +708,7 @@ pub fn Connection.new(stream net.TcpStream, limits Limits, timeouts Timeouts) Re
     var socket = stream
     match socket.set_nonblocking(true) { Err(e) => { return Err(Error.Io(e)) }
         Ok(value) => {} }
-    return Ok(Connection{stream: socket, reader: net.BufferedReader.new(limits.buffer), writer: net.BufferedWriter.new(limits.buffer), limits: limits, timeouts: timeouts, state: _State.Awaiting, head: false, _close: false, count: usize(0)})
+    return Ok(Connection{stream: socket, reader: net.BufferedReader.new(limits.buffer), writer: net.BufferedWriter.new(limits.buffer), limits: limits, timeouts: timeouts, state: _State.Awaiting, head: false, _close: false, count: 0})
 }
 pub async fn Connection.read_request(&mut self, owner &runtime.Execution) Result<Option<Request>, Error> {
     match self.state { _State.Ended => { return Ok(None) }
@@ -738,7 +738,7 @@ pub async fn Connection.read_request(&mut self, owner &runtime.Execution) Result
     self.head = _eq(parsed.request._method.bytes(), "HEAD".bytes())
     self._close = parsed.close
     self.state = _State.Ready
-    self.count = self.count + usize(1)
+    self.count = self.count + 1
     return Ok(Some(parsed.request))
 }
 pub async fn Connection.write_response(&mut self, owner &runtime.Execution, response Response) Result<void, Error> {
@@ -757,7 +757,7 @@ pub async fn Connection.write_response(&mut self, owner &runtime.Execution, resp
     return Ok(())
 }
 pub async fn Connection.reject(&mut self, owner &runtime.Execution, status u16) Result<void, Error> {
-    if status < u16(400) || status > u16(599) { return Err(Error.InvalidResponse) }
+    if status < 400 || status > 599 { return Err(Error.InvalidResponse) }
     match self.state {
         _State.Awaiting => {}
         _State.Ready => {}

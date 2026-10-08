@@ -17,7 +17,7 @@ extern "C" fn __errno_location() *u8
 /// The program's arguments; index 0 is the program path, as the OS provides
 /// it. Fails with InvalidData if an argument is not UTF-8.
 pub fn args() Result<Vec<string>, io.Error> {
-    data := try fs.read(&"/proc/self/cmdline")
+    data := try fs.read("/proc/self/cmdline")
     var list: Vec<string> = Vec.new()
     var current: Vec<u8> = Vec.new()
     for byte in data.as_slice() {

@@ -1,0 +1,8 @@
+error[E3073]: method `same` of `Same` uses `Self`, which `any Same` cannot provide
+ --> tests/types/fail/E3073_self_through_dynamic_interface.tarn:6:14
+  |
+6 |     return a.same(b)
+  |              ^^^^
+  |
+  = help: use a generic parameter instead: `<T: Same>`
+

@@ -24,6 +24,37 @@ pub copy enum ErrorKind {
     DirectoryNotEmpty
     StorageFull
 }
+
+fn _kind_index(kind &ErrorKind) u32 {
+    match kind {
+        ErrorKind.AddressInUse => { return 0 }
+        ErrorKind.ConnectionRefused => { return 1 }
+        ErrorKind.ConnectionReset => { return 2 }
+        ErrorKind.BrokenPipe => { return 3 }
+        ErrorKind.TimedOut => { return 4 }
+        ErrorKind.WouldBlock => { return 5 }
+        ErrorKind.InvalidAddress => { return 6 }
+        ErrorKind.DnsFailure => { return 7 }
+        ErrorKind.OtherOs => { return 8 }
+        ErrorKind.WriteZero => { return 9 }
+        ErrorKind.UnexpectedEof => { return 10 }
+        ErrorKind.LimitExceeded => { return 11 }
+        ErrorKind.NotFound => { return 12 }
+        ErrorKind.PermissionDenied => { return 13 }
+        ErrorKind.AlreadyExists => { return 14 }
+        ErrorKind.InvalidInput => { return 15 }
+        ErrorKind.InvalidData => { return 16 }
+        ErrorKind.NotDirectory => { return 17 }
+        ErrorKind.IsDirectory => { return 18 }
+        ErrorKind.DirectoryNotEmpty => { return 19 }
+        ErrorKind.StorageFull => { return 20 }
+    }
+}
+/// Kinds compare by variant (Phase 26C): `error.kind == io.ErrorKind.NotFound`.
+impl Eq for ErrorKind {
+    fn eq(&self, other &Self) bool { return _kind_index(self) == _kind_index(other) }
+}
+
 pub copy struct Error {
     pub kind ErrorKind
     code i32

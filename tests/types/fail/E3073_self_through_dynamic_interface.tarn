@@ -1,0 +1,9 @@
+// `Self` beyond the receiver needs a concrete type: `any Same` has none.
+interface Same {
+    fn same(&self, other &Self) bool
+}
+fn check(a &any Same, b &any Same) bool {
+    return a.same(b)
+}
+fn main() {
+}

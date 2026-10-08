@@ -68,7 +68,7 @@ pub fn Executor.new() Executor { return Executor{tasks: Vec.new()} }
 // Consuming insertion returns the new loan holder through ordinary provenance.
 pub fn Executor.add(self, operation Operation<void>) Executor {
     var executor = self
-    executor.tasks.push(_Spawned{operation: operation, record: usize(0)})
+    executor.tasks.push(_Spawned{operation: operation, record: 0})
     return executor
 }
 // Move spawned operations from the Execution mailbox into this executor.
@@ -91,7 +91,7 @@ fn Executor.step(&mut self, owner &Execution) Result<bool, io.Error> {
     for i < count {
         var finished = false
         entry := self.tasks.get_mut(i)
-        if entry.record != usize(0) && _task_abandoned(entry.record) {
+        if entry.record != 0 && _task_abandoned(entry.record) {
             finished = true
         } else {
             try io._check(_wake_owner(&entry.operation.waker, owner.state.native))
@@ -107,9 +107,9 @@ fn Executor.step(&mut self, owner &Execution) Result<bool, io.Error> {
             // Destroys the finished or abandoned operation. The last task,
             // not yet visited this turn, moves into slot i and is visited next.
             self.tasks.swap_remove(i)
-            count = count - usize(1)
+            count = count - 1
         } else {
-            i = i + usize(1)
+            i = i + 1
         }
     }
     return Ok(polled)
@@ -117,15 +117,15 @@ fn Executor.step(&mut self, owner &Execution) Result<bool, io.Error> {
 pub fn Executor.turn(&mut self, owner &Execution, timeout i32) Result<usize, io.Error> {
     // Readiness is serviced even when a task self-wakes continuously.
     try owner.wait(0)
-    if !(try self.step(owner)) && self.tasks.len() != usize(0) { try owner.wait(timeout) }
+    if !(try self.step(owner)) && self.tasks.len() != 0 { try owner.wait(timeout) }
     return Ok(self.tasks.len())
 }
 pub fn Executor.run(self, owner &Execution) Result<void, io.Error> {
     var executor = self
     for {
-        if try executor.turn(owner, -1) == usize(0) {
+        if try executor.turn(owner, -1) == 0 {
             executor.drain(owner)
-            if executor.tasks.len() == usize(0) { return Ok(()) }
+            if executor.tasks.len() == 0 { return Ok(()) }
         }
     }
 }
@@ -185,7 +185,7 @@ pub fn write_all_operation(owner &Execution, stream &mut net.TcpStream, buffer &
             io.Progress.Ready(result) => match result {
                 Err(error) => { return io.Progress.Ready(Err(error)) }
                 Ok(count) => {
-                    if count == usize(0) { return io.Progress.Ready(Err(io.Error{kind: io.ErrorKind.WriteZero, code: 0, domain: 0})) }
+                    if count == 0 { return io.Progress.Ready(Err(io.Error{kind: io.ErrorKind.WriteZero, code: 0, domain: 0})) }
                     offset = offset + count
                     if offset == buffer.len() { return io.Progress.Ready(Ok(())) }
                     io._wake(waker)

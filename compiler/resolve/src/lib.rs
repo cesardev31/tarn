@@ -246,6 +246,8 @@ pub struct Resolved {
     /// Number of generic parameters of every struct, enum, interface and
     /// prelude type (`Option` → 1, `Result` → 2).
     pub type_arity: HashMap<SymbolId, usize>,
+    /// Interface → its implicit `Self` type parameter (Phase 26C).
+    pub interface_self: HashMap<SymbolId, SymbolId>,
 }
 
 impl Resolved {

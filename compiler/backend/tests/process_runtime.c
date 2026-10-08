@@ -10,7 +10,7 @@ static void spawn_raw(TarnNetRaw *out, const char *program, const char **args, s
     TarnString **values = calloc(count ? count : 1, sizeof(*values)); assert(values);
     for (size_t i = 0; i < count; ++i) values[i] = tarn_rt_string((const unsigned char *)args[i], strlen(args[i]));
     TarnString *cwd = tarn_rt_string((const unsigned char *)"", 0);
-    tarn_rt_process_spawn(out, text, (const TarnString *const *)values, count, cwd, 0, capture);
+    tarn_rt_process_spawn(out, text, (const TarnString *const *)values, count, NULL, 0, cwd, 0, capture);
     for (size_t i = 0; i < count; ++i) free(values[i]);
     free(values); free(cwd); free(text);
 }

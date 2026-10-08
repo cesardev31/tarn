@@ -43,6 +43,8 @@ tested and documented.
 | 22 | Verified pure-source package manager | implemented initial subset: [guide](packages.md), [ADR 0051](adr/0051-verified-source-packages.md); public registry infrastructure and signed provenance deferred |
 | 23 | Explicit error conversion: core combinators, variant constructors as functions, then measured syntax decision | **done**: [plan](phase-23-plan.md), [report](phase-23-report.md), [ADR 0052](adr/0052-explicit-error-conversion.md) |
 | 24 | `os` arguments/environment, `tarn run -- args`, `xlinux doctor` port (milestone 5) | **done**: [report](phase-24-report.md), [ADR 0053](adr/0053-process-arguments-and-environment.md) |
+| 25 | Port-driven stdlib: `os.exit`, `os.can_execute`, `os.disk_space`, `io.Error.from_os`, `Command.env` | **done**: [report](phase-25-report.md), ADR 0053 (Phase 25 extension) |
+| 26 | Less ceremony: redundant casts removed, literals as `&string`, `Self` + `core.Eq` for `==`; formatting designed, deferred | **done**: [report](phase-26-report.md), [ADR 0054](adr/0054-less-ceremony.md) |
 
 ## Milestones
 
@@ -59,10 +61,10 @@ before borrowing, generics or a large stdlib.
 ## Open design questions
 
 - Value-producing `if` (currently: no).
-- Equality for structs/enums (needs an `Equal` interface).
+- Equality for `Option`/`Result` (needs impl bounds; `core.Eq` exists, ADR 0054).
 - Error conversion in `try` (currently exact match only).
 - Method-owner syntax for `[]T` / `[N]T` so `len` can move to `core` (ADR 0020).
-- `Self` in interface signatures (needed by `Eq`, ADR 0022).
+
 - Well-formedness of type annotations w.r.t. bounds (`x: Point<string>`).
 - Exact iteration protocol for `for x in xs`.
 - `try` error conversion (`Error.from`) vs. explicit mapping.

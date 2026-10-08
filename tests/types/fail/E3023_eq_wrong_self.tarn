@@ -1,0 +1,12 @@
+// The interface's `Self` is the implementing type: `other` must be `&Meters`.
+struct Meters {
+    value i64
+}
+struct Feet {
+    value i64
+}
+impl Eq for Meters {
+    fn eq(&self, other &Feet) bool { return self.value == other.value }
+}
+fn main() {
+}

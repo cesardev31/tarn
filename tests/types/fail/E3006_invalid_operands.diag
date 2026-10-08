@@ -20,7 +20,7 @@ error[E3006]: cannot apply `==` to `P` and `P`
 11 |     e := p == p
    |          ^^^^^^
    |
-   = note: v0 compares only numbers, strings and booleans (`==`/`!=`); use `match` for enums
+   = note: `==`/`!=` need numbers, strings, booleans or a type implementing `Eq`; implement `Eq` or use `match`
 
 error[E3006]: cannot apply `&` to `{float}` and `{integer}`
   --> tests/types/fail/E3006_invalid_operands.tarn:12:10

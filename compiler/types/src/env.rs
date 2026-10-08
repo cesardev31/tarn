@@ -128,6 +128,8 @@ pub struct Decls {
     pub mutex_guard: Option<SymbolId>,
     pub atomics: HashMap<SymbolId, Ty>,
     pub transfer: Option<SymbolId>,
+    /// `core.Eq`, behind `==`/`!=` for structs, enums and type parameters.
+    pub eq: Option<SymbolId>,
     pub share: Option<SymbolId>,
     pub native_capabilities: HashMap<SymbolId, crate::NativeCapabilities>,
     /// Interface declaration order, plus resolved implementation IDs.
@@ -180,7 +182,7 @@ impl<'a> Env<'a> {
             panic: get("panic"),
             channel_fn: get("channel"),
         };
-        let decls = Decls { task: ps.get("Task"), transfer: ps.get("Transfer"), share: ps.get("Share"), copy: prelude.copy, ..Decls::default() };
+        let decls = Decls { task: ps.get("Task"), eq: ps.get("Eq"), transfer: ps.get("Transfer"), share: ps.get("Share"), copy: prelude.copy, ..Decls::default() };
         let mut decls = decls;
         decls.result = ps.get("Result");
         decls.mutex = ps.get("Mutex");
@@ -408,8 +410,17 @@ impl<'a> Env<'a> {
             && let (Some(parameter), Some(copy)) = (generics.first(), self.decls.copy) {
             self.decls.bounds.entry(*parameter).or_default().push(copy);
         }
-        let params: Vec<Ty> = f.params.iter().map(|p| self.lower(m, &p.ty)).collect();
-        let ret = f.ret.as_ref().map(|t| self.lower(m, t)).unwrap_or(Ty::Void);
+        let mut params: Vec<Ty> = f.params.iter().map(|p| self.lower(m, &p.ty)).collect();
+        let mut ret = f.ret.as_ref().map(|t| self.lower(m, t)).unwrap_or(Ty::Void);
+        // Impl methods: `Self` is the target type with its binders (Phase 26C).
+        if let Some(target) = &self_ty
+            && let Some(this) = self.r.scope(self.r.symbol(sym).scope).get("Self")
+            && matches!(self.r.symbol(this).kind, SymbolKind::GenericParam)
+        {
+            let map = HashMap::from([(ParamId(this.0), target.clone())]);
+            params = params.iter().map(|t| crate::check::subst(t, &map)).collect();
+            ret = crate::check::subst(&ret, &map);
+        }
         let receiver = f.receiver.as_ref().map(|r| r.kind);
         let passing = |ty: &Ty| match ty {
             Ty::Ref(false, _) => PassingMode::SharedBorrow,

@@ -342,6 +342,13 @@ fn save<W: Writer>(w &mut W) { ... }     // static dispatch (monomorphized or sh
 fn save_any(w &mut any Writer) { ... }    // dynamic dispatch, explicit with `any`
 ```
 
+`Self` in an interface is the implementing type (in an impl, its target).
+A method using `Self` beyond its receiver cannot be called through `any I`
+(E3073). Equality: `core.Eq` (`fn eq(&self, other &Self) bool`); `==`/`!=`
+on a type implementing it call `eq`, with no structural default (ADR 0054).
+A string literal may be passed where `&string` is expected; it is borrowed
+exactly as `&"..."`.
+
 Implementations are explicit (`impl I for T`), not structural: intent is
 visible and greppable, and adding a method never silently changes which
 interfaces a type satisfies.

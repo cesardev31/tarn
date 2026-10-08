@@ -375,6 +375,22 @@ impl<'c, 'a> Walker<'c, 'a> {
                     }
                 }),
                 ItemKind::Interface(i) => self.in_scope(ScopeKind::Item, item.span, |w| {
+                    // `Self`: the implementing type, an implicit type parameter
+                    // of the interface's method signatures (Phase 26C).
+                    let this = Symbol {
+                        name: "Self".into(),
+                        kind: SymbolKind::GenericParam,
+                        module: Some(w.m),
+                        def: None,
+                        span: Some(i.name.span),
+                        scope: w.scope,
+                        is_pub: false,
+                        body: None,
+                    };
+                    let self_param = w.cx.declare(w.scope, this, w.m, "E2003");
+                    if let Some(iface) = w.cx.r.tables[w.m.0 as usize].defs.get(&item.id).copied() {
+                        w.cx.r.interface_self.insert(iface, self_param);
+                    }
                     w.generics(&i.generics);
                     for f in &i.methods {
                         w.function(f);
@@ -488,6 +504,19 @@ impl<'c, 'a> Walker<'c, 'a> {
         self.push_scope(ScopeKind::Item, item.span);
         let iface = self.interface_path(&i.interface, "`impl`");
         let target = self.impl_target(&i.target);
+        // `Self` in an impl is its target type; the type checker substitutes
+        // this implicit parameter with the target and its binders.
+        let this = Symbol {
+            name: "Self".into(),
+            kind: SymbolKind::GenericParam,
+            module: Some(self.m),
+            def: None,
+            span: Some(item.span),
+            scope: self.scope,
+            is_pub: false,
+            body: None,
+        };
+        self.cx.declare(self.scope, this, self.m, "E2003");
         self.check_coherence(item, i, iface, target);
         self.impl_members(item, i, iface, target);
         self.scope = saved;

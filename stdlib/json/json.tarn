@@ -17,32 +17,32 @@ pub struct Writer {
 }
 pub fn Writer.new() Writer { return Writer{text: string.Builder.new(), comma: false} }
 fn Writer.separate(&mut self) {
-    if self.comma { self.text.push(&",") }
+    if self.comma { self.text.push(",") }
     self.comma = true
 }
 pub fn Writer.begin_object(&mut self) {
     self.separate()
-    self.text.push(&"{")
+    self.text.push("{")
     self.comma = false
 }
 pub fn Writer.end_object(&mut self) {
-    self.text.push(&"}")
+    self.text.push("}")
     self.comma = true
 }
 pub fn Writer.begin_array(&mut self) {
     self.separate()
-    self.text.push(&"[")
+    self.text.push("[")
     self.comma = false
 }
 pub fn Writer.end_array(&mut self) {
-    self.text.push(&"]")
+    self.text.push("]")
     self.comma = true
 }
 /// Object member name; the next written value belongs to it.
 pub fn Writer.key(&mut self, name &string) {
     self.separate()
     self.quoted(name)
-    self.text.push(&":")
+    self.text.push(":")
     self.comma = false
 }
 pub fn Writer.string(&mut self, value &string) {
@@ -59,11 +59,11 @@ pub fn Writer.i64(&mut self, value i64) {
 }
 pub fn Writer.bool(&mut self, value bool) {
     self.separate()
-    if value { self.text.push(&"true") } else { self.text.push(&"false") }
+    if value { self.text.push("true") } else { self.text.push("false") }
 }
 pub fn Writer.null(&mut self) {
     self.separate()
-    self.text.push(&"null")
+    self.text.push("null")
 }
 pub fn Writer.value<T: Encode>(&mut self, value &T) { value.encode(self) }
 pub fn Writer.list<T: Encode>(&mut self, items &[]T) {
@@ -92,7 +92,7 @@ pub fn Writer.finish(self) string { return self.text.finish() }
 /// Quote and escape: `"` and `\` are escaped, control characters use their
 /// short escapes or \u00XX. Other UTF-8 is written unchanged.
 fn Writer.quoted(&mut self, value &string) {
-    self.text.push(&"\"")
+    self.text.push("\"")
     data := value.bytes()
     var start: usize = 0
     var index: usize = 0
@@ -113,7 +113,7 @@ fn Writer.quoted(&mut self, value &string) {
         Some(run) => { self.text.push(&run) }
         None => { panic("internal json escape boundary") }
     }
-    self.text.push(&"\"")
+    self.text.push("\"")
 }
 fn escape(byte u8) string {
     if byte == 34 { return "\\\"" }
@@ -316,15 +316,15 @@ fn Parser.value(&mut self, depth usize) Result<Value, Error> {
         }
     }
     if byte == 116 {
-        if self.word(&"true") { return Ok(Value.Bool(true)) }
+        if self.word("true") { return Ok(Value.Bool(true)) }
         return self.fail()
     }
     if byte == 102 {
-        if self.word(&"false") { return Ok(Value.Bool(false)) }
+        if self.word("false") { return Ok(Value.Bool(false)) }
         return self.fail()
     }
     if byte == 110 {
-        if self.word(&"null") { return Ok(Value.Null) }
+        if self.word("null") { return Ok(Value.Null) }
         return self.fail()
     }
     return self.number()
@@ -494,7 +494,7 @@ fn Parser.text(&mut self) Result<string, Error> {
             }
             if code >= 56320 && code < 57344 { return Err(Error{offset: escape_at}) }
             if code >= 55296 && code < 56320 {
-                if !self.word(&"\\u") { return Err(Error{offset: escape_at}) }
+                if !self.word("\\u") { return Err(Error{offset: escape_at}) }
                 match self.unit() {
                     Some(low) => {
                         if low < 56320 || low >= 57344 { return Err(Error{offset: escape_at}) }

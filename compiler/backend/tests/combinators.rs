@@ -65,3 +65,25 @@ fn main() {
         ["dropped-error-c", "dropped-error-e", "kept-a", "kept-error-f", "kept-fallback-b", "kept-fallback-c", "mapped-g", "unused-b", "unused-f", "unused-fallback-a", "unused-ok-d"]
     );
 }
+
+/// Phase 26B: a string literal where `&string` is expected is borrowed like
+/// `&"..."`: one temporary per evaluation, destroyed exactly once.
+#[test]
+fn string_literal_borrows_destroy_each_temporary_once() {
+    let source = r#"
+fn size(text &string) usize { return text.len() }
+fn main() {
+    var total: usize = 0
+    var n = 0
+    for n < 3 {
+        total = total + size("loop")
+        n = n + 1
+    }
+    kept: &string := "kept"
+    print(total + size("once") + kept.len())
+}
+"#;
+    let output = run(source, "literal-borrow");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "20\n");
+    assert_eq!(drops(&output), ["kept", "loop", "loop", "loop", "once"]);
+}

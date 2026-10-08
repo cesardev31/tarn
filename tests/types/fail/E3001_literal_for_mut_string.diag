@@ -1,0 +1,8 @@
+error[E3001]: expected `&mut string`, found `string`
+ --> tests/types/fail/E3001_literal_for_mut_string.tarn:6:11
+  |
+6 |     clear("fixed")
+  |           ^^^^^^^ this is `string`
+  |
+  = help: borrow it with `&`
+
