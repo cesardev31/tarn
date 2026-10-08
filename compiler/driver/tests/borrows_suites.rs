@@ -20,8 +20,11 @@ fn borrows_pass_suite() {
             continue;
         }
         let res = tarn_driver::check(f).unwrap();
-        let prov = match (&res.ir, &res.borrows) {
-            (Some(ir), Some(b)) => b.provenance_lines(ir).into_iter().map(|l| l + "\n").collect::<String>(),
+        let prov = match (&res.ir, &res.borrows, &res.resolved) {
+            (Some(ir), Some(b), Some(r)) => {
+                let keep = relevant_functions(ir, r);
+                b.provenance_lines(ir).into_iter().filter(|l| keep.contains(l.split(" -> ").next().unwrap_or(""))).map(|l| l + "\n").collect::<String>()
+            }
             _ => String::new(),
         };
         golden(f, "prov", &prov, &mut failures);

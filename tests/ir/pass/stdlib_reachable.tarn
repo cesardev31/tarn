@@ -1,0 +1,10 @@
+// Snapshots show standard-library bodies only when reached: this program
+// uses Option.unwrap_or (shown) and no other combinator (not shown).
+fn first(items &[]i64) Option<i64> {
+    if items.len() == 0 { return None }
+    return Some(items[0])
+}
+fn main() {
+    values := [2]i64{7, 8}
+    print(first(&values).unwrap_or(0))
+}

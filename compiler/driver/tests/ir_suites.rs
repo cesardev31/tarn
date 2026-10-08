@@ -11,7 +11,7 @@ fn print_ir(path: &Path) -> (Option<String>, String, Vec<String>) {
     let map = &res.program.sources;
     let diags = res.diagnostics.iter().map(|d| d.render(map) + "\n").collect::<String>().replace(PREFIX, "");
     match (&res.resolved, &res.typed, &res.ir) {
-        (Some(r), Some(t), Some(ir)) => (Some(tarn_ir::print_program(ir, r, t)), diags, tarn_ir::verify(ir)),
+        (Some(r), Some(t), Some(ir)) => (Some(only_functions(&tarn_ir::print_program(ir, r, t), &relevant_functions(ir, r))), diags, tarn_ir::verify(ir)),
         _ => (None, diags, Vec::new()),
     }
 }

@@ -24,7 +24,8 @@ fn snapshots_and_all_boolean_paths_destroy_exactly_once() {
             let main = p.functions.iter().find(|f| f.decl.name == "main").unwrap();
             assert!(main.flags.is_empty(), "static/dead/definite partial drops need no flags");
         }
-        golden(&path, "drops", &post::print_program(p, res.resolved.as_ref().unwrap(), t), &mut failures);
+        let keep = relevant_functions(res.ir.as_ref().unwrap(), res.resolved.as_ref().unwrap());
+        golden(&path, "drops", &only_functions(&post::print_program(p, res.resolved.as_ref().unwrap(), t), &keep), &mut failures);
         let main = p.functions.iter().find(|f| f.decl.name == "main").unwrap();
         for bits in 0..(1 << main.decl.param_count) {
             let mut m = Machine { p, created: 0, labels: Vec::new(), destroyed: HashSet::new(), trace: Vec::new(), steps: 0, aborted: false };

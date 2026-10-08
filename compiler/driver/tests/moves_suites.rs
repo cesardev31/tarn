@@ -13,7 +13,7 @@ use std::path::Path;
 fn drops(path: &Path) -> String {
     let res = tarn_driver::check(path).unwrap();
     let (Some(r), Some(t), Some(ir), Some(m)) = (&res.resolved, &res.typed, &res.ir, &res.moves) else { return String::new() };
-    let text = tarn_ir::print_program_annotated(ir, r, t, &m.drop_notes());
+    let text = only_functions(&tarn_ir::print_program_annotated(ir, r, t, &m.drop_notes()), &relevant_functions(ir, r));
     let mut out = String::new();
     let mut func = String::new();
     let mut block = String::new();

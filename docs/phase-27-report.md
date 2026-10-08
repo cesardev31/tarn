@@ -52,3 +52,21 @@ fragmentation from literals in loops and handlers).
 
 `cargo test --workspace --no-fail-fast`: 267 passed, 0 failed, 1 ignored
 (existing benchmark), no build warnings.
+
+## Test maintenance: snapshot relevance filter
+
+Golden IR, post-drop, move and provenance snapshots printed every
+standard-library function with a body, so each `core` change rewrote dozens
+of unrelated goldens (12,800 lines in Phase 23). The driver test helpers now
+print a stdlib function only when an application function reaches it
+(`relevant_functions`/`only_functions` in `compiler/driver/tests/common`;
+references found through `FunctionId(n)` in the IR's Debug form). Compiler
+output is unchanged: `tarn ir` still prints everything.
+
+- 67 goldens lost 13,789 lines, all of them unreached stdlib bodies
+  (Option/Result combinators, `string.view/choose`, five runtime helpers);
+  no application function changed and no line was added.
+- `tests/ir/pass/stdlib_reachable` pins the other direction: a reached
+  combinator (`Option.unwrap_or`) is still printed, unreached ones are not.
+- The four snapshot suites now hold 2,530 lines in total.
+- Full workspace after the filter: 267 passed, 0 failed, 1 ignored.

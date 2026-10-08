@@ -1,11 +1,2 @@
-Option.map -> borrows from {self, f}
-Option.ok_or -> borrows from {self, error}
-Option.unwrap_or -> borrows from {self, fallback}
-Result.map -> borrows from {self, f}
-Result.map_err -> borrows from {self, f}
-Result.ok -> borrows from {self}
-Result.unwrap_or -> borrows from {self, fallback}
 make -> borrows from {r}
 make::closure#0 -> borrows from {r}
-string.choose -> borrows from {self, other}
-string.view -> borrows from {self}

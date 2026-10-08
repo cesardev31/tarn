@@ -61,3 +61,57 @@ pub fn run(entry: &Path) -> Outcome {
     };
     Outcome { resolution, types, diags, errors: res.has_errors(), codes: res.diagnostics.iter().map(|d| d.code).collect() }
 }
+
+/// Standard-library modules whose function bodies appear in snapshots only
+/// when the program reaches them (Phase 27 maintenance): an unused `core`
+/// combinator or `string` helper must not churn every golden file.
+const STDLIB_MODULES: &[&str] = &["core", "io", "time", "net", "runtime", "fs", "process", "ffi", "string", "path", "http", "json", "os"];
+
+/// Names of the functions worth printing: every function of an application
+/// module, and standard-library or generated functions reachable from one.
+/// References are found through `FunctionId(n)` in the IR's Debug form, which
+/// covers calls, function values, closures, environment destructors and tasks.
+#[allow(dead_code)]
+pub fn relevant_functions(ir: &tarn_ir::Program, r: &tarn_resolve::Resolved) -> std::collections::HashSet<String> {
+    let application = |f: &tarn_ir::Function| {
+        f.symbol
+            .and_then(|s| r.symbol(s).module)
+            .is_some_and(|m| !STDLIB_MODULES.contains(&r.modules[m.0 as usize].name.as_str()))
+    };
+    let mut kept = vec![false; ir.functions.len()];
+    let mut work: Vec<usize> = (0..ir.functions.len()).filter(|&i| application(&ir.functions[i])).collect();
+    while let Some(i) = work.pop() {
+        if std::mem::replace(&mut kept[i], true) {
+            continue;
+        }
+        let f = &ir.functions[i];
+        let text = format!("{:?}{:?}", f.kind, f.blocks);
+        for part in text.split("FunctionId(").skip(1) {
+            if let Some(id) = part.split(')').next().and_then(|n| n.parse::<usize>().ok())
+                && id < kept.len()
+                && !kept[id]
+            {
+                work.push(id);
+            }
+        }
+    }
+    ir.functions.iter().zip(kept).filter(|(_, k)| *k).map(|(f, _)| f.name.clone()).collect()
+}
+
+/// Keep only the printed functions in `keep`: a function starts at a line
+/// `fn <name>(` or `fn <name> [` and runs until the next one.
+#[allow(dead_code)]
+pub fn only_functions(text: &str, keep: &std::collections::HashSet<String>) -> String {
+    let mut out = String::new();
+    let mut keeping = true;
+    for line in text.split_inclusive('\n') {
+        if let Some(rest) = line.strip_prefix("fn ") {
+            let name = rest.split(['(', ' ']).next().unwrap_or("");
+            keeping = keep.contains(name);
+        }
+        if keeping {
+            out.push_str(line);
+        }
+    }
+    out
+}
