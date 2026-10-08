@@ -202,12 +202,15 @@ fn build_failed(has_child: bool) {
 pub fn run(args: &[String]) -> ExitCode {
     super::process::install_handlers();
     let entry = Path::new(&args[0]);
-    let json = args.iter().any(|a| a == "--json");
+    let json = crate::tool_args(args).iter().any(|a| a == "--json");
     let mut libraries = Vec::new();
+    let mut program = Vec::new();
     let mut rest = args[1..].iter();
     while let Some(arg) = rest.next() {
         if arg == "--link" {
             libraries.push(rest.next().unwrap().clone());
+        } else if arg == "--" {
+            program.extend(rest.by_ref().cloned());
         }
     }
     let scratch = match super::process::Scratch::new() {
@@ -254,7 +257,7 @@ pub fn run(args: &[String]) -> ExitCode {
                                 super::process::terminate(&mut previous, Duration::from_secs(2));
                             }
                             if !super::process::stopping() {
-                                match super::process::command(&output).spawn() {
+                                match super::process::command(&output).args(&program).spawn() {
                                     Ok(process) => {
                                         child = Some(process);
                                         eprintln!("[watch] program started");

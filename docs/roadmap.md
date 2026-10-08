@@ -42,6 +42,7 @@ tested and documented.
 
 | 22 | Verified pure-source package manager | implemented initial subset: [guide](packages.md), [ADR 0051](adr/0051-verified-source-packages.md); public registry infrastructure and signed provenance deferred |
 | 23 | Explicit error conversion: core combinators, variant constructors as functions, then measured syntax decision | **done**: [plan](phase-23-plan.md), [report](phase-23-report.md), [ADR 0052](adr/0052-explicit-error-conversion.md) |
+| 24 | `os` arguments/environment, `tarn run -- args`, `xlinux doctor` port (milestone 5) | **done**: [report](phase-24-report.md), [ADR 0053](adr/0053-process-arguments-and-environment.md) |
 
 ## Milestones
 

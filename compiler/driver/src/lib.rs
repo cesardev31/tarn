@@ -19,6 +19,8 @@ const STRING_SOURCE: &str = include_str!("../../../stdlib/string/string.tarn");
 
 const JSON_SOURCE: &str = include_str!("../../../stdlib/json/json.tarn");
 
+const OS_SOURCE: &str = include_str!("../../../stdlib/os/os.tarn");
+
 const CORE_SOURCE: &str = include_str!("../../../stdlib/core/core.tarn");
 
 /// Trusted standard-library modules (ADR 0041), embedded so the compiler is
@@ -39,7 +41,7 @@ fn trusted_source(name: &str) -> Option<&'static str> {
     TRUSTED_STDLIB.iter().find(|(n, _)| *n == name).map(|(_, source)| *source)
 }
 
-fn official_module(name: &str) -> bool { (name == "string" || name == "path" || name == "http" || name == "json") || trusted_source(name).is_some() }
+fn official_module(name: &str) -> bool { (name == "string" || name == "path" || name == "http" || name == "json" || name == "os") || trusted_source(name).is_some() }
 
 pub struct Program {
     pub import_targets: std::collections::HashMap<(String, String), String>,
@@ -149,7 +151,7 @@ fn official_stdlib_path(name: &str) -> PathBuf {
 
 fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, editor: bool, packages: Option<&PackageSet>) -> Result<(Program, Vec<Diagnostic>), String> {
     let official_entry = if editor {
-        entry.canonicalize().ok().and_then(|entry| TRUSTED_STDLIB.iter().map(|(name, _)| *name).chain(["string", "path", "http", "json"]).find(|name|
+        entry.canonicalize().ok().and_then(|entry| TRUSTED_STDLIB.iter().map(|(name, _)| *name).chain(["string", "path", "http", "json", "os"]).find(|name|
             official_stdlib_path(name).canonicalize().ok().as_ref() == Some(&entry)))
     } else { None };
     let packages = if official_entry.is_none() { packages } else { None };
@@ -195,6 +197,7 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
                 None if name == "path" && !path.is_file() => PATH_SOURCE.to_string(),
                 None if name == "http" && !path.is_file() => HTTP_SOURCE.to_string(),
                 None if name == "json" && !path.is_file() => JSON_SOURCE.to_string(),
+                None if name == "os" && !path.is_file() => OS_SOURCE.to_string(),
                 None => {
                     let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
                     disk_sources.push(path.clone());

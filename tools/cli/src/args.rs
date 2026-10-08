@@ -19,7 +19,7 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
         "build" => {
             "tarn build [file.tarn | directory] [-o path] [--link library]... [--json]".into()
         }
-        "run" => "tarn run [file.tarn | directory] [--link library]... [--json] [--watch]".into(),
+        "run" => "tarn run [file.tarn | directory] [--link library]... [--json] [--watch] [-- program arguments...]".into(),
         "test" => "tarn test [file.tarn | directory] [--filter text] [--timeout milliseconds] [--json] [--watch] [--link library]...".into(),
         _ => format!(
             "tarn {command}{}",
@@ -34,10 +34,15 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
     let mut entry = None;
     let mut options = Vec::new();
     let mut output_seen = false;
+    let mut program = Vec::new();
     let mut rest = args[1..].iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
-            "--" if command == "run" => return Err(fail("program arguments are not supported yet; the process-arguments API is not available".into())),
+            // Everything after `--` belongs to the program, verbatim (os.args()).
+            "--" if command == "run" => {
+                program.push(arg.clone());
+                program.extend(rest.by_ref().cloned());
+            }
             "--json" if matches!(command.as_str(), "lex" | "check" | "resolve" | "build" | "run" | "test") => options.push(arg.clone()),
             "--watch" if matches!(command.as_str(), "check" | "run" | "test") => options.push(arg.clone()),
             "--filter" | "--timeout" if command == "test" => {
@@ -79,6 +84,7 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
     }
     let mut normalized = vec![command.clone(), path.to_string_lossy().into_owned()];
     normalized.extend(options);
+    normalized.extend(program);
     Ok(normalized)
 }
 

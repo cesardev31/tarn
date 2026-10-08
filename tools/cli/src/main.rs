@@ -48,6 +48,11 @@ run propagates the program exit code.
 planned: clean, cache
 ";
 
+/// Tool arguments only: everything after `--` belongs to the program.
+pub(crate) fn tool_args(args: &[String]) -> &[String] {
+    args.iter().position(|a| a == "--").map_or(args, |end| &args[..end])
+}
+
 /// Verified package dependencies of `entry` (ADR 0051). Compilation reads
 /// the existing lock and cache only: it never resolves, fetches or rewrites.
 pub(crate) fn package_set(entry: &std::path::Path) -> Result<Option<tarn_driver::PackageSet>, String> {
@@ -80,7 +85,7 @@ fn main() -> ExitCode {
         Some("types") => cmd_types(&args[1..]),
         Some("ir") => cmd_ir(&args[1..]),
         Some("build") => cmd_native(&args[1..], false),
-        Some("run") if args.iter().any(|a| a == "--watch") => watch::run(&args[1..]),
+        Some("run") if tool_args(&args).iter().any(|a| a == "--watch") => watch::run(&args[1..]),
         Some("run") => cmd_native(&args[1..], true),
         Some("test") => {
             let options = testing::Options::parse(&args[1..]);
@@ -274,14 +279,16 @@ fn cmd_native(args: &[String], run: bool) -> ExitCode {
         return ExitCode::from(2);
     };
     // Arguments have already been validated by the shared parser.
-    let json = args.iter().any(|arg| arg == "--json");
+    let json = tool_args(args).iter().any(|arg| arg == "--json");
     let mut explicit = None;
     let mut libraries = Vec::new();
+    let mut program = Vec::new();
     let mut rest = args[1..].iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "-o" => explicit = rest.next().map(std::path::PathBuf::from),
             "--link" => libraries.push(rest.next().expect("validated library").clone()),
+            "--" => program.extend(rest.by_ref().cloned()),
             "--json" => {},
             _ => unreachable!("validated native option"),
         }
@@ -302,7 +309,7 @@ fn cmd_native(args: &[String], run: bool) -> ExitCode {
     }
     if let Err(e) = tarn_backend::build_linked(p, t, &output, &libraries) { native_error(json, "native", &e.to_string()); return ExitCode::from(1); }
     if !run { return ExitCode::SUCCESS; }
-    let status = std::process::Command::new(&output).status();
+    let status = std::process::Command::new(&output).args(&program).status();
     let _ = std::fs::remove_file(&output);
     match status {
         Ok(s) => { use std::os::unix::process::ExitStatusExt; ExitCode::from(s.code().unwrap_or_else(|| 128 + s.signal().unwrap_or(1)).clamp(0,255) as u8) }

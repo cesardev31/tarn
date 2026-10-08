@@ -26,7 +26,7 @@ pub const PRELUDE_ENUMS: &[&str] = &["Option", "Result"];
 /// Standard-library modules that `import` may name (spec phase 16 list).
 /// Their members are not checked yet.
 pub const STD_MODULES: &[&str] = &[
-    "core", "string", "runtime", "collections", "fs", "path", "process", "io", "time", "json", "http", "net", "tls", "testing", "ffi",
+    "core", "string", "runtime", "collections", "fs", "path", "process", "io", "time", "json", "http", "net", "tls", "testing", "ffi", "os",
     "logging", "crypto", "encoding", "compression", "cli", "os",
 ];
 

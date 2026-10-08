@@ -1,0 +1,70 @@
+// Process arguments and environment for applications (Phase 24A). Ordinary
+// Tarn over `fs` and `ffi`, with no compiler or runtime support: Linux exposes
+// the exact argv in /proc/self/cmdline and libc keeps the environment.
+// Text is UTF-8; invalid bytes are reported, never replaced.
+import "fs"
+import "io"
+import "ffi"
+
+extern "C" fn getenv(name *u8) *u8
+extern "C" fn strlen(text *u8) usize
+
+/// The program's arguments; index 0 is the program path, as the OS provides
+/// it. Fails with InvalidData if an argument is not UTF-8.
+pub fn args() Result<Vec<string>, io.Error> {
+    data := try fs.read(&"/proc/self/cmdline")
+    var list: Vec<string> = Vec.new()
+    var current: Vec<u8> = Vec.new()
+    for byte in data.as_slice() {
+        if byte == 0 {
+            match string_from_utf8(current.as_slice()) {
+                Some(text) => { list.push(text) }
+                None => { return Err(io.Error.new(io.ErrorKind.InvalidData)) }
+            }
+            current = Vec.new()
+        } else {
+            current.push(byte)
+        }
+    }
+    return Ok(list)
+}
+
+/// Raw bytes of an environment variable; None when unset or when the name
+/// contains NUL or `=`.
+pub fn env_bytes(name &string) Option<Vec<u8>> {
+    for byte in name.bytes() {
+        if byte == 61 { return None }
+    }
+    match ffi.CString.new(name) {
+        Some(key) => {
+            var bytes: Vec<u8> = Vec.new()
+            unsafe {
+                value := getenv(key.as_ptr())
+                if ffi.is_null(value) { return None }
+                bytes = ffi.copy_bytes(value, strlen(value))
+            }
+            return Some(bytes)
+        }
+        None => { return None }
+    }
+}
+
+/// An environment variable as text: None when unset, Err(InvalidData) when
+/// its value is not UTF-8. Use env_bytes for exact bytes.
+pub fn env(name &string) Result<Option<string>, io.Error> {
+    match env_bytes(name) {
+        Some(bytes) => match string_from_utf8(bytes.as_slice()) {
+            Some(text) => { return Ok(Some(text)) }
+            None => { return Err(io.Error.new(io.ErrorKind.InvalidData)) }
+        }
+        None => { return Ok(None) }
+    }
+}
+
+/// Text value, or `fallback` when unset. Invalid UTF-8 is still an error.
+pub fn env_or(name &string, fallback &string) Result<string, io.Error> {
+    match try env(name) {
+        Some(value) => { return Ok(value) }
+        None => { return Ok(fallback.clone()) }
+    }
+}

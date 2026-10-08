@@ -40,8 +40,7 @@ processes, Windows/macOS.
   means `<dir>/main.tarn`. This matches existing local imports, which are
   already relative to the entry directory.
 - `tarn run app.tarn -- arg1 arg2`: forward program arguments, which
-  requires an `os.args`-style API decision. If that API is not ready, reject
-  `--` with a clear message rather than ignoring arguments.
+  requires an `os.args`-style API decision. Implemented in Phase 24 (ADR 0053): `os.args()`.
 - Exit codes documented: 0 success, 1 compile/link/test failure, 2 usage
   error; `run` propagates the program's code (existing behavior).
 - `build --json` and `run --json`: compiler diagnostics as the existing JSON

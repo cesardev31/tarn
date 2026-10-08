@@ -80,3 +80,28 @@ fn link_grants_validate_and_explain_failures() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// Phase 24A: `tarn run -- args` reaches `os.args()` verbatim, including
+/// arguments that look like tool flags; `os.env` reports invalid UTF-8.
+#[test]
+fn program_arguments_and_environment() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-os-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cli = env!("CARGO_BIN_EXE_tarn");
+    let source = dir.join("main.tarn");
+    std::fs::write(&source, "import \"os\"\nimport \"io\"\nfn main() Result<void, io.Error> {\n    args := try os.args()\n    var i = 1\n    for i < args.len() {\n        print(args.get(i))\n        i = i + 1\n    }\n    print(try os.env_or(&\"TARN_OS_TEST\", &\"unset\"))\n    print(os.env_bytes(&\"A=B\").is_none())\n    return Ok(())\n}\n").unwrap();
+    let output = Command::new(cli).arg("run").arg(&source).args(["--", "plain", "with space", "ñ", "--watch", "--json", ""]).env_remove("TARN_OS_TEST").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "plain\nwith space\nñ\n--watch\n--json\n\nunset\ntrue\n");
+    let output = Command::new(cli).arg("run").arg(&source).env("TARN_OS_TEST", "value").output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "value\ntrue\n");
+    use std::os::unix::ffi::OsStrExt;
+    let invalid = std::ffi::OsStr::from_bytes(b"a\xff");
+    let output = Command::new(cli).arg("run").arg(&source).env("TARN_OS_TEST", invalid).output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid data"));
+    // `--` is only meaningful for run.
+    let output = Command::new(cli).arg("build").arg(&source).args(["--", "x"]).output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    std::fs::remove_dir_all(dir).unwrap();
+}
