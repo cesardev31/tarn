@@ -1,0 +1,30 @@
+fn small(n u64) u64 {
+    var total: u64 = 0
+    var i: u64 = 0
+    for i < 1000 {
+        total = total + (n + i) % 7
+        i = i + 1
+    }
+    return total
+}
+fn main() {
+    var total: u64 = 0
+    var batch: u64 = 0
+    for batch < 1250 {
+        var tasks: Vec<Task<u64>> = Vec.new()
+        var k: u64 = 0
+        for k < 8 {
+            n := batch * 8 + k
+            tasks.push(spawn move fn() u64 { return small(n) })
+            k = k + 1
+        }
+        for {
+            match tasks.pop() {
+                Some(task) => { total = total + task.join() }
+                None => { break }
+            }
+        }
+        batch = batch + 1
+    }
+    print(total)
+}

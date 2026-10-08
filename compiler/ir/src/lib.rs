@@ -18,10 +18,12 @@
 pub mod async_frame;
 mod lower;
 pub mod post_drop;
+mod ranges;
 mod pretty;
 mod verify;
 
 pub use lower::lower_program;
+pub use ranges::prove_arithmetic;
 pub use pretty::{print_function, print_program, print_program_annotated};
 pub use verify::verify;
 
@@ -246,6 +248,11 @@ pub enum BinOp {
     Add,
     Sub,
     Mul,
+    /// Integer `+`/`-`/`*` whose result provably fits its type (ranges.rs,
+    /// ADR 0057): the overflow check cannot fail and is not emitted.
+    AddProven,
+    SubProven,
+    MulProven,
     Div,
     Rem,
     BitAnd,

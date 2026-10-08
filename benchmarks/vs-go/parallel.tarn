@@ -1,0 +1,26 @@
+fn work(start u64, end u64) u64 {
+    var total: u64 = 0
+    var i = start
+    for i < end {
+        total = total + (i * 7 + 3) % 1000
+        i = i + 1
+    }
+    return total
+}
+fn main() {
+    var tasks: Vec<Task<u64>> = Vec.new()
+    var w: u64 = 0
+    for w < 8 {
+        start := w * 100000000
+        tasks.push(spawn move fn() u64 { return work(start, start + 100000000) })
+        w = w + 1
+    }
+    var total: u64 = 0
+    for {
+        match tasks.pop() {
+            Some(task) => { total = total + task.join() }
+            None => { break }
+        }
+    }
+    print(total)
+}

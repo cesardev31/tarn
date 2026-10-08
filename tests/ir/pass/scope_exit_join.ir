@@ -96,7 +96,7 @@ fn continue_exit() -> void {
     _2 = gt(copy _1, 0_i64)
     switch copy _2 [0 => bb1, _ => bb3]
   bb3:
-    _3 = sub(copy _1, 1_i64)
+    _3 = sub_proven(copy _1, 1_i64)
     _1 = copy _3
     live _4
     _4 = true

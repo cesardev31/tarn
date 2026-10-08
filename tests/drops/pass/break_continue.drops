@@ -50,7 +50,7 @@ fn main [post-drop] {
     _8 = copy _5
     _9 = call Buffer.new() -> bb6
   bb5:
-    _5 = add(copy _5, 1_i64)
+    _5 = add_proven(copy _5, 1_i64)
     goto bb3
   bb6:
     live _10

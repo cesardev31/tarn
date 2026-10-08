@@ -314,7 +314,8 @@ fn check_loaded_with_bindings((program, mut diagnostics): (Program, Vec<Diagnost
             let (t, d) = tarn_types::check(&inputs, &r);
             diagnostics.extend(d);
             if !errors(&diagnostics) {
-                let (p, d) = tarn_ir::lower_program(&inputs, &r, &t);
+                let (mut p, d) = tarn_ir::lower_program(&inputs, &r, &t);
+                tarn_ir::prove_arithmetic(&mut p);
                 diagnostics.extend(d);
                 let (m, d) = tarn_ownership::check_moves(&p, &r, &t);
                 diagnostics.extend(d);

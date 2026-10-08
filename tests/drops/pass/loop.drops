@@ -47,7 +47,7 @@ fn main [post-drop] {
     _6 = copy _3
     _7 = call Buffer.new() -> bb5
   bb4:
-    _3 = add(copy _3, 1_i64)
+    _3 = add_proven(copy _3, 1_i64)
     goto bb2
   bb5:
     if df0 { destroy _2 }

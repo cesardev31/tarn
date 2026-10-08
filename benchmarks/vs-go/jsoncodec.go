@@ -18,7 +18,7 @@ func main() {
 	total := 0
 	for round := 0; round < 200; round++ {
 		text, _ := json.Marshal(items)
-		var value []any
+		var value []Item
 		if json.Unmarshal(text, &value) == nil {
 			total += len(value) + len(text)
 		}

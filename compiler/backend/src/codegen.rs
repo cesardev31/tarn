@@ -1552,6 +1552,10 @@ impl Cx<'_, '_> {
                     self.b.ins().icmp(cc, x, y)
                 } else {
                     match op {
+                        // Proven by the IR's range analysis: no check (ADR 0057).
+                        BinOp::AddProven => self.b.ins().iadd(x, y),
+                        BinOp::SubProven => self.b.ins().isub(x, y),
+                        BinOp::MulProven => self.b.ins().imul(x, y),
                         BinOp::Add | BinOp::Sub | BinOp::Mul => {
                             let (v, overflow) = match (op, signed) {
                                 (BinOp::Add, true) => self.b.ins().sadd_overflow(x, y),

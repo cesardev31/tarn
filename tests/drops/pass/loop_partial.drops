@@ -54,7 +54,7 @@ fn main [post-drop] {
     _9 = copy _6
     switch copy _1 [0 => bb8, _ => bb7]
   bb6:
-    _6 = add(copy _6, 1_i64)
+    _6 = add_proven(copy _6, 1_i64)
     goto bb4
   bb7:
     _10 = call consume(move _5.0) -> bb10

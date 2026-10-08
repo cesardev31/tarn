@@ -46,6 +46,9 @@ tested and documented.
 | 25 | Port-driven stdlib: `os.exit`, `os.can_execute`, `os.disk_space`, `io.Error.from_os`, `Command.env` | **done**: [report](phase-25-report.md), ADR 0053 (Phase 25 extension) |
 | 26 | Less ceremony: redundant casts removed, literals as `&string`, `Self` + `core.Eq` for `==`; formatting designed, deferred | **done**: [report](phase-26-report.md), [ADR 0054](adr/0054-less-ceremony.md) |
 | 27 | Static string literals: no allocation per literal evaluation | **done**: [report](phase-27-report.md), [ADR 0055](adr/0055-static-string-literals.md) |
+| 28 | Native performance vs Go: optimizer on, trace switches cached, bulk primitives, constant-divisor checks | **done**: [report](phase-28-report.md), [ADR 0056](adr/0056-native-performance-baseline.md) |
+| 29 | Fair Go benchmarks, thread cache for `spawn`, proven integer arithmetic | **done**: [report](phase-29-report.md), [ADR 0057](adr/0057-proven-arithmetic.md) |
+| 30 | Multi-core async/HTTP (design) and performance tooling (`tarn test --bench`, `tarn profile`) | **proposed**: [ADR 0058](adr/0058-multicore-executor-design.md) |
 
 ## Milestones
 

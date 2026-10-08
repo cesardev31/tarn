@@ -1,0 +1,41 @@
+// Phase 29: more tasks blocked in join than CPUs. A fixed-size pool would
+// deadlock here; the thread cache adds threads when none is idle.
+fn leaf(n u64) u64 { return n * 2 }
+fn parent(base u64) u64 {
+    var children: Vec<Task<u64>> = Vec.new()
+    var k: u64 = 0
+    for k < 4 {
+        value := base * 10 + k
+        children.push(spawn move fn() u64 { return leaf(value) })
+        k = k + 1
+    }
+    var total: u64 = 0
+    for {
+        match children.pop() {
+            Some(child) => { total = total + child.join() }
+            None => { break }
+        }
+    }
+    return total
+}
+fn main() {
+    var round = 0
+    var total: u64 = 0
+    for round < 20 {
+        var parents: Vec<Task<u64>> = Vec.new()
+        var p: u64 = 0
+        for p < 32 {
+            base := p
+            parents.push(spawn move fn() u64 { return parent(base) })
+            p = p + 1
+        }
+        for {
+            match parents.pop() {
+                Some(task) => { total = total + task.join() }
+                None => { break }
+            }
+        }
+        round = round + 1
+    }
+    print(total)
+}

@@ -3,7 +3,7 @@ package main
 import "fmt"
 
 func main() {
-	var data []int64
+	data := make([]int64, 0, 20000000)
 	for i := int64(0); i < 20000000; i++ {
 		data = append(data, i%977)
 	}

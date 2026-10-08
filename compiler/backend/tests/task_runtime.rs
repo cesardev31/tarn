@@ -67,15 +67,15 @@ fn native_task_runtime_faults_abort_instead_of_detaching_or_hanging() {
 static int failure;
 void *__real_calloc(size_t, size_t);
 int __real_pthread_create(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
-int __real_pthread_join(pthread_t, void **);
+int __real_pthread_cond_init(pthread_cond_t *, const pthread_condattr_t *);
 void *__wrap_calloc(size_t n, size_t size) {
     return failure == 1 ? NULL : __real_calloc(n, size);
 }
 int __wrap_pthread_create(pthread_t *t, const pthread_attr_t *a, void *(*fn)(void *), void *p) {
     return failure == 2 ? EAGAIN : __real_pthread_create(t, a, fn, p);
 }
-int __wrap_pthread_join(pthread_t t, void **value) {
-    return failure == 3 ? EINVAL : __real_pthread_join(t, value);
+int __wrap_pthread_cond_init(pthread_cond_t *c, const pthread_condattr_t *a) {
+    return failure == 3 ? ENOMEM : __real_pthread_cond_init(c, a);
 }
 static void worker(void *out, void *code, void *env) { (void)out; (void)code; (void)env; }
 static void destroy(void *out) { (void)out; }
@@ -83,9 +83,10 @@ int main(int argc, char **argv) {
     if (argc != 2) return 1;
     failure = atoi(argv[1]);
     if (failure == 4) {
-        TarnTask mock = {0};
-        mock.thread = pthread_self();
-        tarn_rt_task_wait(&mock);
+        /* Waiting twice for one task (a double join) is a runtime fault. */
+        TarnTask *twice = tarn_rt_task_spawn(worker, destroy, 0, NULL, NULL);
+        tarn_rt_task_wait(twice);
+        tarn_rt_task_wait(twice);
     }
     TarnTask *task = tarn_rt_task_spawn(worker, destroy, 0, NULL, NULL);
     tarn_rt_task_drop(task);
@@ -95,7 +96,7 @@ int main(int argc, char **argv) {
     std::fs::write(&source, format!("{}\n{test}", include_str!("../../../runtime/native.c"))).unwrap();
     let exe = dir.join("faults");
     let compilation = Command::new("cc").args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-pthread",
-        "-Wl,--wrap=calloc", "-Wl,--wrap=pthread_create", "-Wl,--wrap=pthread_join"])
+        "-Wl,--wrap=calloc", "-Wl,--wrap=pthread_create", "-Wl,--wrap=pthread_cond_init"])
         .arg(&source).arg("-lm").arg("-o").arg(&exe).output().unwrap();
     assert!(compilation.status.success(), "{}", String::from_utf8_lossy(&compilation.stderr));
     for failure in 1..=4 {

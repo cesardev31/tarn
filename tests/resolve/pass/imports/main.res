@@ -579,7 +579,7 @@
 13:26 u8 -> primitive u8 (prelude)
 13:30 Option<string> -> enum Option (core:9:10)
 13:37 string -> primitive string (prelude)
-13:54 string_from_utf8 -> fn string_from_utf8 (core:287:27)
+13:54 string_from_utf8 -> fn string_from_utf8 (core:289:27)
 13:71 data -> param data (string:13:18)
 17:21 string -> primitive string (prelude)
 17:35 usize -> primitive usize (prelude)

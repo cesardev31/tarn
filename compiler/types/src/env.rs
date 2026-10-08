@@ -444,7 +444,7 @@ impl<'a> Env<'a> {
         // not manufacture a reference from a bodyless declaration.
         let task_join = f.abi.as_deref() == Some("intrinsic") && f.name.name == "join"
             && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.task);
-        let sync_constructor = f.abi.as_deref() == Some("intrinsic") && f.name.name == "new"
+        let sync_constructor = f.abi.as_deref() == Some("intrinsic") && (f.name.name == "new" || f.name.name == "with_capacity")
             && matches!(&self_ty, Some(Ty::Adt(id, _)) if Some(*id) == self.decls.mutex || Some(*id) == self.decls.vec || self.decls.atomics.contains_key(id));
         let result = if task_join || sync_constructor { ResultContract::Owned } else if !holds(&ret) {
             if self.decls.is_copy(&ret) { ResultContract::Copy } else { ResultContract::Owned }

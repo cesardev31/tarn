@@ -156,6 +156,8 @@ pub struct Vec<T> {
     elements [0]T
 }
 pub extern "intrinsic" fn Vec<T>.new() Vec<T>
+/// Empty vector with room for `capacity` elements, allocated once.
+pub extern "intrinsic" fn Vec<T>.with_capacity(capacity usize) Vec<T>
 pub extern "intrinsic" fn Vec<T>.len(&self) usize
 pub extern "intrinsic" fn Vec<T>.push(&mut self, value T)
 /// Moves the last element out, if any.

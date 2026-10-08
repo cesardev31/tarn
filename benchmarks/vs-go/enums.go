@@ -18,7 +18,7 @@ func area(s *Shape) int64 {
 }
 
 func main() {
-	var shapes []Shape
+	shapes := make([]Shape, 0, 3000000)
 	for i := int64(0); i < 3000000; i++ {
 		switch i % 3 {
 		case 0:

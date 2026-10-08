@@ -11,7 +11,7 @@ fn area(s &Shape) i64 {
     }
 }
 fn main() {
-    var shapes: Vec<Shape> = Vec.new()
+    var shapes: Vec<Shape> = Vec.with_capacity(3000000)
     var i: i64 = 0
     for i < 3000000 {
         k := i % 3

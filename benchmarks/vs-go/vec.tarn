@@ -1,5 +1,5 @@
 fn main() {
-    var data: Vec<i64> = Vec.new()
+    var data: Vec<i64> = Vec.with_capacity(20000000)
     var i: i64 = 0
     for i < 20000000 {
         data.push(i % 977)

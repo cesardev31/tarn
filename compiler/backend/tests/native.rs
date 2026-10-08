@@ -104,6 +104,11 @@ fn checked_arithmetic_and_panic_abort() {
         ("copy_range_reversed", "t := \"abc\"\n    print(t.copy_range(2, 1))"),
         ("copy_range_past_end", "t := \"abc\"\n    print(t.copy_range(1, 9))"),
         ("divide_zero_variable", "a: i64 := 10\n    b: i64 := 0\n    print(a % b)"),
+        // Range proofs (ADR 0057) must keep every check that can fail.
+        ("range_le_max", "var i: u8 = 250\n    for i <= 255 {\n        i = i + 1\n    }"),
+        ("range_unbounded_mul", "var x: u8 = 1\n    var n = 0\n    for n < 10 {\n        x = x * 2\n        n = n + 1\n    }"),
+        ("range_accumulator", "var total: u8 = 0\n    var i: u8 = 0\n    for i < 100 {\n        total = total + i\n        i = i + 1\n    }"),
+        ("range_signed_below", "var i: i8 = 0\n    for i > -128 {\n        i = i - 1\n    }\n    print(i - 1)"),
         ("panic", "x := \"live\"\n    panic(\"stop\")"),
     ] {
         let (exe, _) = compile(&format!("fn main() {{\n    {body}\n}}\n"), name);

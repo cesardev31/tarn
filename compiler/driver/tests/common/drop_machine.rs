@@ -106,8 +106,8 @@ impl Machine<'_> {
                 let Value::Number(a) = self.op(fr, a) else { panic!("non-number") };
                 let Value::Number(b) = self.op(fr, b) else { panic!("non-number") };
                 Value::Number(match op {
-                    BinOp::Add => a + b,
-                    BinOp::Sub => a - b,
+                    BinOp::Add | BinOp::AddProven => a + b,
+                    BinOp::Sub | BinOp::SubProven => a - b,
                     BinOp::Lt => (a < b).into(),
                     BinOp::Eq => (a == b).into(),
                     _ => panic!("binary {op:?}"),

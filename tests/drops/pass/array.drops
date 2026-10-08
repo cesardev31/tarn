@@ -61,7 +61,7 @@ fn main [post-drop] {
     df0[_10] = false
     switch copy _1 [0 => bb9, _ => bb8]
   bb7:
-    _10 = add(copy _10, 1_usize)
+    _10 = add_proven(copy _10, 1_usize)
     goto bb5
   bb8:
     destroy _12

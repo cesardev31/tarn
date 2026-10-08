@@ -120,3 +120,37 @@ fn os_exit_sets_the_status_and_flushes_output() {
     assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// ADR 0057: range proofs only remove checks that cannot fail, so every
+/// native program behaves identically with and without them (same stdout,
+/// stderr and status), including programs that abort.
+#[test]
+fn range_proofs_do_not_change_behavior() {
+    let cli = env!("CARGO_BIN_EXE_tarn");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/native/pass");
+    let mut compared = 0;
+    for entry in std::fs::read_dir(&root).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "tarn") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).unwrap();
+        // Networking and timing fixtures depend on the environment.
+        if ["net", "time", "http", "process", "fs", "spawn", "async", "task", "executor", "suspended", "readiness"].iter().any(|m| source.contains(&format!("import \"{m}\""))) {
+            continue;
+        }
+        let run = |proofs: bool| {
+            let mut command = Command::new(cli);
+            command.arg("run").arg(&path);
+            if !proofs {
+                command.env("TARN_NO_RANGE_PROOFS", "1");
+            }
+            command.output().unwrap()
+        };
+        let (with, without) = (run(true), run(false));
+        assert_eq!(with.status.code(), without.status.code(), "{}", path.display());
+        assert_eq!(with.stdout, without.stdout, "{}", path.display());
+        compared += 1;
+    }
+    assert!(compared > 20, "{compared}");
+}

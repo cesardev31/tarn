@@ -67,6 +67,29 @@ impl Cx<'_, '_> {
             }
             return Ok(Some(Val { value: Some(addr), ty: dest.clone() }));
         }
+        if operation == "with_capacity" && args.len() == 1 && args[0].ty == Ty::Int(IntTy::Usize) {
+            let (data, len, cap, elem) = self.vec_fields(dest)?;
+            let l = layout::layout(self.t, dest)?;
+            let slot = self.stack(l.size, l.align);
+            let addr = self.b.ins().stack_addr(types::I64, slot, 0);
+            let capacity = args[0].value.ok_or_else(|| Error::bug("vector capacity"))?;
+            let zero = self.b.ins().iconst(types::I64, 0);
+            // Zero capacity keeps the null storage of Vec.new.
+            let size = self.b.ins().iconst(types::I64, i64::from(layout::layout(self.t, &elem)?.size));
+            let (alloc, done) = (self.b.create_block(), self.b.create_block());
+            self.b.append_block_param(done, types::I64);
+            let empty = self.b.ins().icmp_imm(IntCC::Equal, capacity, 0);
+            self.b.ins().brif(empty, done, &[zero.into()], alloc, &[]);
+            self.b.switch_to_block(alloc);
+            let storage = self.runtime("tarn_rt_vec_grow", &[zero, capacity, size])[0];
+            self.b.ins().jump(done, &[storage.into()]);
+            self.b.switch_to_block(done);
+            let storage = self.b.block_params(done)[0];
+            self.b.ins().store(cl::MemFlags::new(), storage, addr, data);
+            self.b.ins().store(cl::MemFlags::new(), zero, addr, len);
+            self.b.ins().store(cl::MemFlags::new(), capacity, addr, cap);
+            return Ok(Some(Val { value: Some(addr), ty: dest.clone() }));
+        }
         let receiver = args.first().ok_or_else(|| Error::bug("vector receiver"))?;
         let Ty::Ref(mutable, vec) = &receiver.ty else { return Err(Error::bug("vector receiver type")) };
         let (data_at, len_at, cap_at, elem) = self.vec_fields(vec)?;
