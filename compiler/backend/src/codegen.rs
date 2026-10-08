@@ -543,6 +543,8 @@ pub fn emit_entry(p: &post::Program, t: &Typed, test: bool) -> Result<Vec<u8>> {
     // Vector element destruction functions, declared on demand by drop_vector
     // and defined after ordinary functions (see Cx::element_glue).
     let glue = RefCell::new(Vec::new());
+    // String literals, emitted once per program as static TarnString images.
+    let literals = RefCell::new(HashMap::new());
     for id in ordered {
         let f = &p.functions[id.0 as usize];
         if f.decl.kind == FnKind::Extern {
@@ -568,6 +570,7 @@ pub fn emit_entry(p: &post::Program, t: &Typed, test: bool) -> Result<Vec<u8>> {
                 task_adapters: &task_adapters,
                 tables: &tables,
                 glue: &glue,
+                literals: &literals,
                 locals: Vec::new(),
                 flags: Vec::new(),
                 blocks: Vec::new(),
@@ -667,6 +670,7 @@ pub fn emit_entry(p: &post::Program, t: &Typed, test: bool) -> Result<Vec<u8>> {
                 task_adapters: &task_adapters,
                 tables: &tables,
                 glue: &glue,
+                literals: &literals,
                 locals: Vec::new(),
                 flags: Vec::new(),
                 blocks: Vec::new(),
@@ -842,6 +846,8 @@ struct Cx<'a, 'b> {
     tables: &'b [(tarn_resolve::SymbolId, Ty, Vec<FunctionId>, DataId)],
     /// Declared vector element destruction functions, by element type.
     glue: &'b RefCell<Vec<(Ty, FuncId)>>,
+    /// Static string literal data by content (Phase 27).
+    literals: &'b RefCell<HashMap<String, DataId>>,
     locals: Vec<Slot>,
     flags: Vec<Flag>,
     blocks: Vec<cl::Block>,
@@ -1182,14 +1188,28 @@ impl Cx<'_, '_> {
                 }
                 Const::Unit => Val { value: None, ty: Ty::Void },
                 Const::Str(s) => {
-                    let id = self.module.declare_anonymous_data(false, false).map_err(|e| Error::bug(e.to_string()))?;
-                    let mut data = DataDescription::new();
-                    data.define(s.as_bytes().to_vec().into_boxed_slice());
-                    self.module.define_data(id, &data).map_err(|e| Error::bug(e.to_string()))?;
+                    // A literal is a read-only TarnString image (len, bytes) in
+                    // the `tarn_strings` section: no allocation per evaluation.
+                    // It is still an owned string; tarn_rt_drop_string skips
+                    // `free` for addresses in that section (Phase 27).
+                    let existing = self.literals.borrow().get(s).copied();
+                    let id = match existing {
+                        Some(id) => id,
+                        None => {
+                            let id = self.module.declare_anonymous_data(false, false).map_err(|e| Error::bug(e.to_string()))?;
+                            let mut image = (s.len() as u64).to_le_bytes().to_vec();
+                            image.extend_from_slice(s.as_bytes());
+                            let mut data = DataDescription::new();
+                            data.define(image.into_boxed_slice());
+                            data.set_align(8);
+                            data.set_segment_section("", "tarn_strings");
+                            self.module.define_data(id, &data).map_err(|e| Error::bug(e.to_string()))?;
+                            self.literals.borrow_mut().insert(s.clone(), id);
+                            id
+                        }
+                    };
                     let gv = self.module.declare_data_in_func(id, self.b.func);
-                    let ptr = self.b.ins().global_value(types::I64, gv);
-                    let len = self.b.ins().iconst(types::I64, s.len() as i64);
-                    Val { value: Some(self.runtime("tarn_rt_string", &[ptr, len])[0]), ty: Ty::Str }
+                    Val { value: Some(self.b.ins().global_value(types::I64, gv)), ty: Ty::Str }
                 }
                 Const::Fn(id, _) => {
                     let f = &self.p.functions[id.0 as usize].decl;

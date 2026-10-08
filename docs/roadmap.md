@@ -45,6 +45,7 @@ tested and documented.
 | 24 | `os` arguments/environment, `tarn run -- args`, `xlinux doctor` port (milestone 5) | **done**: [report](phase-24-report.md), [ADR 0053](adr/0053-process-arguments-and-environment.md) |
 | 25 | Port-driven stdlib: `os.exit`, `os.can_execute`, `os.disk_space`, `io.Error.from_os`, `Command.env` | **done**: [report](phase-25-report.md), ADR 0053 (Phase 25 extension) |
 | 26 | Less ceremony: redundant casts removed, literals as `&string`, `Self` + `core.Eq` for `==`; formatting designed, deferred | **done**: [report](phase-26-report.md), [ADR 0054](adr/0054-less-ceremony.md) |
+| 27 | Static string literals: no allocation per literal evaluation | **done**: [report](phase-27-report.md), [ADR 0055](adr/0055-static-string-literals.md) |
 
 ## Milestones
 

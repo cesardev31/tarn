@@ -87,3 +87,48 @@ fn main() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), "20\n");
     assert_eq!(drops(&output), ["kept", "loop", "loop", "loop", "once"]);
 }
+
+/// Phase 27: string literals are static: evaluating one allocates nothing,
+/// yet values made from them (moved, stored, cloned, concatenated) keep
+/// ordinary ownership and are each destroyed once.
+#[test]
+fn string_literals_do_not_allocate_per_evaluation() {
+    let dir = std::env::temp_dir().join(format!("tarn-literal-alloc-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let counter = dir.join("count.so");
+    std::fs::write(dir.join("count.c"), "#define _GNU_SOURCE\n#include <dlfcn.h>\n#include <stdio.h>\n#include <stdlib.h>\nstatic unsigned long calls;\nvoid *malloc(size_t n) { static void *(*real)(size_t); if (!real) real = dlsym(RTLD_NEXT, \"malloc\"); calls++; return real(n); }\n__attribute__((destructor)) static void report(void) { fprintf(stderr, \"mallocs:%lu\\n\", calls); }\n").unwrap();
+    assert!(Command::new("cc").args(["-shared", "-fPIC", "-o"]).arg(&counter).arg(dir.join("count.c")).arg("-ldl").status().unwrap().success());
+    let source = r#"
+fn size(text &string) usize { return text.len() }
+fn main() {
+    var total: usize = 0
+    var n = 0
+    for n < 100000 {
+        total = total + size("static")
+        n = n + 1
+    }
+    var kept: Vec<string> = Vec.new()
+    kept.push("moved")
+    duplicate := "cloned".clone()
+    joined := "a" + &duplicate
+    print(total + kept.len() + joined.len())
+}
+"#;
+    let entry = dir.join("main.tarn");
+    std::fs::write(&entry, source).unwrap();
+    let result = tarn_driver::check(&entry).unwrap();
+    assert!(!result.has_errors());
+    let exe = dir.join("program");
+    tarn_backend::build(result.drops.as_ref().unwrap(), result.typed.as_ref().unwrap(), &exe).unwrap();
+    let output = Command::new(&exe).env("LD_PRELOAD", &counter).env("TARN_TRACE_DROPS", "1").output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "600008\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mallocs: u64 = stderr.lines().find_map(|l| l.strip_prefix("mallocs:")).unwrap().parse().unwrap();
+    assert!(mallocs < 100, "literal evaluation allocated: {mallocs} mallocs");
+    let mut traced: Vec<&str> = stderr.lines().filter_map(|l| l.strip_prefix("drop:")).filter(|d| *d != "static").collect();
+    traced.sort();
+    assert_eq!(traced, ["a", "acloned", "cloned", "cloned", "moved"]);
+    assert_eq!(stderr.lines().filter(|l| *l == "drop:static").count(), 100000);
+    std::fs::remove_dir_all(dir).unwrap();
+}

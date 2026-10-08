@@ -68,5 +68,5 @@ Patterns counted in 2,898 lines of real Tarn (CRUDs, SQLite wrapper, the
 - `Eq` for fieldless enums is written by hand (a match per variant); repeated
   boilerplate across many enums would be evidence for an explicit,
   per-type opt-in helper.
-- Each string literal still allocates when evaluated. Static literals would
-  remove that cost; it is a representation change for a separate phase.
+- Each string literal used to allocate when evaluated; Phase 27 made
+  literals static (ADR 0055).

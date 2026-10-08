@@ -69,9 +69,21 @@ int32_t tarn_rt_string_compare(const TarnString *a, const TarnString *b) {
     if (order) return order < 0 ? -1 : 1;
     return (a->len > b->len) - (a->len < b->len);
 }
+/* Static string literals (Phase 27): read-only TarnString images that the
+ * linker gathers into the `tarn_strings` section and brackets with these
+ * symbols (weak: absent when a program has no literal). */
+extern const unsigned char __start_tarn_strings[] __attribute__((weak));
+extern const unsigned char __stop_tarn_strings[] __attribute__((weak));
+static int tarn_static_string(const TarnString *s) {
+    const unsigned char *p = (const unsigned char *)s;
+    return __start_tarn_strings && p >= __start_tarn_strings && p < __stop_tarn_strings;
+}
 void tarn_rt_drop_string(TarnString *s) {
-    /* Opt-in compiler test observation, never a user destructor hook. */
+    /* Opt-in compiler test observation, never a user destructor hook. A
+     * static literal is still destroyed as a value (and traced), only its
+     * storage is not released. */
     if (getenv("TARN_TRACE_DROPS")) { flockfile(stderr); fputs("drop:", stderr); fwrite(s->bytes, 1, s->len, stderr); fputc('\n', stderr); funlockfile(stderr); }
+    if (tarn_static_string(s)) return;
     free(s);
 }
 void tarn_rt_print_i64(int64_t v) { printf("%" PRId64 "\n", v); }
