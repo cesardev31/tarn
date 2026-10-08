@@ -921,3 +921,17 @@ fn main() Result<void, io.Error> {{
     child.wait().unwrap();
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
 }
+
+/// The infallible `http.json/text/empty/method_not_allowed` shorthands abort on
+/// an invalid fixed status: a programming error, not a peer or I/O error.
+#[test]
+fn fixed_response_shorthands_abort_on_invalid_status() {
+    for (name, call) in [("status_low", "http.empty(99)"), ("status_high", "http.json(600, \"{}\")"), ("allow_control", "http.method_not_allowed(&\"GET\\n\")")] {
+        let exe = compile(&format!("import \"http\"\nfn main() {{\n    r := {call}\n    print(r.status())\n}}\n"), name);
+        let out = Command::new(&exe).output().unwrap();
+        assert!(!out.status.success(), "{name} must abort");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("panic: http: invalid fixed response"), "{name}");
+        assert!(out.stdout.is_empty(), "{name}");
+        std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+    }
+}

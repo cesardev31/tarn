@@ -1140,11 +1140,46 @@ impl<'a, 'l> Builder<'a, 'l> {
         }
     }
 
+    /// A payload variant used as a function value (Phase 23B): a generated
+    /// capture-free function that builds the variant from its parameters,
+    /// referenced like a capture-free closure. Types are those of this use, so
+    /// it shares this function's generics.
+    fn variant_constructor(&mut self, parent: SymbolId, variant: SymbolId, params: &[Ty], result: &Ty, span: Span) -> Rvalue {
+        let id = FunctionId(self.lx.next_id.get());
+        self.lx.next_id.set(id.0 + 1);
+        let name = format!("{}.{}::constructor", self.lx.r.symbol(parent).name, self.lx.r.symbol(variant).name);
+        let mut vb = Builder::new(self.lx, self.m, id, name, span);
+        vb.f.generics = self.f.generics.clone();
+        vb.f.ret = result.clone();
+        vb.new_local(result.clone(), LocalKind::Return, None, None, false, span);
+        vb.scopes.push(Vec::new());
+        let mut fields = Vec::new();
+        for ty in params {
+            let l = vb.new_local(ty.clone(), LocalKind::Param, None, None, false, span);
+            fields.push(vb.read(Place::local(l), ty));
+        }
+        vb.f.param_count = params.len() as u32;
+        let targs = match result {
+            Ty::Adt(_, a) => a.clone(),
+            _ => Vec::new(),
+        };
+        let index = vb.variant_index(parent, variant);
+        vb.assign(Place::local(RETURN), Rvalue::Aggregate(Aggregate::Variant(parent, index, targs), fields), span);
+        vb.emit_return(span);
+        self.diags.append(&mut vb.diags);
+        let f = vb.finish();
+        self.lx.extra.borrow_mut().push(f);
+        Rvalue::Use(Operand::Const(Const::Fn(id, self.f.generics.iter().copied().map(Ty::Param).collect())))
+    }
+
     /// A name that is not a place: unit variant, function value, std member.
     fn static_value(&mut self, e: &Expr, ty: &Ty) -> Rvalue {
         match self.res(e.id) {
             Some(Res::Symbol(s)) => match &self.lx.r.symbol(*s).kind {
                 SymbolKind::Variant { parent } => {
+                    if let Ty::Fn(_, params, result) = ty {
+                        return self.variant_constructor(*parent, *s, params, result, e.span);
+                    }
                     let targs = match ty {
                         Ty::Adt(_, a) => a.clone(),
                         _ => Vec::new(),

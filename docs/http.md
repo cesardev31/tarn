@@ -94,6 +94,12 @@ Response helpers: `Response.json(status, body string)` (content-type
 application/json; http does not depend on [json](json.md)), `Response.empty(status)`
 and `Response.method_not_allowed(allow &string)` (405 with Allow).
 
+For statuses and headers fixed in source, the module functions `http.json`,
+`http.text`, `http.empty` and `http.method_not_allowed` return `Response`
+directly. An invalid fixed status (outside 200–599) or header is a programming
+error and aborts, like an out-of-range index. Use the `Response.*` forms,
+which return `Result`, when the status comes from data (ADR 0052).
+
 ## Ownership and connection state
 
 Normal move/drop transfers or discharges exactly-once socket close. close consumes

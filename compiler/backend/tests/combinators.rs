@@ -1,0 +1,67 @@
+//! Phase 23A: ownership of core Option/Result combinators.
+use std::process::Command;
+
+fn run(source: &str, tag: &str) -> std::process::Output {
+    let dir = std::env::temp_dir().join(format!("tarn-combinators-{}-{tag}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("main.tarn");
+    std::fs::write(&entry, source).unwrap();
+    let result = tarn_driver::check(&entry).unwrap();
+    assert!(
+        !result.has_errors(),
+        "{}",
+        result.diagnostics.iter().map(|d| d.render(&result.program.sources)).collect::<String>()
+    );
+    let exe = dir.join("program");
+    tarn_backend::build(result.drops.as_ref().unwrap(), result.typed.as_ref().unwrap(), &exe).unwrap();
+    let output = Command::new("timeout").arg("30s").arg(&exe).env("TARN_TRACE_DROPS", "1").output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    std::fs::remove_dir_all(dir).unwrap();
+    output
+}
+
+fn drops(output: &std::process::Output) -> Vec<String> {
+    let mut drops: Vec<String> = String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .filter_map(|l| l.strip_prefix("drop:"))
+        .map(str::to_string)
+        .collect();
+    drops.sort();
+    drops
+}
+
+/// Every owned value a combinator discards (unused fallback, dropped error,
+/// unused Ok payload) is destroyed exactly once, and kept values once later.
+/// `unused-b`/`unused-f` are parameters `some(false, ..)` itself discards.
+#[test]
+fn combinators_destroy_discarded_values_once() {
+    let source = r#"
+fn some(on bool, text string) Option<string> {
+    if on { return Some(text) }
+    return None
+}
+fn result(on bool, text string) Result<string, string> {
+    if on { return Ok(text) }
+    return Err(text)
+}
+fn main() {
+    a := some(true, "kept-a").unwrap_or("unused-fallback-a")
+    b := some(false, "unused-b").unwrap_or("kept-fallback-b")
+    c := result(false, "dropped-error-c").unwrap_or("kept-fallback-c")
+    d := result(true, "unused-ok-d").ok().is_some()
+    e := result(false, "dropped-error-e").ok().is_none()
+    f := some(false, "unused-f").ok_or("kept-error-f").is_err()
+    g := result(false, "mapped-g").map_err(fn(m string) i32 { return 7 }).is_err()
+    print(a)
+    print(b)
+    print(c)
+    print(d && e && f && g)
+}
+"#;
+    let output = run(source, "drops");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "kept-a\nkept-fallback-b\nkept-fallback-c\ntrue\n");
+    assert_eq!(
+        drops(&output),
+        ["dropped-error-c", "dropped-error-e", "kept-a", "kept-error-f", "kept-fallback-b", "kept-fallback-c", "mapped-g", "unused-b", "unused-f", "unused-fallback-a", "unused-ok-d"]
+    );
+}

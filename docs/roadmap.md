@@ -41,6 +41,7 @@ tested and documented.
 | 21 | VS Code extension (TextMate) | **done within documented editor subset**: [plan](phase-21-plan.md), [report](phase-21-report.md); highlighting, snippets, compiler LSP and shared formatting |
 
 | 22 | Verified pure-source package manager | implemented initial subset: [guide](packages.md), [ADR 0051](adr/0051-verified-source-packages.md); public registry infrastructure and signed provenance deferred |
+| 23 | Explicit error conversion: core combinators, variant constructors as functions, then measured syntax decision | **done**: [plan](phase-23-plan.md), [report](phase-23-report.md), [ADR 0052](adr/0052-explicit-error-conversion.md) |
 
 ## Milestones
 

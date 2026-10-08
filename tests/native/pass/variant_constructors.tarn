@@ -1,0 +1,34 @@
+// Phase 23B: payload variants as function values in shared, mutable and
+// consuming positions, including generic Some and map_err(AppError.Io).
+enum AppError {
+    Io(string)
+    Code(i32, string)
+    Missing
+}
+fn apply(f fn(i32) Option<i32>, x i32) Option<i32> { return f(x) }
+fn pair(f mut fn(i32, string) AppError) AppError {
+    var g = f
+    return g(7, "seven")
+}
+fn read(ok bool) Result<string, string> {
+    if ok { return Ok("data") }
+    return Err("disk")
+}
+fn load(ok bool) Result<string, AppError> {
+    text := try read(ok).map_err(AppError.Io)
+    return Ok(text)
+}
+fn wrap<T>(value T, f once fn(T) Option<T>) Option<T> {
+    return f(value)
+}
+fn main() {
+    match apply(Some, 3) { Some(n) => { print(n) }
+        None => {} }
+    match pair(AppError.Code) { AppError.Code(n, s) => { print(n)
+            print(s) }
+        _ => {} }
+    match load(false) { Err(AppError.Io(m)) => { print(m) }
+        _ => {} }
+    match wrap("generic", Some) { Some(s) => { print(s) }
+        None => {} }
+}

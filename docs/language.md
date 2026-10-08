@@ -289,8 +289,10 @@ fn read_config(path &string) Result<Config, Error> {
 
 `try expr` evaluates `expr`; on `Err(e)` (or `None`) it returns early from the
 enclosing function. In v0 the error type of `expr` must be exactly the
-function's error type: there is no automatic conversion (E3017); convert
-explicitly with `match`. Automatic conversion is an open question. `try` is a prefix keyword rather than a postfix `?`
+function's error type: there is no automatic conversion (E3017). Convert
+explicitly on the same line with the core combinators, passing a variant as
+the conversion function: `try store.save().map_err(http.Error.Io)`, or
+`try find(id).ok_or(Error.Missing)` for an Option (ADR 0052). `try` is a prefix keyword rather than a postfix `?`
 because it is visible at the start of the line, reads the same to people and
 models, and makes control flow greppable. See ADR 0005.
 
@@ -437,7 +439,11 @@ Moving a non-Copy capture from a body makes it consuming. Its second invocation
 is an E4001 use-after-move. Mode annotations are invariant, with one exception:
 a closure literal written where `mut fn` is expected and that does not consume
 its captures is typed `mut fn` (Phase 17, ADR 0048); a consuming closure is still
-rejected there. Spawn remains unsupported.
+rejected there. A non-`move` closure literal likewise adopts an expected
+`once fn` (ADR 0052). Spawn remains unsupported.
+
+Where a function value is expected, a payload enum variant is its
+constructor: `map_err(AppError.Io)`, `apply(Some, 3)` (ADR 0052).
 
 ```tarn
 fn make() fn() usize {

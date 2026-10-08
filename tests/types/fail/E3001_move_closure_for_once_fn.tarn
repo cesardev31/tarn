@@ -1,0 +1,9 @@
+// A non-consuming `move fn` owns a heap environment that consuming
+// invocation would not release, so it does not adopt `once fn` (Phase 23A).
+fn run(f once fn() string) string {
+    return f()
+}
+fn main() {
+    owned := "x"
+    print(run(move fn() string { return owned.clone() }))
+}

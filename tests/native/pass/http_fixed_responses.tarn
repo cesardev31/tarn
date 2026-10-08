@@ -1,0 +1,8 @@
+// ADR 0052 follow-up: infallible http responses for fixed statuses.
+import "http"
+fn main() {
+    print(http.json(201, "{}").status())
+    print(http.text(404, &"missing").status())
+    print(http.empty(204).status())
+    print(http.method_not_allowed(&"GET").status())
+}

@@ -1,0 +1,6 @@
+error[E3001]: expected `once fn() string`, found `fn() string`
+ --> tests/types/fail/E3001_move_closure_for_once_fn.tarn:8:15
+  |
+8 |     print(run(move fn() string { return owned.clone() }))
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is `fn() string`
+

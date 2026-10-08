@@ -3,3 +3,43 @@ main bb1: drop _1 -> dead (moved)
 main bb3: drop _2 -> dead (moved)
 main bb3: drop _4 -> dead (moved)
 main bb4: drop _2 -> static
+Option.unwrap_or bb4: drop _4 -> dead (moved)
+Option.unwrap_or bb4: drop _2 -> static
+Option.unwrap_or bb4: drop _1 -> partial, skip self.Some.0
+Option.unwrap_or bb5: drop _2 -> dead (moved)
+Option.unwrap_or bb5: drop _1 -> static
+Option.ok_or bb4: drop _4 -> dead (moved)
+Option.ok_or bb4: drop _2 -> static
+Option.ok_or bb4: drop _1 -> partial, skip self.Some.0
+Option.ok_or bb5: drop _2 -> dead (moved)
+Option.ok_or bb5: drop _1 -> static
+Option.map bb5: drop _5 -> dead (moved)
+Option.map bb5: drop _4 -> dead (moved)
+Option.map bb5: drop _2 -> dead (moved)
+Option.map bb5: drop _1 -> partial, skip self.Some.0
+Option.map bb6: drop _2 -> static
+Option.map bb6: drop _1 -> static
+Result.ok bb4: drop _3 -> dead (moved)
+Result.ok bb4: drop _1 -> partial, skip self.Ok.0
+Result.ok bb5: drop _5 -> static
+Result.ok bb5: drop _1 -> partial, skip self.Err.0
+Result.unwrap_or bb4: drop _4 -> dead (moved)
+Result.unwrap_or bb4: drop _2 -> static
+Result.unwrap_or bb4: drop _1 -> partial, skip self.Ok.0
+Result.unwrap_or bb5: drop _6 -> static
+Result.unwrap_or bb5: drop _2 -> dead (moved)
+Result.unwrap_or bb5: drop _1 -> partial, skip self.Err.0
+Result.map bb5: drop _5 -> dead (moved)
+Result.map bb5: drop _4 -> dead (moved)
+Result.map bb5: drop _2 -> dead (moved)
+Result.map bb5: drop _1 -> partial, skip self.Ok.0
+Result.map bb6: drop _7 -> dead (moved)
+Result.map bb6: drop _2 -> static
+Result.map bb6: drop _1 -> partial, skip self.Err.0
+Result.map_err bb4: drop _4 -> dead (moved)
+Result.map_err bb4: drop _2 -> static
+Result.map_err bb4: drop _1 -> partial, skip self.Ok.0
+Result.map_err bb6: drop _7 -> dead (moved)
+Result.map_err bb6: drop _6 -> dead (moved)
+Result.map_err bb6: drop _2 -> dead (moved)
+Result.map_err bb6: drop _1 -> partial, skip self.Err.0

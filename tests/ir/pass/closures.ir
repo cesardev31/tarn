@@ -47,6 +47,350 @@ fn main() -> void {
     return
 }
 
+fn Option.is_some(_1: &Option<T>) -> bool {
+    _0: bool    // return
+    _1: &Option<T>    // param self
+    _2: u32    // temp
+    _3: &T    // let value
+    _4: u32    // temp
+  bb0:
+    goto bb1
+  bb1:
+    _2 = discriminant((*_1))
+    switch copy _2 [0 => bb4, _ => bb2]
+  bb2:
+    _4 = discriminant((*_1))
+    switch copy _4 [1 => bb5, _ => bb3]
+  bb3:
+    unreachable
+  bb4:
+    live _3
+    _3 = &((*_1) as #0).0
+    _0 = true
+    dead _3
+    return
+  bb5:
+    _0 = false
+    return
+}
+
+fn Option.is_none(_1: &Option<T>) -> bool {
+    _0: bool    // return
+    _1: &Option<T>    // param self
+    _2: bool    // temp
+    _3: &Option<T>    // temp
+  bb0:
+    _3 = &(*_1)
+    _2 = call Option.is_some<T>(copy _3) -> bb1
+  bb1:
+    _0 = not(copy _2)
+    return
+}
+
+fn Option.unwrap_or(_1: Option<T>, _2: T) -> T {
+    _0: T    // return
+    _1: Option<T>    // param self
+    _2: T    // param fallback
+    _3: u32    // temp
+    _4: T    // let value
+    _5: u32    // temp
+  bb0:
+    goto bb1
+  bb1:
+    _3 = discriminant(_1)
+    switch copy _3 [0 => bb4, _ => bb2]
+  bb2:
+    _5 = discriminant(_1)
+    switch copy _5 [1 => bb5, _ => bb3]
+  bb3:
+    unreachable
+  bb4:
+    live _4
+    _4 = move (_1 as #0).0
+    _0 = move _4
+    drop _4
+    dead _4
+    drop _2
+    drop _1
+    return
+  bb5:
+    _0 = move _2
+    drop _2
+    drop _1
+    return
+}
+
+fn Option.ok_or(_1: Option<T>, _2: E) -> Result<T, E> {
+    _0: Result<T, E>    // return
+    _1: Option<T>    // param self
+    _2: E    // param error
+    _3: u32    // temp
+    _4: T    // let value
+    _5: u32    // temp
+  bb0:
+    goto bb1
+  bb1:
+    _3 = discriminant(_1)
+    switch copy _3 [0 => bb4, _ => bb2]
+  bb2:
+    _5 = discriminant(_1)
+    switch copy _5 [1 => bb5, _ => bb3]
+  bb3:
+    unreachable
+  bb4:
+    live _4
+    _4 = move (_1 as #0).0
+    _0 = Result<T, E>.Ok(move _4)
+    drop _4
+    dead _4
+    drop _2
+    drop _1
+    return
+  bb5:
+    _0 = Result<T, E>.Err(move _2)
+    drop _2
+    drop _1
+    return
+}
+
+fn Option.map(_1: Option<T>, _2: once fn(T) U) -> Option<U> {
+    _0: Option<U>    // return
+    _1: Option<T>    // param self
+    _2: once fn(T) U    // param f
+    _3: u32    // temp
+    _4: T    // let value
+    _5: U    // temp
+    _6: u32    // temp
+  bb0:
+    goto bb1
+  bb1:
+    _3 = discriminant(_1)
+    switch copy _3 [0 => bb4, _ => bb2]
+  bb2:
+    _6 = discriminant(_1)
+    switch copy _6 [1 => bb6, _ => bb3]
+  bb3:
+    unreachable
+  bb4:
+    live _4
+    _4 = move (_1 as #0).0
+    _5 = call (move _2)(move _4) -> bb5
+  bb5:
+    _0 = Option<U>.Some(move _5)
+    drop _5
+    drop _4
+    dead _4
+    drop _2
+    drop _1
+    return
+  bb6:
+    _0 = Option<U>.None()
+    drop _2
+    drop _1
+    return
+}
+
+fn Result.is_ok(_1: &Result<T, E>) -> bool {
+    _0: bool    // return
+    _1: &Result<T, E>    // param self
+    _2: u32    // temp
+    _3: &T    // let value
+    _4: u32    // temp
+    _5: &E    // let error
+  bb0:
+    goto bb1
+  bb1:
+    _2 = discriminant((*_1))
+    switch copy _2 [0 => bb4, _ => bb2]
+  bb2:
+    _4 = discriminant((*_1))
+    switch copy _4 [1 => bb5, _ => bb3]
+  bb3:
+    unreachable
+  bb4:
+    live _3
+    _3 = &((*_1) as #0).0
+    _0 = true
+    dead _3
+    return
+  bb5:
+    live _5
+    _5 = &((*_1) as #1).0
+    _0 = false
+    dead _5
+    return
+}
+
+fn Result.is_err(_1: &Result<T, E>) -> bool {
+    _0: bool    // return
+    _1: &Result<T, E>    // param self
+    _2: bool    // temp
+    _3: &Result<T, E>    // temp
+  bb0:
+    _3 = &(*_1)
+    _2 = call Result.is_ok<T, E>(copy _3) -> bb1
+  bb1:
+    _0 = not(copy _2)
+    return
+}
+
+fn Result.ok(_1: Result<T, E>) -> Option<T> {
+    _0: Option<T>    // return
+    _1: Result<T, E>    // param self
+    _2: u32    // temp
+    _3: T    // let value
+    _4: u32    // temp
+    _5: E    // let error
+  bb0:
+    goto bb1
+  bb1:
+    _2 = discriminant(_1)
+    switch copy _2 [0 => bb4, _ => bb2]
+  bb2:
+    _4 = discriminant(_1)
+    switch copy _4 [1 => bb5, _ => bb3]
+  bb3:
+    unreachable
+  bb4:
+    live _3
+    _3 = move (_1 as #0).0
+    _0 = Option<T>.Some(move _3)
+    drop _3
+    dead _3
+    drop _1
+    return
+  bb5:
+    live _5
+    _5 = move (_1 as #1).0
+    _0 = Option<T>.None()
+    drop _5
+    dead _5
+    drop _1
+    return
+}
+
+fn Result.unwrap_or(_1: Result<T, E>, _2: T) -> T {
+    _0: T    // return
+    _1: Result<T, E>    // param self
+    _2: T    // param fallback
+    _3: u32    // temp
+    _4: T    // let value
+    _5: u32    // temp
+    _6: E    // let error
+  bb0:
+    goto bb1
+  bb1:
+    _3 = discriminant(_1)
+    switch copy _3 [0 => bb4, _ => bb2]
+  bb2:
+    _5 = discriminant(_1)
+    switch copy _5 [1 => bb5, _ => bb3]
+  bb3:
+    unreachable
+  bb4:
+    live _4
+    _4 = move (_1 as #0).0
+    _0 = move _4
+    drop _4
+    dead _4
+    drop _2
+    drop _1
+    return
+  bb5:
+    live _6
+    _6 = move (_1 as #1).0
+    _0 = move _2
+    drop _6
+    dead _6
+    drop _2
+    drop _1
+    return
+}
+
+fn Result.map(_1: Result<T, E>, _2: once fn(T) U) -> Result<U, E> {
+    _0: Result<U, E>    // return
+    _1: Result<T, E>    // param self
+    _2: once fn(T) U    // param f
+    _3: u32    // temp
+    _4: T    // let value
+    _5: U    // temp
+    _6: u32    // temp
+    _7: E    // let error
+  bb0:
+    goto bb1
+  bb1:
+    _3 = discriminant(_1)
+    switch copy _3 [0 => bb4, _ => bb2]
+  bb2:
+    _6 = discriminant(_1)
+    switch copy _6 [1 => bb6, _ => bb3]
+  bb3:
+    unreachable
+  bb4:
+    live _4
+    _4 = move (_1 as #0).0
+    _5 = call (move _2)(move _4) -> bb5
+  bb5:
+    _0 = Result<U, E>.Ok(move _5)
+    drop _5
+    drop _4
+    dead _4
+    drop _2
+    drop _1
+    return
+  bb6:
+    live _7
+    _7 = move (_1 as #1).0
+    _0 = Result<U, E>.Err(move _7)
+    drop _7
+    dead _7
+    drop _2
+    drop _1
+    return
+}
+
+fn Result.map_err(_1: Result<T, E>, _2: once fn(E) F) -> Result<T, F> {
+    _0: Result<T, F>    // return
+    _1: Result<T, E>    // param self
+    _2: once fn(E) F    // param f
+    _3: u32    // temp
+    _4: T    // let value
+    _5: u32    // temp
+    _6: E    // let error
+    _7: F    // temp
+  bb0:
+    goto bb1
+  bb1:
+    _3 = discriminant(_1)
+    switch copy _3 [0 => bb4, _ => bb2]
+  bb2:
+    _5 = discriminant(_1)
+    switch copy _5 [1 => bb5, _ => bb3]
+  bb3:
+    unreachable
+  bb4:
+    live _4
+    _4 = move (_1 as #0).0
+    _0 = Result<T, F>.Ok(move _4)
+    drop _4
+    dead _4
+    drop _2
+    drop _1
+    return
+  bb5:
+    live _6
+    _6 = move (_1 as #1).0
+    _7 = call (move _2)(move _6) -> bb6
+  bb6:
+    _0 = Result<T, F>.Err(move _7)
+    drop _7
+    drop _6
+    dead _6
+    drop _2
+    drop _1
+    return
+}
+
 fn string.view(_1: &string) -> &string {
     _0: &string    // return
     _1: &string    // param self

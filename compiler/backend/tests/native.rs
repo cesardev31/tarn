@@ -160,32 +160,49 @@ fn backend_rejects_invalid_call_and_return_abi() {
 fn native_line_deletions_never_panic_or_emit_invalid_code() {
     let dir = std::env::temp_dir().join(format!("tarn-native-mutations-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let entry = dir.join("main.tarn");
-    let mut runs = 0;
+    let mut sources = Vec::new();
     for category in ["pass", "fail"] {
         for file in std::fs::read_dir(format!("../../tests/native/{category}")).unwrap() {
             let path = file.unwrap().path();
-            if path.extension().is_none_or(|x| x != "tarn") {
-                continue;
-            }
-            let src = std::fs::read_to_string(&path).unwrap();
-            let lines: Vec<_> = src.lines().collect();
-            for i in 0..lines.len() {
-                std::fs::write(&entry, [&lines[..i], &lines[i + 1..]].concat().join("\n")).unwrap();
-                let res = tarn_driver::check(&entry).unwrap();
-                if res.has_errors() {
-                    continue;
-                }
-                let emitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tarn_backend::emit_object(res.drops.as_ref().unwrap(), res.typed.as_ref().unwrap())));
-                assert!(emitted.is_ok(), "backend panic in {} without line {}", path.display(), i + 1);
-                if let Err(e) = emitted.unwrap() {
-                    assert!(e.to_string().starts_with("backend not implemented:"), "{} without line {}: {e}", path.display(), i + 1);
-                }
-                runs += 1;
+            if path.extension().is_some_and(|x| x == "tarn") {
+                let src = std::fs::read_to_string(&path).unwrap();
+                sources.push((path, src));
             }
         }
     }
-    assert!(runs > 40);
+    sources.sort();
+    let jobs: Vec<(usize, usize)> = sources.iter().enumerate().flat_map(|(f, (_, s))| (0..s.lines().count()).map(move |i| (f, i))).collect();
+    // Independent mutants run on all cores; each worker owns its entry
+    // directory because local imports resolve beside the entry file.
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let runs = std::sync::atomic::AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+    std::thread::scope(|scope| {
+        for worker in 0..workers {
+            let (dir, sources, jobs, next, runs) = (&dir, &sources, &jobs, &next, &runs);
+            scope.spawn(move || {
+                let own = dir.join(format!("w{worker}"));
+                std::fs::create_dir_all(&own).unwrap();
+                let entry = own.join("main.tarn");
+                while let Some(&(f, i)) = jobs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                    let (path, src) = &sources[f];
+                    let lines: Vec<_> = src.lines().collect();
+                    std::fs::write(&entry, [&lines[..i], &lines[i + 1..]].concat().join("\n")).unwrap();
+                    let res = tarn_driver::check(&entry).unwrap();
+                    if res.has_errors() {
+                        continue;
+                    }
+                    let emitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tarn_backend::emit_object(res.drops.as_ref().unwrap(), res.typed.as_ref().unwrap())));
+                    assert!(emitted.is_ok(), "backend panic in {} without line {}", path.display(), i + 1);
+                    if let Err(e) = emitted.unwrap() {
+                        assert!(e.to_string().starts_with("backend not implemented:"), "{} without line {}: {e}", path.display(), i + 1);
+                    }
+                    runs.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            });
+        }
+    });
+    assert!(runs.into_inner() > 40);
     std::fs::remove_dir_all(dir).unwrap();
 }
 

@@ -225,6 +225,25 @@ pub fn Response.method_not_allowed(allow &string) Result<Response, Error> {
     return (try Response.empty(405)).header(try Header.text(&"allow", allow))
 }
 
+// Infallible shorthands for handlers whose statuses and headers are fixed in
+// source (ADR 0052 follow-up). An invalid status or header here is a
+// programming error, like an out-of-range index, and aborts. Use the
+// `Response.*` constructors when the status comes from data.
+fn _fixed(response Result<Response, Error>) Response {
+    match response {
+        Ok(value) => { return value }
+        Err(error) => { panic("http: invalid fixed response (status must be 200-599, headers must be valid)") }
+    }
+}
+/// JSON text with content-type application/json.
+pub fn json(status u16, body string) Response { return _fixed(Response.json(status, body)) }
+/// UTF-8 text with content-type text/plain.
+pub fn text(status u16, body &string) Response { return _fixed(Response.text(status, body)) }
+/// No body.
+pub fn empty(status u16) Response { return _fixed(Response.empty(status)) }
+/// 405 with Allow; `allow` is normally a literal such as `&"GET, POST"`.
+pub fn method_not_allowed(allow &string) Response { return _fixed(Response.method_not_allowed(allow)) }
+
 // Strict authority validation never performs DNS. IPv6 compression is lexical.
 fn _ipv4(data &[]u8) bool {
     var start = usize(0)

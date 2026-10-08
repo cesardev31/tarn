@@ -5,6 +5,13 @@ Execution.spawn_async -> borrows from {self}
 Operation.new -> borrows from {owner, poller}
 Operation.poll -> borrows from {self}
 Operation.poll_with -> borrows from {self}
+Option.map -> borrows from {self, f}
+Option.ok_or -> borrows from {self, error}
+Option.unwrap_or -> borrows from {self, fallback}
+Result.map -> borrows from {self, f}
+Result.map_err -> borrows from {self, f}
+Result.ok -> borrows from {self}
+Result.unwrap_or -> borrows from {self, fallback}
 _leaf -> borrows from {progress}
 _runner::closure#0 -> borrows from {poller, waker}
 first -> borrows from {a, b}

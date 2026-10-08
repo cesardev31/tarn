@@ -1,0 +1,41 @@
+// Phase 23A: Option/Result combinators in core, with closure literals that
+// adopt `once fn`, including one borrowing a local (`prefix`).
+enum AppError {
+    Io(string)
+    Missing
+}
+fn read(ok bool) Result<string, string> {
+    if ok { return Ok("data") }
+    return Err("disk")
+}
+fn load(ok bool) Result<string, AppError> {
+    text := try read(ok).map_err(fn(e string) AppError { return AppError.Io(e) })
+    return Ok(text)
+}
+fn find(n i32) Option<i32> {
+    if n > 0 { return Some(n) }
+    return None
+}
+fn lookup(n i32) Result<i32, AppError> {
+    v := try find(n).ok_or(AppError.Missing)
+    return Ok(v * 2)
+}
+fn main() {
+    match load(true) { Ok(t) => { print(t) }
+        Err(e) => {} }
+    match load(false) { Ok(t) => {}
+        Err(e) => { match e { AppError.Io(m) => { print(m) }
+            AppError.Missing => {} } } }
+    print(lookup(4).unwrap_or(0))
+    print(lookup(-1).is_err())
+    print(find(3).map(fn(x i32) i32 { return x + 1 }).unwrap_or(0))
+    print(read(true).ok().is_some())
+    print(read(false).unwrap_or("fallback"))
+    print(find(0).is_none())
+    prefix := "wrapped: "
+    match read(false).map_err(fn(e string) string { return "" + &prefix + &e }) {
+        Ok(t) => {}
+        Err(m) => { print(m) }
+    }
+    print(prefix)
+}

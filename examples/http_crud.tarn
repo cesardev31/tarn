@@ -79,14 +79,6 @@ fn name_of(request &http.Request) Option<string> {
     }
 }
 
-// Persist, then answer with `response`; a failed write becomes a 500.
-fn saved(store &Store, response Result<http.Response, http.Error>) Result<http.Response, http.Error> {
-    match store.save() {
-        Ok(done) => { return response }
-        Err(error) => { return Err(http.Error.Io(error)) }
-    }
-}
-
 fn items(store &mut Store, request &http.Request) Result<http.Response, http.Error> {
     if request.method() == &"GET" { return http.Response.json(200, json.encode_list(store.items.as_slice())) }
     if request.method() != &"POST" { return http.Response.method_not_allowed(&"GET, POST") }
@@ -96,7 +88,8 @@ fn items(store &mut Store, request &http.Request) Result<http.Response, http.Err
             store.next = store.next + 1
             body := json.encode(&item)
             store.items.push(item)
-            return saved(store, http.Response.json(201, body))
+            try store.save().map_err(http.Error.Io)
+            return http.Response.json(201, body)
         }
         None => { return http.Response.text(400, &"expected {\"name\": \"...\"}\n") }
     }
@@ -112,14 +105,16 @@ fn by_id(store &mut Store, request &http.Request, id u64) Result<http.Response, 
     if method == &"GET" { return http.Response.json(200, json.encode(store.items.get(index))) }
     if method == &"DELETE" {
         removed := store.items.swap_remove(index)
-        return saved(store, http.Response.empty(204))
+        try store.save().map_err(http.Error.Io)
+        return http.Response.empty(204)
     }
     if method != &"PUT" { return http.Response.method_not_allowed(&"GET, PUT, DELETE") }
     match name_of(request) {
         Some(name) => { store.items.get_mut(index).name = name }
         None => { return http.Response.text(400, &"expected {\"name\": \"...\"}\n") }
     }
-    return saved(store, http.Response.json(200, json.encode(store.items.get(index))))
+    try store.save().map_err(http.Error.Io)
+    return http.Response.json(200, json.encode(store.items.get(index)))
 }
 
 fn route(store &mut Store, request &http.Request) Result<http.Response, http.Error> {

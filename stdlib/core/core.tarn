@@ -17,6 +17,70 @@ pub enum Result<T, E> {
     Err(E)
 }
 
+// Combinators (Phase 23A). Ordinary Tarn: conversions stay explicit at the
+// call site, e.g. `try store.save().map_err(http.Error.Io)`. Callbacks run at
+// most once (`once fn`); non-`move` closure literals adopt that mode.
+pub fn Option<T>.is_some(&self) bool {
+    match self {
+        Some(value) => { return true }
+        None => { return false }
+    }
+}
+pub fn Option<T>.is_none(&self) bool { return !self.is_some() }
+/// The value, or `fallback` (which is destroyed when unused).
+pub fn Option<T>.unwrap_or(self, fallback T) T {
+    match self {
+        Some(value) => { return value }
+        None => { return fallback }
+    }
+}
+/// `Ok(value)`, or `Err(error)` when empty.
+pub fn Option<T>.ok_or<E>(self, error E) Result<T, E> {
+    match self {
+        Some(value) => { return Ok(value) }
+        None => { return Err(error) }
+    }
+}
+pub fn Option<T>.map<U>(self, f once fn(T) U) Option<U> {
+    match self {
+        Some(value) => { return Some(f(value)) }
+        None => { return None }
+    }
+}
+pub fn Result<T, E>.is_ok(&self) bool {
+    match self {
+        Ok(value) => { return true }
+        Err(error) => { return false }
+    }
+}
+pub fn Result<T, E>.is_err(&self) bool { return !self.is_ok() }
+/// The success value; the error is discarded.
+pub fn Result<T, E>.ok(self) Option<T> {
+    match self {
+        Ok(value) => { return Some(value) }
+        Err(error) => { return None }
+    }
+}
+pub fn Result<T, E>.unwrap_or(self, fallback T) T {
+    match self {
+        Ok(value) => { return value }
+        Err(error) => { return fallback }
+    }
+}
+pub fn Result<T, E>.map<U>(self, f once fn(T) U) Result<U, E> {
+    match self {
+        Ok(value) => { return Ok(f(value)) }
+        Err(error) => { return Err(error) }
+    }
+}
+/// Convert the error with `f`; the usual way to change error types for `try`.
+pub fn Result<T, E>.map_err<F>(self, f once fn(E) F) Result<T, F> {
+    match self {
+        Ok(value) => { return Ok(value) }
+        Err(error) => { return Err(f(error)) }
+    }
+}
+
 /// Capability: values of this type are copied instead of moved.
 ///
 /// Not implemented with `impl`: primitives are `Copy`, and a struct or enum is

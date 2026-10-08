@@ -1070,10 +1070,11 @@ impl Cx<'_, '_> {
     }
     fn write(&mut self, p: &Place, v: Val) -> Result<()> {
         let ty = self.place_ty(p)?;
-        // A capture-free closure literal typed `mut fn` (ADR 0048) is emitted
+        // A capture-free closure literal typed `mut fn` or `once fn` (ADR 0048,
+        // Phase 23A) is emitted
         // as a shared function item; the code/null-environment pair is
         // identical, so only the invocation mode differs.
-        let adopted = matches!((&ty, &v.ty), (Ty::Fn(tarn_types::CallMode::Mutable, ps, r), Ty::Fn(tarn_types::CallMode::Shared, qs, s)) if ps == qs && r == s);
+        let adopted = matches!((&ty, &v.ty), (Ty::Fn(tarn_types::CallMode::Mutable | tarn_types::CallMode::Once, ps, r), Ty::Fn(tarn_types::CallMode::Shared, qs, s)) if ps == qs && r == s);
         if ty != v.ty && !adopted {
             return Err(Error::bug(format!("assignment ABI mismatch {ty:?} <- {:?}", v.ty)));
         }

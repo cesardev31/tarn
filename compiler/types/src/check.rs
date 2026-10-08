@@ -863,9 +863,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
             ExprKind::Unit => Ty::Void,
             ExprKind::Error => Ty::Error,
             ExprKind::Paren(inner) => self.expr(inner, expected),
-            ExprKind::Ident(_) => self.name_value(e),
+            ExprKind::Ident(_) => self.name_value(e, expected),
             ExprKind::Field { base, name } => match self.res(e.id) {
-                Some(_) => self.name_value(e),
+                Some(_) => self.name_value(e, expected),
                 None => self.field(e, base, name),
             },
             ExprKind::Call { callee, args } => self.call(e, callee, args, expected),
@@ -964,7 +964,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
     }
 
     /// An identifier or a static path used as a value.
-    fn name_value(&mut self, e: &Expr) -> Ty {
+    fn name_value(&mut self, e: &Expr, expected: Option<&Ty>) -> Ty {
         match self.res(e.id) {
             Some(Res::External { .. }) => {
                 self.err(
@@ -982,6 +982,13 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 SymbolKind::Variant { parent } => {
                     let (fields, generics) = self.variant_info(parent, s);
                     let map = self.instantiate(&generics);
+                    let adt = Ty::Adt(parent, generics.iter().map(|p| map[p].clone()).collect());
+                    // Where a function is expected, a payload variant is its
+                    // constructor: `map_err(http.Error.Io)` (Phase 23B).
+                    // It captures nothing, so it adopts the expected invocation mode.
+                    if !fields.is_empty() && let Some(Ty::Fn(mode, ..)) = expected.map(|t| self.infer.shallow(t)) {
+                        return Ty::Fn(mode, fields.iter().map(|f| subst(f, &map)).collect(), Box::new(adt));
+                    }
                     if !fields.is_empty() {
                         // Written as the user would: `Some(...)`, `Shape.Circle(...)`.
                         let vname = self.env.r.symbol(s).name.clone();
@@ -1475,8 +1482,12 @@ impl<'e, 'a> FnCx<'e, 'a> {
         // strictly stronger, and capture modes stay shared. Once is not adopted
         // because consuming invocation also changes environment release.
         let wants_mutable = matches!(exp, Some(Ty::Fn(CallMode::Mutable, ..)));
+        // A borrowed (non-`move`) environment lives on the stack or is null, so
+        // consuming invocation releases nothing and may also be adopted. An
+        // owned non-consuming environment would stay allocated: still rejected.
+        let wants_once = matches!(exp, Some(Ty::Fn(CallMode::Once, ..))) && !owned;
         Ty::Fn(
-            if consuming {
+            if consuming || wants_once {
                 CallMode::Once
             } else if mutable || wants_mutable {
                 CallMode::Mutable
