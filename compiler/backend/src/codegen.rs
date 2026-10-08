@@ -425,7 +425,7 @@ pub fn emit_entry(p: &post::Program, t: &Typed, test: bool) -> Result<Vec<u8>> {
         ("tarn_rt_process_wait", vec![types::I64, types::I32], vec![]),
         ("tarn_rt_process_kill", vec![types::I64, types::I32], vec![]),
         ("tarn_rt_process_read", vec![types::I64, types::I32, types::I64, types::I64], vec![]),
-        ("tarn_rt_process_spawn", vec![types::I64, types::I64, types::I64, types::I64, types::I64, types::I8, types::I8], vec![]),
+        ("tarn_rt_process_spawn", vec![types::I64, types::I64, types::I64, types::I64, types::I64, types::I64, types::I64, types::I8, types::I8], vec![]),
         ("tarn_rt_fs_drop", vec![types::I32], vec![]),
         ("tarn_rt_fs_dir_drop", vec![types::I64], vec![]),
         ("tarn_rt_fs_open", vec![types::I64, types::I64, types::I32], vec![]),

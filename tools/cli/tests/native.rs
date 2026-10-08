@@ -105,3 +105,18 @@ fn program_arguments_and_environment() {
     assert_eq!(output.status.code(), Some(2));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// Phase 25: `os.exit` ends the process with its code, flushes earlier
+/// output (also into a pipe) and runs nothing after it.
+#[test]
+fn os_exit_sets_the_status_and_flushes_output() {
+    let dir = std::env::temp_dir().join(format!("tarn-cli-exit-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("main.tarn");
+    std::fs::write(&source, "import \"os\"\nfn main() {\n    print(\"before\")\n    os.exit(7)\n    print(\"after\")\n}\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_tarn")).arg("run").arg(&source).output().unwrap();
+    assert_eq!(output.status.code(), Some(7));
+    assert_eq!(output.stdout, b"before\n");
+    assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+    std::fs::remove_dir_all(dir).unwrap();
+}

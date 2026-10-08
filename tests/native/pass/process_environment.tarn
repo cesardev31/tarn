@@ -1,0 +1,21 @@
+// Phase 25: per-child environment overrides; the last value for a key wins,
+// invalid keys and NUL values fail to spawn, the parent is unchanged.
+import "process"
+import "os"
+fn show(command process.Command) {
+    match command.output() {
+        Ok(out) => match out.stdout_text() {
+            Ok(text) => { print(text) }
+            Err(e) => { print("not text") }
+        }
+        Err(e) => { print("spawn failed") }
+    }
+}
+fn main() {
+    show(process.Command.new("sh").arg("-c").arg("printf %s-%s $TARN_A $TARN_B").env("TARN_A", "one").env("TARN_B", "x").env("TARN_B", "two"))
+    show(process.Command.new("sh").arg("-c").arg("printf [%s] \"$TARN_A\""))
+    show(process.Command.new("sh").arg("-c").arg("true").env("A=B", "v"))
+    show(process.Command.new("sh").arg("-c").arg("true").env("", "v"))
+    show(process.Command.new("sh").arg("-c").arg("true").env("K", "a\u{0}b"))
+    print(os.env_or(&"TARN_A", &"parent unchanged").unwrap_or("error"))
+}

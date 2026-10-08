@@ -5,6 +5,8 @@ import "string"
 pub struct Command {
     program string
     arguments Vec<string>
+    /// `KEY=value` overrides on top of the inherited environment.
+    environment Vec<string>
     directory string
     use_directory bool
 }
@@ -19,7 +21,7 @@ pub copy enum ExitStatus { Exited(i32)
 pub struct Output { pub status ExitStatus
     pub stdout Vec<u8>
     pub stderr Vec<u8> }
-extern "intrinsic" fn _spawn(program &string, arguments &[]string, directory &string, use_directory bool, capture bool) io._Raw
+extern "intrinsic" fn _spawn(program &string, arguments &[]string, environment &[]string, directory &string, use_directory bool, capture bool) io._Raw
 extern "intrinsic" fn _wait(child Process) io._Raw
 extern "intrinsic" fn _close(pipe _Pipe) io._Raw
 extern "intrinsic" fn _kill(pid i32) io._Raw
@@ -27,7 +29,21 @@ extern "intrinsic" fn _read(fd i32, data &mut []u8) io._Raw
 
 pub fn Command.new(program string) Command {
     arguments: Vec<string> := Vec.new()
-    return Command{program: program, arguments: arguments, directory: "", use_directory: false}
+    environment: Vec<string> := Vec.new()
+    return Command{program: program, arguments: arguments, environment: environment, directory: "", use_directory: false}
+}
+/// Set `key` for the child, replacing an inherited value; the parent's own
+/// environment is unchanged. A key that is empty or contains `=` or NUL, or
+/// a value containing NUL, makes spawning fail with InvalidInput.
+pub fn Command.env(self, key string, value string) Command {
+    var command = self
+    var valid = !key.is_empty()
+    for byte in key.bytes() {
+        if byte == 61 { valid = false }
+    }
+    // An invalid key is stored as "=..." so the native bridge rejects it.
+    if valid { command.environment.push(key + &"=" + &value) } else { command.environment.push("=" + &key) }
+    return command
 }
 pub fn Command.arg(self, value string) Command {
     var command = self
@@ -50,7 +66,7 @@ fn _descriptor(raw io._Raw, offset usize) i32 {
         i32(raw.address[offset + 2]) * 65536 + i32(raw.address[offset + 3]) * 16777216
 }
 fn _launch(command &Command, capture bool) Result<_Launch, io.Error> {
-    raw := try io._check(_spawn(&command.program, command.arguments.as_slice(), &command.directory, command.use_directory, capture))
+    raw := try io._check(_spawn(&command.program, command.arguments.as_slice(), command.environment.as_slice(), &command.directory, command.use_directory, capture))
     child := Process{pid: i32(raw.value)}
     if capture {
         stdout := _Pipe{fd: _descriptor(raw, usize(0))}

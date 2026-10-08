@@ -1,0 +1,21 @@
+// Phase 25: executable permission, filesystem space and errno mapping.
+import "os"
+import "io"
+fn main() {
+    print(os.can_execute(&"/bin/sh"))
+    print(os.can_execute(&"/etc/hostname"))
+    print(os.can_execute(&"/no/such/file"))
+    print(os.can_execute(&"a\u{0}b"))
+    match os.disk_space(&"/") {
+        Ok(s) => { print(s.total > 0 && s.available <= s.free && s.free <= s.total) }
+        Err(e) => { print("unexpected error") }
+    }
+    match os.disk_space(&"/no/such/dir") {
+        Ok(s) => { print("unexpected success") }
+        Err(e) => {
+            match e.kind { io.ErrorKind.NotFound => { print("not found") }
+                _ => { print("other") } }
+            print(e.native_code())
+        }
+    }
+}

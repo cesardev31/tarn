@@ -44,6 +44,7 @@ pub(crate) fn verify(t: &Typed) -> Vec<String> {
             vec![
                 text.clone(),
                 Ty::Ref(false, Box::new(Ty::Slice(Box::new(Ty::Str)))),
+                Ty::Ref(false, Box::new(Ty::Slice(Box::new(Ty::Str)))),
                 text,
                 Ty::Bool,
                 Ty::Bool,

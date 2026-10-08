@@ -864,12 +864,46 @@ static int process_pipe(int fds[2]) {
     if (second < 0) { int code = errno; process_close(first); return code; }
     fds[0] = first; fds[1] = second; return 0;
 }
+/* Inherited environment with `KEY=value` overrides; a later override of the
+ * same key wins. NULL with out->code set on invalid entries. */
+static char **process_environment(TarnNetRaw *out, const TarnString *const *entries, uint64_t count) {
+    uint64_t inherited = 0; while (environ[inherited]) ++inherited;
+    if (count > SIZE_MAX / sizeof(char *) - inherited - 1) { process_error(out, E2BIG); return NULL; }
+    char **envp = calloc(inherited + count + 1, sizeof(char *)); if (!envp) abort();
+    uint64_t used = 0;
+    for (uint64_t i = 0; i < count; ++i) {
+        const char *eq = memchr(entries[i]->bytes, '=', entries[i]->len);
+        if (!eq || eq == (const char *)entries[i]->bytes) { process_error(out, EINVAL); goto fail; }
+        size_t key = (size_t)(eq - (const char *)entries[i]->bytes);
+        int later = 0;
+        for (uint64_t j = i + 1; j < count && !later; ++j)
+            later = entries[j]->len > key && !memcmp(entries[j]->bytes, entries[i]->bytes, key + 1);
+        if (later) continue;
+        envp[used] = process_text(out, entries[i]); if (!envp[used]) goto fail; ++used;
+    }
+    for (uint64_t i = 0; i < inherited; ++i) {
+        int replaced = 0;
+        for (uint64_t j = 0; j < used && !replaced; ++j) {
+            size_t key = (size_t)(strchr(envp[j], '=') - envp[j]);
+            replaced = !strncmp(environ[i], envp[j], key + 1);
+        }
+        if (replaced) continue;
+        envp[used] = strdup(environ[i]); if (!envp[used]) abort(); ++used;
+    }
+    return envp;
+fail:
+    for (uint64_t i = 0; i < used; ++i) free(envp[i]);
+    free(envp); return NULL;
+}
 void tarn_rt_process_spawn(TarnNetRaw *out, const TarnString *program,
-        const TarnString *const *arguments, uint64_t count, const TarnString *directory,
+        const TarnString *const *arguments, uint64_t count,
+        const TarnString *const *environment, uint64_t environment_count, const TarnString *directory,
         uint8_t use_directory, uint8_t capture) {
     net_init(out);
     if (!program->len || (use_directory && !directory->len)) { process_error(out, EINVAL); return; }
     if (count > SIZE_MAX / sizeof(char *) - 2) { process_error(out, E2BIG); return; }
+    char **envp = environ;
+    if (environment_count) { envp = process_environment(out, environment, environment_count); if (!envp) return; }
     char **argv = calloc(count + 2, sizeof(char *)); if (!argv) abort();
     char *cwd = NULL; int code = 0, pipes[4] = {-1, -1, -1, -1}, input = -1;
     posix_spawn_file_actions_t actions; posix_spawnattr_t attributes;
@@ -898,7 +932,7 @@ void tarn_rt_process_spawn(TarnNetRaw *out, const TarnString *program,
     /* Child never inherits other application/runtime descriptors. GNU libc
      * closefrom/chdir spawn actions avoid unsafe post-fork Tarn callbacks. */
     code = posix_spawn_file_actions_addclosefrom_np(&actions, 3); if (code) goto done;
-    code = posix_spawnp(&pid, argv[0], &actions, &attributes, argv, environ);
+    code = posix_spawnp(&pid, argv[0], &actions, &attributes, argv, envp);
     if (!code) {
         net_init(out); out->value = pid; process_trace("spawn", pid);
         if (capture) {
@@ -914,6 +948,7 @@ done:
     if (input >= 0) process_close(input);
     for (uint64_t i = 0; i < count + 1; ++i) free(argv[i]);
     free(argv); free(cwd);
+    if (envp != environ) { for (char **e = envp; *e; ++e) free(*e); free(envp); }
     if (code) process_error(out, code);
 }
 void tarn_rt_process_wait(TarnNetRaw *out, int32_t pid) {

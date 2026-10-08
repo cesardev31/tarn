@@ -122,5 +122,11 @@ fn _leaf<R>(waker &Waker, progress Progress<R>) Progress<R> {
 }
 fn _fail(kind ErrorKind) Error { return Error{kind: kind, code: 0, domain: 0} }
 
+/// The error for a Linux errno returned by a C function (Phase 25), with the
+/// same kinds as filesystem operations and the native code preserved.
+pub fn Error.from_os(code i32) Error {
+    return _error(_Raw{domain: 3, code: code, value: 0, address: [24]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}})
+}
+
 /// Construct an application I/O error without an original native code.
 pub fn Error.new(kind ErrorKind) Error { return Error{kind: kind, code: 0, domain: 0} }
