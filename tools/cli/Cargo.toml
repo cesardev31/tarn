@@ -21,3 +21,9 @@ tarn_ir = { path = "../../compiler/ir" }
 tarn_backend = { path = "../../compiler/backend" }
 
 tarn_fmt = { path = "../fmt" }
+
+[dependencies.tarn_packages]
+path = "../packages"
+
+[dev-dependencies]
+serde_json = "1"

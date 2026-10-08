@@ -304,7 +304,13 @@ impl Resolved {
 /// Resolve a whole program. Diagnostics are returned in emission order; the
 /// driver sorts them by position.
 pub fn resolve(modules: &[ModuleInput]) -> (Resolved, Vec<Diagnostic>) {
+    resolve_with_imports(modules, &HashMap::new())
+}
+
+/// Driver-selected import identities; source paths and aliases remain neutral AST data.
+pub fn resolve_with_imports(modules: &[ModuleInput], targets: &HashMap<(String, String), String>) -> (Resolved, Vec<Diagnostic>) {
     let mut cx = collect::Cx::new(modules);
+    cx.import_targets = targets.clone();
     cx.collect();
     cx.walk_all();
     cx.finish()

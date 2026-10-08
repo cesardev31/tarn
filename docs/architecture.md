@@ -28,6 +28,7 @@ Source → Lexer → Parser → AST → Resolve → Types → Typed IR
 | `stdlib/core` | — | `core.tarn`: prelude declarations, embedded in the compiler (ADR 0020) | started |
 | `runtime` | — | embedded C runtime: primitive print, strings, panic/abort; libc startup | initial (ADR 0027) |
 | `tools/cli` | `tarn` | the single CLI | started |
+| `tools/packages` | `tarn_packages` | deterministic pure-source resolution, immutable local registry, HTTPS fetch, lock/cache verification; hands the driver a plain verified `PackageSet` (compiler crates never depend on it) | initial subset (ADR 0051) |
 | `tools/fmt` | `tarn_fmt` | canonical whitespace over real lexer/parser with token/AST preservation checks (ADR 0050) | done (basic) |
 | `tools/lsp` | `tarn-lsp` | stdio LSP: diagnostics, hover, definition, shared formatting, unsaved buffers | done within documented editor subset |
 
@@ -47,16 +48,26 @@ Each external crate needs a line in this table with a justification.
 
 | Crate | Used by | Why |
 |-------|---------|-----|
-| `serde_json` | tools/lsp | JSON-RPC messages and robust JSON encoding/decoding |
-| `url` | tools/lsp | Correct file URI encoding/decoding, including escaped paths |
+| `serde_json` | tools/lsp, tools/packages | JSON-RPC messages and robust JSON encoding/decoding |
+| `url` | tools/lsp, tools/packages | Correct file URI encoding/decoding, including escaped paths |
 | `cranelift-codegen/frontend/module/object/native` | backend | ISA/codegen, SSA builder, symbols, ELF object emission; pinned 0.125.3, dependency audit in ADR 0027 |
 
-## Tarn package security (planned)
+| `toml_edit` 0.25.15 | tools/packages | Standards-compliant editable manifests; parse/display only, preserves comments |
+| `semver` 1.0.28 | tools/packages | SemVer constraints and prerelease rules rather than a custom incompatible resolver |
+| `sha2` 0.10.9 | tools/packages | SHA-256 content and inventory verification without handwritten cryptography |
 
-Future package operations use the single `tarn` CLI, version-free imports,
+The package dependencies add 14 external transitive/direct crates in Cargo.lock;
+`cargo tree -p tarn_packages --offline` records the focused graph. Reuse existing
+JSON/URL crates. HTTPS uses trusted system curl rather than adding an HTTP/TLS
+framework. See ADR 0051.
+
+## Tarn package security
+
+Implemented pure-source package operations use the single `tarn` CLI, version-free imports,
 `tarn.toml` intent and a verified exact `tarn.lock` graph. Packages are data until
-explicitly granted constrained execution authority. No package manager, registry,
-resolver or sandbox is implemented. Requirements and open choices are in
+explicitly granted constrained execution authority. The initial manager includes deterministic resolution, local immutable publication
+and HTTPS consumption. Public registry infrastructure, signed provenance and
+build sandboxes are not implemented. See [the package guide](packages.md). Requirements and open choices are in
 [dependency security](dependency-security.md).
 
 The Cargo crates above and the embedded-runtime system `cc` invocation below are
@@ -74,7 +85,7 @@ ABI, canonical layout, output paths and limits: [ADR 0027](adr/0027-native-backe
 ## Caching (planned)
 
 Use a content-addressed global store, conceptually `~/.tarn/registry/`,
-`~/.tarn/sources/` and `~/.tarn/artifacts/`; exact disk layout remains open.
+`~/.tarn/sources/` and `~/.tarn/artifacts/`; `sources/<sha256>/` is implemented; registry metadata/artifact caching remains open.
 Deduplicate verified sources by content. Artifact keys include source hash,
 compiler/toolchain identity, target, options and resolved dependency graph identity.
 Interface hashes, names or mutable tags alone cannot establish cache identity.

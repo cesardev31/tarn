@@ -69,7 +69,7 @@ pub fn check(entry: &Path, json: bool) -> ExitCode {
                 .join(", ")
         );
         // Keep the pre-check stamps: edits during compilation must cause a new check.
-        match tarn_driver::check(entry) {
+        match crate::check_project(entry) {
             Ok(result) => {
                 let mut paths: BTreeSet<_> = result.program.disk_sources.iter().cloned().collect();
                 paths.insert(entry.to_path_buf());
@@ -224,7 +224,7 @@ pub fn run(args: &[String]) -> ExitCode {
     let mut changed = BTreeSet::from([entry.to_path_buf()]);
     loop {
         header(&changed, "building");
-        match tarn_driver::check(entry) {
+        match crate::check_project(entry) {
             Ok(result) => {
                 refresh(
                     &mut sources,

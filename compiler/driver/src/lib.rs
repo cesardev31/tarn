@@ -42,6 +42,7 @@ fn trusted_source(name: &str) -> Option<&'static str> {
 fn official_module(name: &str) -> bool { (name == "string" || name == "path" || name == "http" || name == "json") || trusted_source(name).is_some() }
 
 pub struct Program {
+    pub import_targets: std::collections::HashMap<(String, String), String>,
     pub sources: SourceMap,
     /// Files read from disk during loading; embedded stdlib sources are excluded.
     pub disk_sources: Vec<PathBuf>,
@@ -75,6 +76,58 @@ impl CheckResult {
     }
 }
 
+/// Dependency sources already verified by the host package tool (ADR 0051).
+/// Plain data: the driver maps imports to package modules but never reads a
+/// manifest, lock, registry or cache, so compiler crates carry no package
+/// manager dependencies.
+#[derive(Clone, Debug, Default)]
+pub struct PackageSet {
+    /// Packages the application's own modules may import.
+    pub direct: std::collections::BTreeSet<String>,
+    pub packages: std::collections::BTreeMap<String, Package>,
+    /// Verified bytes of every package source, keyed by absolute path. Only
+    /// these files can be package modules.
+    pub sources: std::collections::HashMap<PathBuf, String>,
+    /// Non-source inputs whose change invalidates a build (manifest, lock, policy).
+    pub inputs: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Package {
+    /// The package entry module's file; package-local imports resolve beside it.
+    pub entry: PathBuf,
+    /// Packages this package may import.
+    pub dependencies: std::collections::BTreeSet<String>,
+}
+
+impl PackageSet {
+    /// `import "name"` or `import "name/module"` from `owner` (None: the
+    /// application): the private module identity and verified file.
+    fn import(&self, owner: Option<&str>, path: &str) -> Result<Option<(String, PathBuf, String)>, String> {
+        let (name, rest) = path.split_once('/').unwrap_or((path, ""));
+        let visible = match owner {
+            Some(owner) => self.packages.get(owner).is_some_and(|p| p.dependencies.contains(name)),
+            None => self.direct.contains(name),
+        };
+        if !visible {
+            return Ok(None);
+        }
+        let package = self.packages.get(name).ok_or_else(|| format!("package `{name}` is declared but not locked"))?;
+        let file = if rest.is_empty() { package.entry.clone() } else { package.module_root().join(format!("{rest}.tarn")) };
+        if !self.sources.contains_key(&file) {
+            return Err(format!("package `{name}` does not contain module `{path}`"));
+        }
+        let module = if rest.is_empty() { format!("@package/{name}") } else { format!("@package/{name}/{rest}") };
+        Ok(Some((module, file, name.to_string())))
+    }
+}
+
+impl Package {
+    fn module_root(&self) -> PathBuf {
+        self.entry.parent().map(Path::to_path_buf).unwrap_or_default()
+    }
+}
+
 /// Load the entry file and every local module it transitively imports.
 pub fn load(entry: &Path) -> Result<(Program, Vec<Diagnostic>), String> {
     load_with_overlays(entry, &std::collections::HashMap::new())
@@ -82,18 +135,25 @@ pub fn load(entry: &Path) -> Result<(Program, Vec<Diagnostic>), String> {
 
 /// Read open editor buffers before falling back to disk. Paths must be absolute.
 pub fn load_with_overlays(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>) -> Result<(Program, Vec<Diagnostic>), String> {
-    load_editor_sources(entry, overlays, false)
+    load_editor_sources(entry, overlays, false, None)
+}
+
+/// `load_with_overlays` plus verified package dependencies.
+pub fn load_with_packages(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, packages: Option<&PackageSet>) -> Result<(Program, Vec<Diagnostic>), String> {
+    load_editor_sources(entry, overlays, false, packages)
 }
 
 fn official_stdlib_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../stdlib/{name}/{name}.tarn"))
 }
 
-fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, editor: bool) -> Result<(Program, Vec<Diagnostic>), String> {
+fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, editor: bool, packages: Option<&PackageSet>) -> Result<(Program, Vec<Diagnostic>), String> {
     let official_entry = if editor {
         entry.canonicalize().ok().and_then(|entry| TRUSTED_STDLIB.iter().map(|(name, _)| *name).chain(["string", "path", "http", "json"]).find(|name|
             official_stdlib_path(name).canonicalize().ok().as_ref() == Some(&entry)))
     } else { None };
+    let packages = if official_entry.is_none() { packages } else { None };
+    let mut import_targets = std::collections::HashMap::new();
     let root = entry.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     let stem = entry.file_stem().and_then(|s| s.to_str()).ok_or("invalid file name")?.to_string();
     // Entry filenames do not confer reserved stdlib module identity.
@@ -101,11 +161,15 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
         else if trusted_source(&stem).is_some() { format!("entry/{stem}") } else { stem };
     let mut sources = SourceMap::new();
     let mut disk_sources = Vec::new();
+    if let Some(packages) = packages {
+        disk_sources.extend(packages.sources.keys().cloned());
+        disk_sources.extend(packages.inputs.iter().cloned());
+    }
     let mut modules: Vec<(String, Module)> = Vec::new();
     let mut diags = Vec::new();
     let mut trusted_modules = std::collections::HashSet::new();
-    let mut queue = vec![(stem, entry.to_path_buf())];
-    while let Some((name, path)) = queue.pop() {
+    let mut queue = vec![(stem, entry.to_path_buf(), None::<String>, root.clone())];
+    while let Some((name, path, owner, module_root)) = queue.pop() {
         if modules.iter().any(|(n, _)| *n == name) {
             continue;
         }
@@ -120,6 +184,10 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
         } else if let Some(source) = trusted_source(&name) {
             trusted_modules.insert(name.clone());
             source.to_string()
+        } else if let Some(text) = packages.and_then(|p| p.sources.get(&path)) {
+            if overlays.get(&path).is_some_and(|overlay| overlay != text) { return Err("locked package source cannot be overridden by an editor buffer; edit the development checkout instead".into()); }
+            disk_sources.push(path.clone());
+            text.clone()
         } else {
             match overlays.get(&path) {
                 Some(text) => text.clone(),
@@ -149,13 +217,31 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
                 _ => false,
             };
             if needs_execution {
-                queue.push(("runtime".to_string(), root.join("runtime.tarn")));
+                queue.push(("runtime".to_string(), root.join("runtime.tarn"), None, root.clone()));
             }
             if let ItemKind::Import(imp) = &item.kind {
-                let file = root.join(format!("{}.tarn", imp.path));
+                if imp.path.starts_with("@package/") { return Err("package namespaces are private; import a declared package name".into()); }
+                let file = module_root.join(format!("{}.tarn", imp.path));
                 let valid = imp.path.split('/').all(|s| !s.is_empty() && s != "." && s != "..");
-                if valid && (file.is_file() || overlays.contains_key(&file) || official_module(&imp.path)) {
-                    queue.push((imp.path.clone(), file));
+                if !valid { continue; }
+                let dependency = packages.map(|p| p.import(owner.as_deref(), &imp.path)).transpose()?.flatten();
+                let local = file.is_file() || overlays.contains_key(&file);
+                if local && dependency.is_some() { return Err(format!("import `{}` is ambiguous between a local module and a declared package", imp.path)); }
+                if let Some((target, file, package)) = dependency {
+                    let module_root = packages.and_then(|p| p.packages.get(&package)).map(Package::module_root).unwrap_or_default();
+                    import_targets.insert((name.clone(), imp.path.clone()), target.clone());
+                    queue.push((target, file, Some(package), module_root));
+                } else if trusted_source(&imp.path).is_some() || (official_module(&imp.path) && !local) {
+                    queue.push((imp.path.clone(), root.join(format!("{}.tarn", imp.path)), None, root.clone()));
+                } else if local {
+                    let target = if let Some(package) = &owner { format!("@package/{package}/{}", imp.path) } else { imp.path.clone() };
+                    if owner.is_some() && !packages.is_some_and(|p| p.sources.contains_key(&file)) {
+                        return Err("package import is absent from its verified inventory".into());
+                    }
+                    import_targets.insert((name.clone(), imp.path.clone()), target.clone());
+                    queue.push((target, file, owner.clone(), module_root.clone()));
+                } else if owner.is_some() {
+                    return Err(format!("package module `{name}` imports undeclared or missing dependency `{}`",imp.path));
                 }
             }
         }
@@ -173,7 +259,7 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
         modules.push(("core".to_string(), res.module));
         trusted_modules.insert("core".to_string());
     }
-    Ok((Program { sources, disk_sources, modules, trusted_modules }, diags))
+    Ok((Program { import_targets, sources, disk_sources, modules, trusted_modules }, diags))
 }
 
 /// Lex, parse and resolve. Resolution only runs on syntactically valid
@@ -187,10 +273,20 @@ pub fn check_with_overlays(entry: &Path, overlays: &std::collections::HashMap<Pa
     check_loaded(load_with_overlays(entry, overlays)?)
 }
 
+/// Check a program whose package dependencies the host tool has verified.
+pub fn check_with_packages(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, packages: Option<&PackageSet>) -> Result<CheckResult, String> {
+    check_loaded(load_with_packages(entry, overlays, packages)?)
+}
+
 /// Editor-only checking of this checkout's official stdlib source buffers.
 /// Normal CLI entry files never gain intrinsic authority from their path/name.
 pub fn check_editor_with_overlays(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>) -> Result<CheckResult, String> {
-    check_loaded(load_editor_sources(entry, overlays, true)?)
+    check_loaded(load_editor_sources(entry, overlays, true, None)?)
+}
+
+/// Editor checking with verified package dependencies.
+pub fn check_editor_with_packages(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, packages: Option<&PackageSet>) -> Result<CheckResult, String> {
+    check_loaded(load_editor_sources(entry, overlays, true, packages)?)
 }
 
 fn check_loaded(loaded: (Program, Vec<Diagnostic>)) -> Result<CheckResult, String> {
@@ -207,7 +303,7 @@ fn check_loaded_with_bindings((program, mut diagnostics): (Program, Vec<Diagnost
     let errors = |ds: &[Diagnostic]| ds.iter().any(|d| d.severity == Severity::Error);
     if !errors(&diagnostics) {
         let inputs: Vec<ModuleInput> = program.modules.iter().map(|(n, m)| ModuleInput { name: n.clone(), ast: m, trusted_stdlib: program.trusted_modules.contains(n) }).collect();
-        let (mut r, d) = tarn_resolve::resolve(&inputs);
+        let (mut r, d) = tarn_resolve::resolve_with_imports(&inputs, &program.import_targets);
         testing::bind_generated_prelude(&program, &mut r, generated_starts);
         diagnostics.extend(d);
         // Types only on name-clean programs, for the same reason as above.

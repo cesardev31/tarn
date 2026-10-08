@@ -4,6 +4,7 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
     let Some(command) = args.first() else {
         return Ok(args);
     };
+    if super::packages::COMMANDS.contains(&command.as_str()) { super::packages::validate(command,&args[1..])?; return Ok(args); }
     if command == "fmt" { return formatter_args(args); }
     let native = matches!(command.as_str(), "build" | "run" | "test");
     let source = native
@@ -66,9 +67,15 @@ pub fn normalize(args: Vec<String>) -> Result<Vec<String>, String> {
     if !source {
         return Ok(args);
     }
-    let mut path = std::path::PathBuf::from(entry.unwrap_or_else(|| "main.tarn".into()));
-    if path.is_dir() {
-        path.push("main.tarn");
+    let default_entry = entry.is_none();
+    let mut path = std::path::PathBuf::from(entry.unwrap_or_else(|| ".".into()));
+    if path.is_dir() || default_entry {
+        let manifest = tarn_packages::manifest::find(&path).and_then(|root| tarn_packages::manifest::Manifest::read(&root).ok());
+        path = match manifest {
+            Some(manifest) => manifest.root.join(manifest.entry),
+            None => path.join("main.tarn"),
+        };
+        if default_entry && manifestless_relative(&path) { path = "main.tarn".into(); }
     }
     let mut normalized = vec![command.clone(), path.to_string_lossy().into_owned()];
     normalized.extend(options);
@@ -96,3 +103,5 @@ fn formatter_args(args: Vec<String>) -> Result<Vec<String>, String> {
     if check { result.push("--check".into()); }
     Ok(result)
 }
+
+fn manifestless_relative(path: &std::path::Path) -> bool { path == std::path::Path::new("./main.tarn") }

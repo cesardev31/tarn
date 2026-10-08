@@ -90,7 +90,7 @@ impl Server {
         files.sort();
         for file in files {
             let Some(u) = uri(file) else { continue };
-            let ds = match tarn_driver::check_editor_with_overlays(file,&self.buffers) {
+            let ds = match check(file, &self.buffers) {
                 Ok(result) => result.diagnostics.iter().filter_map(|d| {
                     let span = d.primary_span()?;
                     if std::path::Path::new(&result.program.sources.file(span.file).name) != file { return None; }
@@ -125,7 +125,7 @@ impl Server {
     }
     fn symbol(&self, params: &Value, definition: bool) -> Option<Value> {
         let file = path(params["textDocument"]["uri"].as_str()?)?;
-        let result = tarn_driver::check_editor_with_overlays(&file, &self.buffers).ok()?;
+        let result = check(&file, &self.buffers).ok()?;
         let source = result
             .program
             .sources
@@ -281,4 +281,11 @@ mod tests {
             Some(text.len() as u32)
         );
     }
+}
+
+/// Editor checking with the project's verified package dependencies (ADR
+/// 0051). Package loading is the tool's job; the compiler receives plain data.
+fn check(file: &std::path::Path, buffers: &std::collections::HashMap<std::path::PathBuf, String>) -> Result<tarn_driver::CheckResult, String> {
+    let packages = tarn_packages::graph::package_set(file)?;
+    tarn_driver::check_editor_with_packages(file, buffers, packages.as_ref())
 }

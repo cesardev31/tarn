@@ -1021,12 +1021,13 @@ Do not pursue "zero dependencies" as a dogma.
 Reimplementing complex standards incorrectly merely to avoid one dependency is not a project goal.
 
 
-### Tarn package management and supply-chain security (planned)
+### Tarn package management and supply-chain security
 
 The preceding dependency review applies to the compiler's existing dependencies.
-The following requirements govern future Tarn packages. They are design guidance,
-not implemented CLI, registry, resolver or sandbox behavior. Do not add dependencies
-or implement these systems as part of documenting this policy.
+The following requirements govern Tarn packages. The initial pure-source manager
+is implemented in Phase 22 (ADR 0051 and docs/packages.md). Public registry
+infrastructure, signed provenance and build sandboxes remain future work. Do not
+implement those systems merely as part of documenting this policy.
 
 “Dependency resolution should be boring, deterministic and auditable.”
 

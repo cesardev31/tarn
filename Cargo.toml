@@ -13,6 +13,7 @@ members = [
     "compiler/backend",
     "tools/cli",
     "tools/fmt",
+    "tools/packages",
     "tools/lsp",
 ]
 

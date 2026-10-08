@@ -27,7 +27,17 @@ cargo test
 
 Docs: [language](docs/language.md) · [ownership](docs/ownership.md) ·
 [errors](docs/errors.md) · [architecture](docs/architecture.md) ·
-[ADRs](docs/adr/) · [dependency security (planned)](docs/dependency-security.md). Editor: [editors/vscode](editors/vscode).
+[ADRs](docs/adr/) · [packages](docs/packages.md) · [dependency security](docs/dependency-security.md). Editor: [editors/vscode](editors/vscode).
+
+## Packages
+
+The integrated CLI supports `init`, `add`, `remove`, `update`, `fetch`, `deps`,
+`verify`, `audit` and immutable local `publish`. Projects use `tarn.toml` and
+`tarn.lock`; normal builds verify cached sources offline without changing the lock.
+Choose a local registry or HTTPS origin; no public registry is configured by
+default. Packages receive no installation/build hook authority. See
+[the package guide](docs/packages.md) for a complete local workflow and the
+explicit limits around publisher provenance and registry infrastructure.
 
 ## Native execution (Linux x86_64)
 

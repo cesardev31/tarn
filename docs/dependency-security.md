@@ -1,9 +1,10 @@
 # Dependency management and supply-chain security
 
-Status: design requirements; package management, registry, resolver and sandbox
-are not implemented. All commands and configuration below describe future
-behavior. This work adds no dependency and starts no optimization or concurrency
-work.
+Status: the initial pure-source manager is implemented in Phase 22. See
+[the executable workflow and current schemas](packages.md) and
+[ADR 0051](adr/0051-verified-source-packages.md). The requirements below remain
+the long-term security contract. Public registry infrastructure, provenance,
+authorized build execution and sandboxing are not implemented.
 
 ## Principles and threat model
 
@@ -32,17 +33,15 @@ tarn build
 tarn test
 ```
 
-These are workflow requirements, not executable instructions for today's CLI.
+These commands require actual releases in a configured registry; no public postgres or redis packages are assumed.
 Source imports remain `import "redis"` and `import "postgres"`; versions must
 not leak into paths such as `redis/v2` or `postgres@4`. Local filesystem module
-semantics remain intact. Package-to-import mapping and ambiguity handling still
-need resolver design.
+semantics remain intact. The initial manager maps declared dependencies to isolated module namespaces and rejects local/package ambiguity.
 
 `tarn.toml` records dependency intent and security policy; `tarn.lock` records
 the exact resolved graph. Intent must express exact versions, compatible-major
 requirements, compatible minor/patch requirements and explicit ranges using
-ordinary SemVer, with understandable conflict explanations. Exact manifest
-syntax and selection algorithm are open.
+ordinary SemVer, with understandable conflict explanations. The initial manifest and bounded one-version resolution algorithm are specified in ADR 0051; incompatible-major coexistence remains open.
 
 Prefer a single compatible version where constraints allow it; avoid unnecessary
 duplicates. Multiple incompatible majors may coexist only under an explicit
@@ -154,7 +153,7 @@ for convenience.
 
 ## Inspection and registry requirements
 
-The planned command surface is:
+The command surface is implemented for the bootstrap subset; the full trust responsibilities below remain requirements:
 
 | Command | Intended responsibility |
 |---------|-------------------------|
@@ -190,9 +189,9 @@ age, visible trust downgrades and auditable dependency paths.
 
 Open decisions include:
 
-- Exact SemVer resolver algorithm and conflict resolution.
+- Future improvements beyond bounded single-version SemVer backtracking.
 - Coexistence and import mapping for incompatible major versions.
-- Default minimum release age and policy precedence.
+- Production default minimum release age (bootstrap uses zero, project/global maximum).
 - Signing format and key lifecycle.
 - Provenance format and verification policy.
 - Registry federation and origin configuration.

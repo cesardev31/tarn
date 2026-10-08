@@ -58,7 +58,8 @@ pub fn run_with_sources(
     options: &Options,
     mut loaded: impl FnMut(&[std::path::PathBuf], bool),
 ) -> (ExitCode, Vec<std::path::PathBuf>) {
-    let (result, cases) = match tarn_driver::testing::check_tests(entry) {
+    let tested = crate::package_set(entry).and_then(|packages| tarn_driver::testing::check_tests_with_packages(entry, packages.as_ref()));
+    let (result, cases) = match tested {
         Ok(result) => result,
         Err(error) => {
             let mut paths = tarn_driver::load(entry)

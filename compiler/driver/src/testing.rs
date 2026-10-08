@@ -1,5 +1,5 @@
 //! Test discovery and generated ordinary source harnesses (ADR 0049).
-use crate::{CheckResult, check_loaded, load_with_overlays};
+use crate::{CheckResult, PackageSet, check_loaded, load_with_packages};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use tarn_ast::ItemKind;
@@ -36,6 +36,11 @@ pub fn test_files(entry: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 pub fn check_tests(entry: &Path) -> Result<(CheckResult, Vec<TestCase>), String> {
+    check_tests_with_packages(entry, None)
+}
+
+/// `check_tests` for a project whose package dependencies the host verified.
+pub fn check_tests_with_packages(entry: &Path, packages: Option<&PackageSet>) -> Result<(CheckResult, Vec<TestCase>), String> {
     let entry = entry
         .canonicalize()
         .map_err(|e| format!("cannot read `{}`: {e}", entry.display()))?;
@@ -91,7 +96,7 @@ pub fn check_tests(entry: &Path) -> Result<(CheckResult, Vec<TestCase>), String>
         }
     }
     let overlays: HashMap<_, _> = text.iter().map(|(p, s)| (p.clone(), s.clone())).collect();
-    let (mut initial_program, diagnostics) = load_with_overlays(&entry, &overlays)?;
+    let (mut initial_program, diagnostics) = load_with_packages(&entry, &overlays, packages)?;
     initial_program.disk_sources.extend(roots.iter().cloned());
     let initial = check_loaded((initial_program, diagnostics))?;
     if initial.has_errors() {
@@ -265,7 +270,7 @@ pub fn check_tests(entry: &Path) -> Result<(CheckResult, Vec<TestCase>), String>
     dispatch.push_str("panic(\"invalid test index\")\n}\n");
     text.get_mut(&entry).unwrap().push_str(&dispatch);
     let overlays: HashMap<_, _> = text.into_iter().collect();
-    let (mut program, diagnostics) = load_with_overlays(&entry, &overlays)?;
+    let (mut program, diagnostics) = load_with_packages(&entry, &overlays, packages)?;
     // Overlay roots remain real watch dependencies, not embedded sources.
     program.disk_sources.extend(roots);
     program.disk_sources.sort();

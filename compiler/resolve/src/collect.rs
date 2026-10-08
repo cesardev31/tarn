@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use tarn_ast::{FnDecl, ItemKind};
 
 pub(crate) struct Cx<'a> {
+    pub import_targets: HashMap<(String, String), String>,
     pub inputs: &'a [ModuleInput<'a>],
     pub r: Resolved,
     pub diags: Vec<Diagnostic>,
@@ -24,7 +25,7 @@ impl<'a> Cx<'a> {
     pub fn new(inputs: &'a [ModuleInput<'a>]) -> Cx<'a> {
         let mut r = Resolved::default();
         let prelude = prelude::build(&mut r);
-        Cx { inputs, r, diags: Vec::new(), prelude, used: HashSet::new() }
+        Cx { import_targets: HashMap::new(), inputs, r, diags: Vec::new(), prelude, used: HashSet::new() }
     }
 
     pub fn finish(self) -> (Resolved, Vec<Diagnostic>) {
@@ -119,7 +120,8 @@ impl<'a> Cx<'a> {
         for item in &ast.items {
             match &item.kind {
                 ItemKind::Import(imp) => {
-                    let target = self.import_target(&imp.path, imp.path_span);
+                    let target_path = self.import_targets.get(&(self.inputs[m.0 as usize].name.clone(), imp.path.clone())).cloned().unwrap_or_else(|| imp.path.clone());
+                    let target = self.import_target(&target_path, imp.path_span);
                     let name = imp.path.rsplit('/').next().unwrap_or(&imp.path).to_string();
                     let sym = Symbol {
                         name,

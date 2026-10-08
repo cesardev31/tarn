@@ -330,7 +330,7 @@ pub fn emit(p: &post::Program, t: &Typed) -> Result<Vec<u8>> {
 }
 
 pub fn emit_entry(p: &post::Program, t: &Typed, test: bool) -> Result<Vec<u8>> {
-    let main = if test { p.functions.first() } else { p.functions.iter().find(|f| f.decl.name == "main") }.ok_or_else(|| Error::unsupported("program requires fn main()"))?;
+    let main = if test { p.functions.first() } else { p.functions.iter().find(|f| f.decl.name == "main" && f.decl.symbol.and_then(|s| t.decls.fns.get(&s)).is_some_and(|sig| sig.module.0 == 0)) }.ok_or_else(|| Error::unsupported("program requires fn main()"))?;
     let result_main = matches!(&main.decl.ret, Ty::Adt(id, args) if Some(*id) == t.decls.result && args.len() == 2 && args[0] == Ty::Void && matches!(&args[1], Ty::Adt(e, ts) if Some(*e) == t.decls.net_error && ts.is_empty()));
     if test {
         if main.decl.param_count != 1 || main.decl.ret != Ty::Void || main.decl.locals.get(1).map(|l| &l.ty) != Some(&Ty::Int(tarn_types::IntTy::I32)) {

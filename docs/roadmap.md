@@ -40,6 +40,8 @@ tested and documented.
 | 20 | Formatter (basic) | **done within documented basic subset**: [plan](phase-20-plan.md), [report](phase-20-report.md), [ADR 0050](adr/0050-conservative-source-formatting.md) |
 | 21 | VS Code extension (TextMate) | **done within documented editor subset**: [plan](phase-21-plan.md), [report](phase-21-report.md); highlighting, snippets, compiler LSP and shared formatting |
 
+| 22 | Verified pure-source package manager | implemented initial subset: [guide](packages.md), [ADR 0051](adr/0051-verified-source-packages.md); public registry infrastructure and signed provenance deferred |
+
 ## Milestones
 
 1. `add(20, 22)` program compiles to a native binary through the full pipeline.
@@ -74,15 +76,16 @@ E3040. See [ADR 0028](adr/0028-native-feature-completeness.md) and
 rejected. Optimization remains deferred. Phase 10 adds shared, mutable and consuming callable modes, `move fn` ownership captures and safe returned owned closures (ADR 0032).
 
 
-## Dependency management and supply-chain security (design only)
+## Dependency management and supply-chain security
 
-[Dependency security](dependency-security.md) sets requirements for future
-integrated `tarn` package commands, version-free imports, manifest/lock separation,
-verified immutable content and explicitly constrained build authority. No package
-manager, registry, resolver or sandbox implementation is scheduled by this update.
-SemVer resolution, incompatible-major coexistence, release-age default,
-signing/provenance formats, federation, sandbox enforcement and features remain
-open. Optimization and async remain deferred; 12B supplies explicit readiness.
+The initial manager implements integrated commands, manifest/lock separation,
+SemVer resolution, immutable local publication, HTTPS consumption, verified
+content-addressed source storage and dependency-scoped imports. See
+[package management](packages.md). [Dependency security](dependency-security.md)
+remains the long-term contract. Public registry deployment, signing/provenance,
+federation, build sandboxes, features and incompatible-major coexistence remain
+open. Dependencies receive no build execution authority.
+
 Blocking networking is covered by Phase 12A and [ADR 0034](adr/0034-blocking-networking.md);
 readiness by [ADR 0035](adr/0035-nonblocking-readiness.md) and
 [the Phase 12B report](readiness-report.md).

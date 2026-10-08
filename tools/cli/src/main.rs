@@ -5,6 +5,7 @@ mod watch;
 mod process;
 mod testing;
 mod formatting;
+mod packages;
 
 use std::process::ExitCode;
 use tarn_diagnostics::SourceMap;
@@ -29,14 +30,35 @@ usage:
     tarn fmt [file.tarn | directory] [--check]
                                      format sources recursively (default: .)
     tarn fmt --stdin                 format stdin to stdout
+    tarn init [directory] [--lib]      create a package manifest and source
+    tarn add package [--version range] [--registry origin]
+    tarn remove package              remove a direct dependency
+    tarn update [package]            explicitly resolve dependency versions
+    tarn fetch                       fetch locked source bytes
+    tarn deps [--tree | --why package] [--trust] [--json]
+    tarn verify [--json]              verify locked content and graph
+    tarn audit [--json]               inspect advisories; 3 means unknown evidence
+    tarn publish [--registry origin]  publish an immutable local release
     tarn version                     print the compiler version
 
-Entry defaults to ./main.tarn; directories select <dir>/main.tarn.
-Exit codes: 0 success, 1 compilation/link failure, 2 usage error.
+Entry uses the nearest tarn.toml package.entry; otherwise ./main.tarn.
+Exit codes: 0 success, 1 failure, 2 usage error; audit 3 means unknown evidence.
 run propagates the program exit code.
 
 planned: clean, cache
 ";
+
+/// Verified package dependencies of `entry` (ADR 0051). Compilation reads
+/// the existing lock and cache only: it never resolves, fetches or rewrites.
+pub(crate) fn package_set(entry: &std::path::Path) -> Result<Option<tarn_driver::PackageSet>, String> {
+    tarn_packages::graph::package_set(entry)
+}
+
+/// Check a program together with its verified package dependencies.
+pub(crate) fn check_project(entry: &std::path::Path) -> Result<tarn_driver::CheckResult, String> {
+    let packages = package_set(entry)?;
+    tarn_driver::check_with_packages(entry, &Default::default(), packages.as_ref())
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -47,6 +69,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if let Some(command) = args.first().filter(|c| packages::COMMANDS.contains(&c.as_str())) {
+        return packages::run(command, &args[1..]);
+    }
     match args.first().map(String::as_str) {
         Some("lex") => cmd_lex(&args[1..]),
         Some("ast") => cmd_ast(&args[1..]),
@@ -157,7 +182,7 @@ fn cmd_check(args: &[String], dump: bool) -> ExitCode {
         eprintln!("error: missing file\n\nusage: tarn check <file.tarn> [--json]");
         return ExitCode::from(2);
     };
-    let res = match tarn_driver::check(std::path::Path::new(path)) {
+    let res = match check_project(std::path::Path::new(path)) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error[E9001]: {e}");
@@ -183,7 +208,7 @@ fn cmd_types(args: &[String]) -> ExitCode {
         eprintln!("error: missing file\n\nusage: tarn types <file.tarn>");
         return ExitCode::from(2);
     };
-    let res = match tarn_driver::check(std::path::Path::new(path)) {
+    let res = match check_project(std::path::Path::new(path)) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error[E9001]: {e}");
@@ -205,7 +230,7 @@ fn cmd_ir(args: &[String]) -> ExitCode {
         eprintln!("error: missing file\n\nusage: tarn ir <file.tarn>");
         return ExitCode::from(2);
     };
-    let res = match tarn_driver::check(std::path::Path::new(path)) {
+    let res = match check_project(std::path::Path::new(path)) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("error[E9001]: {e}");
@@ -261,7 +286,7 @@ fn cmd_native(args: &[String], run: bool) -> ExitCode {
             _ => unreachable!("validated native option"),
         }
     }
-    let res = match tarn_driver::check(std::path::Path::new(path)) {
+    let res = match check_project(std::path::Path::new(path)) {
         Ok(r) => r, Err(e) => { native_error(json, "load", &e.to_string()); return ExitCode::from(1); }
     };
     for d in &res.diagnostics {

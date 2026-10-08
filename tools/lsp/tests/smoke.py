@@ -7,12 +7,12 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[3]
 
-def exchange(messages):
+def exchange(messages, env=None):
     data = b''
     for message in messages:
         body = json.dumps({'jsonrpc': '2.0', **message}).encode()
         data += f'Content-Length: {len(body)}\r\n\r\n'.encode() + body
-    result = subprocess.run([str(ROOT / 'target/debug/tarn-lsp')], input=data, capture_output=True, timeout=30)
+    result = subprocess.run([str(ROOT / 'target/debug/tarn-lsp')], input=data, capture_output=True, timeout=30, env=env)
     assert result.returncode == 0, result.stderr.decode()
     output = result.stdout
     parsed = []
@@ -135,3 +135,39 @@ with tempfile.TemporaryDirectory(prefix='tarn format lsp ') as directory:
     assert responses[6]['error']['code'] == -32803, responses[6]
     assert entry.read_text() == 'fn main() {}\n'
 print('PASS: unsaved formatting, UTF-16 full-document edits, idempotence, invalid/closed buffer refusal, unchanged disk')
+
+# Locked packages use the real frontend and verified dependency source snapshots.
+with tempfile.TemporaryDirectory(prefix='tarn package lsp ') as directory:
+    import os
+    root = Path(directory)
+    env = dict(os.environ, TARN_HOME=str(root / 'home'))
+    cli = ROOT / 'target/debug/tarn'
+    def package_command(cwd, *args):
+        result = subprocess.run([str(cli), *args], cwd=cwd, env=env, capture_output=True, text=True)
+        assert result.returncode == 0, (args, result.stderr)
+    package_command(root, 'init', 'greeting', '--lib')
+    (root / 'greeting/lib.tarn').write_text('pub fn answer() i32 { return 42 }\n')
+    package_command(root / 'greeting', 'publish', '--registry', str(root / 'registry'))
+    package_command(root, 'init', 'application')
+    app = root / 'application'
+    package_command(app, 'add', 'greeting', '--registry', str(root / 'registry'))
+    source = 'import "greeting"\nfn main() {\n    print(greeting.answer())\n}\n'
+    entry = app / 'main.tarn'
+    entry.write_text(source)
+    uri = entry.as_uri()
+    lock = json.loads((app / 'tarn.lock').read_text())
+    cached = root / 'home/sources' / lock['packages'][0]['release']['hash'] / 'lib.tarn'
+    out = exchange([
+        {'id': 1, 'method': 'initialize', 'params': {}}, opened(uri, source),
+        request('textDocument/definition', 2, uri, 2, 20),
+        opened(cached.as_uri(), 'pub fn answer() i32 { return 99 }\n'),
+        changed(uri, source, 2),
+        {'id': 3, 'method': 'shutdown'}, {'method': 'exit'},
+    ], env)
+    responses = {m['id']: m for m in out if 'id' in m}
+    assert responses[2]['result']['uri'] == cached.as_uri(), responses[2]
+    diagnostics = [m['params'] for m in out if m.get('method') == 'textDocument/publishDiagnostics' and m['params']['uri'] == uri]
+    assert diagnostics[0]['diagnostics'] == [], diagnostics[0]
+    assert any('cannot be overridden' in d['message'] for d in diagnostics[-1]['diagnostics']), diagnostics[-1]
+    assert cached.read_text() == 'pub fn answer() i32 { return 42 }\n'
+print('PASS: package definition navigation and locked dependency overlay refusal')

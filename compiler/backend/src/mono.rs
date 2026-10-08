@@ -76,7 +76,7 @@ fn concrete_inner(ty: &Ty, depth: usize, nodes: &mut usize) -> Result<()> {
     Ok(())
 }
 pub fn specialize(p: &post::Program, t: &Typed) -> Result<post::Program> {
-    let main = p.functions.iter().find(|f| f.decl.name == "main").ok_or_else(|| Error::unsupported("program requires fn main()"))?;
+    let main = p.functions.iter().find(|f| f.decl.name == "main" && f.decl.symbol.and_then(|s| t.decls.fns.get(&s)).is_some_and(|sig| sig.module.0 == 0)).ok_or_else(|| Error::unsupported("program requires fn main()"))?;
     specialize_entry(p, t, main.decl.id)
 }
 
