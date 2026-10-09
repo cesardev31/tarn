@@ -1,0 +1,244 @@
+// Collections and algorithms (Phase 31, ADR 0060): a hash map, a hash set
+// and sorting. Ordinary Tarn over `Vec`; no native code and no stored
+// references. Iteration order of Map and Set is unspecified and changes as
+// they grow; sort the keys when order matters.
+
+/// One key/value pair stored in a `Map`.
+pub struct Entry<K, V> {
+    pub key K
+    pub value V
+}
+
+/// Hash map with open addressing and linear probing. Keys implement
+/// `core.Hash` and `core.Eq`; `string`, integers and `bool` already do.
+/// Owned keys and values are moved in and moved out; lookups borrow.
+pub struct Map<K: Hash + Eq, V> {
+    slots Vec<Option<Entry<K, V>>>
+    count usize
+}
+
+/// An empty map; it allocates on the first insertion.
+pub fn Map<K, V>.new() Map<K, V> {
+    return Map { slots: Vec.new(), count: 0 }
+}
+
+/// Number of entries.
+pub fn Map<K, V>.len(&self) usize { return self.count }
+
+pub fn Map<K, V>.is_empty(&self) bool { return self.count == 0 }
+
+/// Inserts or replaces; returns the previous value for an equal key.
+pub fn Map<K, V>.insert(&mut self, key K, value V) Option<V> {
+    match self.find(&key) {
+        Some(slot) => {
+            previous := self.slots.replace(slot, Some(Entry { key: key, value: value }))
+            match previous {
+                Some(entry) => { return Some(entry.value) }
+                None => { return None }
+            }
+        }
+        None => {}
+    }
+    // Load factor at most 3/4 keeps probe sequences short.
+    if (self.count + 1) * 4 > self.slots.len() * 3 { self.grow() }
+    self.place(Entry { key: key, value: value })
+    self.count = self.count + 1
+    return None
+}
+
+/// Borrows an existing value. Missing keys abort; use contains first when
+/// absence is expected. The returned loan follows the map, not the key.
+pub fn Map<K, V>.get(&self, key &K) &V {
+    match self.find(key) {
+        Some(slot) => {
+            match self.slots.get(slot) {
+                Some(entry) => { return &entry.value }
+                None => { panic("missing map key") }
+            }
+        }
+        None => { panic("missing map key") }
+    }
+}
+
+/// Exclusive loan of an existing value. No references are stored in Option.
+pub fn Map<K, V>.get_mut(&mut self, key &K) &mut V {
+    match self.find(key) {
+        Some(slot) => {
+            match self.slots.get_mut(slot) {
+                Some(entry) => { return &mut entry.value }
+                None => { panic("missing map key") }
+            }
+        }
+        None => { panic("missing map key") }
+    }
+}
+
+pub fn Map<K, V>.contains(&self, key &K) bool { return self.find(key).is_some() }
+
+/// Removes the entry for `key` and returns its value.
+pub fn Map<K, V>.remove(&mut self, key &K) Option<V> {
+    match self.find(key) {
+        Some(slot) => {
+            removed := self.slots.replace(slot, None)
+            self.count = self.count - 1
+            self.close_gap(slot)
+            match removed {
+                Some(entry) => { return Some(entry.value) }
+                None => { return None }
+            }
+        }
+        None => { return None }
+    }
+}
+
+/// Number of slots, for iteration with `entry_at`:
+/// test each slot with has_entry before borrowing entry_at.
+pub fn Map<K, V>.slot_count(&self) usize { return self.slots.len() }
+
+/// Whether a slot holds an entry; false for an out-of-range slot.
+pub fn Map<K, V>.has_entry(&self, slot usize) bool {
+    if slot >= self.slots.len() { return false }
+    return self.slots.get(slot).is_some()
+}
+
+/// Borrows an occupied slot. Empty/out-of-range slots abort.
+pub fn Map<K, V>.entry_at(&self, slot usize) &Entry<K, V> {
+    match self.slots.get(slot) {
+        Some(entry) => { return entry }
+        None => { panic("empty map slot") }
+    }
+}
+
+/// Moves every entry out, emptying the map (unspecified order).
+pub fn Map<K, V>.drain(&mut self) Vec<Entry<K, V>> {
+    var out: Vec<Entry<K, V>> = Vec.with_capacity(self.count)
+    for self.slots.len() > 0 {
+        match self.slots.pop() {
+            Some(Some(entry)) => { out.push(entry) }
+            _ => {}
+        }
+    }
+    self.count = 0
+    return out
+}
+
+fn Map<K, V>.find(&self, key &K) Option<usize> {
+    capacity := self.slots.len()
+    if capacity == 0 { return None }
+    mask := capacity - 1
+    var slot = usize(key.hash() & u64(mask))
+    for true {
+        match self.slots.get(slot) {
+            Some(entry) => {
+                if entry.key.eq(key) { return Some(slot) }
+            }
+            None => { return None }
+        }
+        slot = (slot + 1) & mask
+    }
+    return None
+}
+
+fn Map<K, V>.place(&mut self, entry Entry<K, V>) { _place_in(&mut self.slots, entry) }
+
+fn Map<K, V>.grow(&mut self) {
+    var capacity: usize = 8
+    if self.slots.len() > 0 { capacity = self.slots.len() * 2 }
+    var table: Vec<Option<Entry<K, V>>> = Vec.with_capacity(capacity)
+    for table.len() < capacity { table.push(None) }
+    for self.slots.len() > 0 {
+        match self.slots.pop() {
+            Some(Some(entry)) => { _place_in(&mut table, entry) }
+            _ => {}
+        }
+    }
+    self.slots = table
+}
+
+/// Stores an entry whose key is known to be absent; a free slot exists.
+fn _place_in<K: Hash + Eq, V>(table &mut Vec<Option<Entry<K, V>>>, entry Entry<K, V>) {
+    mask := table.len() - 1
+    var slot = usize(entry.key.hash() & u64(mask))
+    for table.get(slot).is_some() { slot = (slot + 1) & mask }
+    table.replace(slot, Some(entry))
+}
+
+/// Linear probing has no tombstones: entries after a removed one are
+/// reinserted until the next empty slot, so lookups stay correct.
+fn Map<K, V>.close_gap(&mut self, removed usize) {
+    mask := self.slots.len() - 1
+    var slot = (removed + 1) & mask
+    for self.slots.get(slot).is_some() {
+        moved := self.slots.replace(slot, None)
+        match moved {
+            Some(entry) => { self.place(entry) }
+            None => {}
+        }
+        slot = (slot + 1) & mask
+    }
+}
+
+/// Owned hash set, with the same hash/equality contract as Map.
+pub struct Set<K: Hash + Eq> { entries Map<K, bool> }
+pub fn Set<K>.new() Set<K> { return Set{entries: Map.new()} }
+pub fn Set<K>.len(&self) usize { return self.entries.len() }
+pub fn Set<K>.is_empty(&self) bool { return self.entries.is_empty() }
+/// True if a new key was inserted.
+pub fn Set<K>.insert(&mut self, key K) bool { return self.entries.insert(key, true).is_none() }
+pub fn Set<K>.contains(&self, key &K) bool { return self.entries.contains(key) }
+pub fn Set<K>.remove(&mut self, key &K) bool { return self.entries.remove(key).is_some() }
+pub fn Set<K>.drain(&mut self) Vec<K> {
+    var keys: Vec<K> = Vec.with_capacity(self.len())
+    var entries = self.entries.drain()
+    for entries.len() > 0 {
+        match entries.pop() {
+            Some(entry) => { keys.push(entry.key) }
+            None => {}
+        }
+    }
+    return keys
+}
+
+/// In-place unstable heapsort: O(n log n) worst-case comparisons, O(1)
+/// auxiliary storage. Negative/zero/positive comparator means less/equal/greater.
+/// The comparator must define a consistent total ordering.
+pub fn sort<T>(values &mut Vec<T>, compare fn(&T, &T) i32) {
+    size := values.len()
+    var root = size / 2
+    for root > 0 {
+        root = root - 1
+        _sift(values, root, size, &compare)
+    }
+    var end = size
+    for end > 1 {
+        end = end - 1
+        values.swap(0, end)
+        _sift(values, 0, end, &compare)
+    }
+}
+fn _sift<T>(values &mut Vec<T>, start usize, end usize, compare &fn(&T, &T) i32) {
+    var root = start
+    for root < end / 2 {
+        var child = root * 2 + 1
+        if child + 1 < end {
+            if compare(values.get(child), values.get(child + 1)) < 0 { child = child + 1 }
+        }
+        if compare(values.get(root), values.get(child)) >= 0 { return }
+        values.swap(root, child)
+        root = child
+    }
+}
+/// Returns the first equal position, or None. Input must already be sorted
+/// with the same comparator. O(log n) comparisons; no borrowed iterator state.
+pub fn binary_search<T>(values &[]T, key &T, compare fn(&T, &T) i32) Option<usize> {
+    var lo: usize = 0
+    var hi = values.len()
+    for lo < hi {
+        middle := lo + (hi - lo) / 2
+        if compare(&values[middle], key) < 0 { lo = middle + 1 } else { hi = middle }
+    }
+    if lo < values.len() {
+        if compare(&values[lo], key) == 0 { return Some(lo) }
+    }
+    return None
+}

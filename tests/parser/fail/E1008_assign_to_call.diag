@@ -2,7 +2,7 @@ error[E1008]: cannot assign to this expression
  --> tests/parser/fail/E1008_assign_to_call.tarn:2:5
   |
 2 |     get() = 1
-  |     ^^^^^ not a variable, field or index
+  |     ^^^^^ not a variable, field, index or `*r`
   |
-  = help: only `name`, `a.field` and `a[i]` can be assigned
+  = help: only `name`, `a.field`, `a[i]` and `*r` can be assigned
 

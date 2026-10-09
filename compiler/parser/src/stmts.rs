@@ -220,8 +220,8 @@ impl Parser {
             if !is_place(&e) {
                 self.error(
                     Diagnostic::error("E1008", "invalid_assignment_target", "cannot assign to this expression")
-                        .primary(e.span, "not a variable, field or index")
-                        .help("only `name`, `a.field` and `a[i]` can be assigned"),
+                        .primary(e.span, "not a variable, field, index or `*r`")
+                        .help("only `name`, `a.field`, `a[i]` and `*r` can be assigned"),
                 );
             }
             self.bump();
@@ -346,6 +346,7 @@ fn is_place(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Ident(_) | ExprKind::Field { .. } | ExprKind::Index { .. } => true,
         ExprKind::Paren(inner) => is_place(inner),
+        ExprKind::Unary { op: tarn_ast::UnaryOp::Deref, .. } => true,
         _ => false,
     }
 }

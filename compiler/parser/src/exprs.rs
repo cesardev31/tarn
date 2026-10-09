@@ -179,6 +179,7 @@ impl Parser {
             TokenKind::Spawn => self.prefix(UnaryOp::Spawn),
             TokenKind::Minus => self.prefix(UnaryOp::Neg),
             TokenKind::Bang => self.prefix(UnaryOp::Not),
+            TokenKind::Star => self.prefix(UnaryOp::Deref),
             TokenKind::Amp => {
                 self.bump();
                 let op = if self.eat(&TokenKind::Mut) { UnaryOp::RefMut } else { UnaryOp::Ref };

@@ -88,6 +88,108 @@ pub interface Eq {
     fn eq(&self, other &Self) bool
 }
 
+// Primitive equality: the built-in comparison, so generic code bounded by
+// `Eq` accepts primitives (ADR 0060).
+impl Eq for i8 {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for i16 {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for i32 {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for i64 {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for isize {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for u8 {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for u16 {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for u32 {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for u64 {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for usize {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for bool {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+impl Eq for string {
+    fn eq(&self, other &Self) bool { return self == other }
+}
+
+/// A 64-bit hash consistent with `Eq`: `a.eq(&b)` implies `a.hash() ==
+/// b.hash()`. Not cryptographic and not stable across Tarn versions; do not
+/// persist it. Used by `collections.Map` and `collections.Set` (ADR 0060).
+pub interface Hash {
+    fn hash(&self) u64
+}
+
+/// Finalizer of splitmix64: spreads integer keys over all 64 bits.
+fn _mix(value u64) u64 {
+    var x = value ^ (value >> 30)
+    x = x.wrapping_mul(13787848793156543929)
+    x = x ^ (x >> 27)
+    x = x.wrapping_mul(10723151780598845931)
+    return x ^ (x >> 31)
+}
+
+impl Hash for u64 {
+    fn hash(&self) u64 { return _mix(*self) }
+}
+// Checked numeric conversions cannot cast a negative signed value to u64.
+// Encode its two's-complement bits without negating the minimum i64.
+fn _signed_hash(value i64) u64 {
+    if value < 0 { return _mix(u64(-(value + 1)) ^ 18446744073709551615) }
+    return _mix(u64(value))
+}
+impl Hash for i8 { fn hash(&self) u64 { return _signed_hash(i64(*self)) } }
+impl Hash for i16 { fn hash(&self) u64 { return _signed_hash(i64(*self)) } }
+impl Hash for i32 { fn hash(&self) u64 { return _signed_hash(i64(*self)) } }
+impl Hash for i64 { fn hash(&self) u64 { return _signed_hash(*self) } }
+impl Hash for isize { fn hash(&self) u64 { return _signed_hash(i64(*self)) } }
+impl Hash for u8 {
+    fn hash(&self) u64 { return _mix(u64(*self)) }
+}
+impl Hash for u16 {
+    fn hash(&self) u64 { return _mix(u64(*self)) }
+}
+impl Hash for u32 {
+    fn hash(&self) u64 { return _mix(u64(*self)) }
+}
+impl Hash for usize {
+    fn hash(&self) u64 { return _mix(u64(*self)) }
+}
+impl Hash for bool {
+    fn hash(&self) u64 {
+        if *self { return _mix(1) }
+        return _mix(0)
+    }
+}
+
+/// FNV-1a over the UTF-8 bytes, finished with the integer mixer.
+impl Hash for string {
+    fn hash(&self) u64 {
+        data := self.bytes()
+        var h: u64 = 14695981039346656037
+        var i: usize = 0
+        for i < data.len() {
+            h = (h ^ u64(data[i])).wrapping_mul(1099511628211)
+            i = i + 1
+        }
+        return _mix(h)
+    }
+}
+
 /// Capability: values of this type are copied instead of moved.
 ///
 /// Not implemented with `impl`: primitives are `Copy`, and a struct or enum is
@@ -128,6 +230,38 @@ pub extern "intrinsic" fn f64.abs(self) f64
 
 // ---------------------------------------------------------------- signed integers
 
+// Modular (two's complement) arithmetic for hashing and checksums; ordinary
+// operators keep their overflow checks (ADR 0060).
+pub extern "intrinsic" fn i8.wrapping_add(self, other i8) i8
+pub extern "intrinsic" fn i8.wrapping_sub(self, other i8) i8
+pub extern "intrinsic" fn i8.wrapping_mul(self, other i8) i8
+pub extern "intrinsic" fn i16.wrapping_add(self, other i16) i16
+pub extern "intrinsic" fn i16.wrapping_sub(self, other i16) i16
+pub extern "intrinsic" fn i16.wrapping_mul(self, other i16) i16
+pub extern "intrinsic" fn i32.wrapping_add(self, other i32) i32
+pub extern "intrinsic" fn i32.wrapping_sub(self, other i32) i32
+pub extern "intrinsic" fn i32.wrapping_mul(self, other i32) i32
+pub extern "intrinsic" fn i64.wrapping_add(self, other i64) i64
+pub extern "intrinsic" fn i64.wrapping_sub(self, other i64) i64
+pub extern "intrinsic" fn i64.wrapping_mul(self, other i64) i64
+pub extern "intrinsic" fn isize.wrapping_add(self, other isize) isize
+pub extern "intrinsic" fn isize.wrapping_sub(self, other isize) isize
+pub extern "intrinsic" fn isize.wrapping_mul(self, other isize) isize
+pub extern "intrinsic" fn u8.wrapping_add(self, other u8) u8
+pub extern "intrinsic" fn u8.wrapping_sub(self, other u8) u8
+pub extern "intrinsic" fn u8.wrapping_mul(self, other u8) u8
+pub extern "intrinsic" fn u16.wrapping_add(self, other u16) u16
+pub extern "intrinsic" fn u16.wrapping_sub(self, other u16) u16
+pub extern "intrinsic" fn u16.wrapping_mul(self, other u16) u16
+pub extern "intrinsic" fn u32.wrapping_add(self, other u32) u32
+pub extern "intrinsic" fn u32.wrapping_sub(self, other u32) u32
+pub extern "intrinsic" fn u32.wrapping_mul(self, other u32) u32
+pub extern "intrinsic" fn u64.wrapping_add(self, other u64) u64
+pub extern "intrinsic" fn u64.wrapping_sub(self, other u64) u64
+pub extern "intrinsic" fn u64.wrapping_mul(self, other u64) u64
+pub extern "intrinsic" fn usize.wrapping_add(self, other usize) usize
+pub extern "intrinsic" fn usize.wrapping_sub(self, other usize) usize
+pub extern "intrinsic" fn usize.wrapping_mul(self, other usize) usize
 /// Absolute value; panics on the minimum value (it has no positive counterpart).
 pub extern "intrinsic" fn i8.abs(self) i8
 pub extern "intrinsic" fn i16.abs(self) i16
@@ -168,6 +302,8 @@ pub extern "intrinsic" fn Vec<T>.at(&self, index usize) T
 pub extern "intrinsic" fn Vec<T>.get_mut(&mut self, index usize) &mut T
 /// Installs `value` at `index` and moves the previous element out.
 pub extern "intrinsic" fn Vec<T>.replace(&mut self, index usize, value T) T
+/// Exchanges two elements; aborts if either index is out of bounds.
+pub extern "intrinsic" fn Vec<T>.swap(&mut self, a usize, b usize)
 /// Moves the element at `index` out; the last element takes its place.
 pub extern "intrinsic" fn Vec<T>.swap_remove(&mut self, index usize) T
 pub extern "intrinsic" fn Vec<T>.is_empty(&self) bool

@@ -42,3 +42,43 @@ pub async fn sleep(duration Duration) Result<void, io.Error> {
     var timer = try Timer.after(duration)
     return await timer.wait_async()
 }
+
+// Linux x86_64 timespec is two signed 64-bit fields (ADR 0060).
+import "ffi"
+extern "C" fn clock_gettime(clock i32, out *mut i64) i32
+extern "C" fn __errno_location() *u8
+pub copy struct Instant { seconds u64
+ nanos u32 }
+/// Unix seconds plus a nanosecond fraction, without calendar/time-zone policy.
+pub copy struct Timestamp { pub unix_seconds i64
+ pub nanos u32 }
+fn _clock(which i32) Result<Timestamp, io.Error> {
+    var fields = [2]i64{0, 0}
+    var result: i32 = 0
+    unsafe { result = clock_gettime(which, ffi.slice_mut(&mut fields)) }
+    if result != 0 {
+        var bytes: Vec<u8> = Vec.new()
+        unsafe { bytes = ffi.copy_bytes(__errno_location(), 4) }
+        code := i32(bytes.at(0)) + i32(bytes.at(1)) * 256 + i32(bytes.at(2)) * 65536 + i32(bytes.at(3)) * 16777216
+        return Err(io.Error.from_os(code))
+    }
+    return Ok(Timestamp{unix_seconds: fields[0], nanos: u32(fields[1])})
+}
+pub fn Instant.now() Result<Instant, io.Error> {
+    stamp := try _clock(1)
+    return Ok(Instant{seconds: u64(stamp.unix_seconds), nanos: stamp.nanos})
+}
+/// Millisecond duration, rounded down. Rejects reversed instants.
+pub fn Instant.since(self, earlier Instant) Result<Duration, io.Error> {
+    if self.seconds < earlier.seconds { return Err(io.Error.new(io.ErrorKind.InvalidInput)) }
+    var seconds = self.seconds - earlier.seconds
+    var nanos = i64(self.nanos) - i64(earlier.nanos)
+    if nanos < 0 {
+        if seconds == 0 { return Err(io.Error.new(io.ErrorKind.InvalidInput)) }
+        seconds = seconds - 1
+        nanos = nanos + 1000000000
+    }
+    return Ok(Duration.milliseconds(seconds * 1000 + u64(nanos) / 1000000))
+}
+pub fn Instant.elapsed(self) Result<Duration, io.Error> { return (try Instant.now()).since(self) }
+pub fn now_utc() Result<Timestamp, io.Error> { return _clock(0) }

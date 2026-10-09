@@ -4,10 +4,10 @@ error[E1001]: expected `)`, found `:=`
 3 |     y := 2
   |       ^^ expected `)`
 
-error[E1002]: expected expression, found `*`
+error[E1002]: expected expression, found `/`
  --> tests/parser/fail/recovery_multiple_errors.tarn:8:10
   |
-8 |     z := * 3
+8 |     z := / 3
   |          ^ expected an expression
 
 error[E1005]: expected end of statement, found identifier `b`

@@ -1,0 +1,57 @@
+// Blocking, non-owning standard descriptor views (ADR 0060). Never close them.
+import "io"
+import "ffi"
+extern "C" fn read(fd i32, data *mut u8, count usize) i64
+extern "C" fn tarn_console_write(fd i32, data *u8, count usize) i64
+extern "C" fn tarn_console_flush() i32
+extern "C" fn __errno_location() *u8
+
+pub struct Input { fd i32 }
+pub struct Output { fd i32 }
+pub fn stdin() Input { return Input{fd: 0} }
+pub fn stdout() Output { return Output{fd: 1} }
+pub fn stderr() Output { return Output{fd: 2} }
+fn _error() io.Error {
+    var data: Vec<u8> = Vec.new()
+    unsafe { data = ffi.copy_bytes(__errno_location(), 4) }
+    code := i32(data.at(0)) + i32(data.at(1)) * 256 + i32(data.at(2)) * 65536 + i32(data.at(3)) * 16777216
+    return io.Error.from_os(code)
+}
+/// One read; zero is EOF (or an empty buffer). Retries EINTR only.
+pub fn Input.read(&mut self, buffer &mut []u8) Result<usize, io.Error> {
+    for {
+        var count: i64 = 0
+        unsafe { count = read(self.fd, ffi.slice_mut(buffer), buffer.len()) }
+        if count >= 0 { return Ok(usize(count)) }
+        error := _error()
+        if error.native_code() != 4 { return Err(error) }
+    }
+}
+/// One write, which may be partial. Retries EINTR only.
+pub fn Output.write(&mut self, buffer &[]u8) Result<usize, io.Error> {
+    for {
+        var count: i64 = 0
+        unsafe { count = tarn_console_write(self.fd, ffi.slice(buffer), buffer.len()) }
+        if count >= 0 { return Ok(usize(count)) }
+        error := _error()
+        if error.native_code() != 4 { return Err(error) }
+    }
+}
+pub fn Output.write_all(&mut self, buffer &[]u8) Result<void, io.Error> {
+    var offset: usize = 0
+    for offset < buffer.len() {
+        count := try self.write(&buffer[offset..])
+        if count == 0 { return Err(io.Error.new(io.ErrorKind.WriteZero)) }
+        offset = offset + count
+    }
+    return Ok(())
+}
+pub fn Output.write_text(&mut self, text &string) Result<void, io.Error> { return self.write_all(text.bytes()) }
+/// Tarn writes are unbuffered. Flush all libc output streams, including print.
+/// Call before mixing print with unbuffered writes when order matters.
+pub fn Output.flush(&mut self) Result<void, io.Error> {
+    var code: i32 = 0
+    unsafe { code = tarn_console_flush() }
+    if code != 0 { return Err(_error()) }
+    return Ok(())
+}

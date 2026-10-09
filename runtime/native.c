@@ -1114,3 +1114,34 @@ int32_t tarn_rt_test_select(int argc, char **argv) {
     }
     return (int32_t)value;
 }
+
+/* Non-owning console writes: turn this call's SIGPIPE into an ordinary errno
+ * without changing process-wide disposition or consuming a previously pending
+ * signal. The mask is thread-local and restored before returning. */
+static int64_t tarn_console_output(int32_t fd, const uint8_t *data, uint64_t count, int flush) {
+    sigset_t blocked, old, pending;
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGPIPE);
+    int rc = pthread_sigmask(SIG_BLOCK, &blocked, &old);
+    if (rc != 0) { errno = rc; return -1; }
+    if (sigpending(&pending) != 0) {
+        int saved = errno;
+        pthread_sigmask(SIG_SETMASK, &old, NULL);
+        errno = saved;
+        return -1;
+    }
+    int already_pending = sigismember(&pending, SIGPIPE);
+    int64_t result = flush ? (int64_t)fflush(NULL) : (int64_t)write(fd, data, (size_t)count);
+    int saved = errno;
+    if (result < 0 && saved == EPIPE && !already_pending && !sigismember(&old, SIGPIPE)) {
+        struct timespec zero = {0, 0};
+        while (sigtimedwait(&blocked, NULL, &zero) < 0 && errno == EINTR) {}
+    }
+    pthread_sigmask(SIG_SETMASK, &old, NULL);
+    errno = saved;
+    return result;
+}
+int64_t tarn_console_write(int32_t fd, const uint8_t *data, uint64_t count) {
+    return tarn_console_output(fd, data, count, 0);
+}
+int32_t tarn_console_flush(void) { return (int32_t)tarn_console_output(-1, NULL, 0, 1); }

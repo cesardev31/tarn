@@ -1,0 +1,92 @@
+// Partial port of status_device/internal/metrics/system.go: network counters
+// and rates only. The GUI, disk, CPU and process collectors are not ported.
+import "collections"
+import "string"
+pub copy struct Counter {
+    pub rx u64
+    pub tx u64
+}
+pub struct Rate {
+    pub name string
+    pub rx_total u64
+    pub tx_total u64
+    pub rx_per_second u64
+    pub tx_per_second u64
+}
+/// Parse /proc/net/dev records. Skip headers, loopback and malformed records.
+pub fn parse_network(text &string) collections.Map<string, Counter> {
+    var counters: collections.Map<string, Counter> = collections.Map.new()
+    lines := string.lines(text)
+    for line in lines.as_slice() {
+        match string.find(line, ":") {
+            Some(colon) => {
+                name := string.trim(&line.copy_range(0, colon))
+                if name == "lo" || name.is_empty() { continue }
+                fields := string.fields(&line.copy_range(colon + 1, line.len()))
+                if fields.len() < 9 { continue }
+                match string.parse_u64(fields.get(0)) {
+                    Some(rx) => match string.parse_u64(fields.get(8)) {
+                        Some(tx) => { counters.insert(name, Counter{rx: rx, tx: tx}) }
+                        None => {}
+                    }
+                    None => {}
+                }
+            }
+            None => {}
+        }
+    }
+    return counters
+}
+fn delta(before u64, after u64) u64 {
+    if after < before { return 0 }
+    return after - before
+}
+// Float scaling avoids overflowing an intermediate integer delta * 1000.
+// Clamp a floating rounded upper boundary before the checked cast.
+fn per_second(bytes u64, millis u64) u64 {
+    scaled := f64(bytes) / f64(millis) * 1000.0
+    if scaled >= 18446744073709551616.0 { return 18446744073709551615 }
+    return u64(scaled)
+}
+fn compare(left &Rate, right &Rate) i32 {
+    if left.name < right.name { return -1 }
+    if left.name > right.name { return 1 }
+    return 0
+}
+/// Name-sorted rates. New interfaces and counter resets have zero deltas.
+/// A zero measurement interval uses one millisecond, explicitly.
+pub fn rates(previous &collections.Map<string, Counter>, current &collections.Map<string, Counter>, elapsed_millis u64) Vec<Rate> {
+    var interval = elapsed_millis
+    if interval == 0 { interval = 1 }
+    var out: Vec<Rate> = Vec.with_capacity(current.len())
+    var slot: usize = 0
+    for slot < current.slot_count() {
+        if current.has_entry(slot) {
+            entry := current.entry_at(slot)
+            var rx: u64 = 0
+            var tx: u64 = 0
+            if previous.contains(&entry.key) {
+                before := previous.get(&entry.key)
+                rx = per_second(delta(before.rx, entry.value.rx), interval)
+                tx = per_second(delta(before.tx, entry.value.tx), interval)
+            }
+            out.push(Rate{name: entry.key.clone(), rx_total: entry.value.rx, tx_total: entry.value.tx, rx_per_second: rx, tx_per_second: tx})
+        }
+        slot = slot + 1
+    }
+    collections.sort(&mut out, compare)
+    return out
+}
+
+import "json"
+impl json.Encode for Rate {
+    fn encode(&self, writer &mut json.Writer) {
+        writer.begin_object()
+        writer.field_string("name", &self.name)
+        writer.field_u64("rx_total", self.rx_total)
+        writer.field_u64("tx_total", self.tx_total)
+        writer.field_u64("rx_per_second", self.rx_per_second)
+        writer.field_u64("tx_per_second", self.tx_per_second)
+        writer.end_object()
+    }
+}

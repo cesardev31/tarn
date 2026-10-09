@@ -411,6 +411,8 @@ pub enum UnaryOp {
     Not,
     Ref,
     RefMut,
+    /// `*r`: the referent of `&T`/`&mut T` (ADR 0060).
+    Deref,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -469,6 +471,7 @@ impl UnaryOp {
             UnaryOp::Not => "!",
             UnaryOp::Ref => "&",
             UnaryOp::RefMut => "&mut",
+            UnaryOp::Deref => "*",
         }
     }
 }

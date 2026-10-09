@@ -1,0 +1,8 @@
+error[E3075]: cannot dereference `i32`
+ --> tests/types/fail/E3075_deref_non_reference.tarn:2:11
+  |
+2 |     print(*value)
+  |           ^^^^^^
+  |
+  = help: `*` applies to references (`&T` or `&mut T`)
+

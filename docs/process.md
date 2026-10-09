@@ -20,7 +20,8 @@ because `spawn` is a language keyword. No implicit shell or string tokenization
 occurs; a space, dollar sign or semicolon in an argument is ordinary data.
 An explicit `/bin/sh` command remains possible when the application wants one.
 
-Environment and executable lookup PATH are inherited. `current_dir` affects
+The environment and executable lookup PATH are inherited; `Command.env(name,
+value)` overrides one child variable (Phase 25) without touching the parent. `current_dir` affects
 only the child, never Tarn's global current directory. NUL, empty program and
 empty explicit directory are InvalidInput; missing executable/directory is
 NotFound, denied execution is PermissionDenied. Other native errors retain
@@ -46,8 +47,7 @@ and return owned copies or InvalidData. Binary/NUL bytes remain intact.
 All operations are blocking on the current pthread. Captures are unbounded;
 a child that never exits or descendants that hold pipe writers can block
 completion indefinitely. Calling these APIs from an async body also blocks
-its executor thread. There are no process timeouts, async process APIs, custom
-environments, public pipes/stdin writers, process groups or detach in 15D.
+its executor thread. There are no process timeouts, async process APIs, public pipes/stdin writers, process groups or detach in 15D.
 Reader-task creation and buffer allocation retain the runtime's existing
 abort-on-resource-failure policy.
 

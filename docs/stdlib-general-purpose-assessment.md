@@ -20,9 +20,26 @@ x86_64 platform. Platform expansion is a separate decision. A standard library
 alone cannot make a language general-purpose: language ergonomics, diagnostics,
 tooling, package availability and operational reliability also matter.
 
-## Existing coverage
+## Phase 31 follow-up
 
-The library currently contains 13 modules. Module count is not a measure of
+The initial assessment below predates Phase 31. The workspace now implements
+Map/Set with nominal Hash/Eq, Vec heapsort and slice binary search, blocking
+console streams, monotonic Instant, Unix UTC timestamps and ASCII string fields.
+See [collections](collections.md), [console](console.md), [clocks](clocks.md) and
+[the partial metrics port](../examples/status_metrics/README.md). These additions
+address parts of the original gaps; generic I/O/line reading, more collections,
+rich text/float formatting, calendar handling and HTTPS clients remain open.
+
+The three documentation discrepancies listed below have been corrected.
+Implementation scope and validation: [Phase 31 report](phase-31-report.md).
+Phase 29's workload-specific strings benchmark reported 2.6x Go's elapsed time
+([source report](phase-29-report.md)); this has not been remeasured here.
+Owned substring allocation and byte-loop checks remain text-performance work.
+Borrowed substring design must preserve the current aggregate-reference boundary.
+
+## Original coverage (before Phase 31)
+
+The original assessment covered 13 modules; Phase 31 adds collections and console. Module count is not a measure of
 completeness: depth, composability and the amount of application code required
 are more useful criteria.
 
@@ -68,7 +85,7 @@ These strengths should survive convenience improvements. New APIs must not hide
 borrows, detach owned work, introduce implicit shell execution or move semantic
 ownership decisions into the backend.
 
-## Gaps by practical impact
+## Original gaps and priorities (before Phase 31)
 
 ### Collections and algorithms: highest priority
 
@@ -263,9 +280,9 @@ Successful demonstrations should include negative cases and destruction paths,
 not just successful output. They should separate standard-library capability,
 package capability and compiler restrictions.
 
-## Documentation discrepancies observed
+## Original documentation discrepancies (now corrected)
 
-The current source exposes APIs absent from some existing descriptions:
+Resolved on 2026-10-08: the documents below now describe these APIs.
 
 - `http.serve_parallel` and `http.Handler` provide parallel native workers, each
   with a separate listener and executor; this does not imply a multithread async

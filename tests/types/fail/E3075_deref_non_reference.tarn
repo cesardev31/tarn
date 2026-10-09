@@ -1,0 +1,3 @@
+fn bad(value i32) {
+    print(*value)
+}

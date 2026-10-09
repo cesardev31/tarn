@@ -1,0 +1,19 @@
+import "time"
+import "io"
+fn main() Result<void, io.Error> {
+    start := try time.Instant.now()
+    stamp := try time.now_utc()
+    end := try time.Instant.now()
+    elapsed := try end.since(start)
+    if stamp.nanos >= 1000000000 { panic("invalid timestamp fraction") }
+    if stamp.unix_seconds < 0 { panic("unexpected wall clock") }
+    match start.since(end) {
+        Err(error) => { if error.kind != io.ErrorKind.InvalidInput { panic("incorrect reversed clock error") } }
+        Ok(value) => { if value.as_millis() != 0 { panic("reversed clock accepted") } }
+    }
+    same := try start.since(start)
+    if same.as_millis() != 0 { panic("same instant is not zero") }
+    current := try start.elapsed()
+    print("clocks ok")
+    return Ok(())
+}

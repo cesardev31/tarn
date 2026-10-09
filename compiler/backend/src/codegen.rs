@@ -1074,6 +1074,15 @@ impl Cx<'_, '_> {
         }
         Ok(addr)
     }
+    fn through_refs(&mut self, mut v: Val) -> Result<Val> {
+        while let Ty::Ref(_, inner) = &v.ty {
+            let inner = (**inner).clone();
+            let st = scalar(&inner).ok_or_else(|| Error::unsupported("comparison through a reference to an aggregate"))?;
+            let addr = v.value.ok_or_else(|| Error::bug("missing reference value"))?;
+            v = Val { value: Some(self.b.ins().load(st, cl::MemFlags::new(), addr, 0)), ty: inner };
+        }
+        Ok(v)
+    }
     fn read(&mut self, p: &Place) -> Result<Val> {
         let ty = self.place_ty(p)?;
         let l = layout::layout(self.t, &ty)?;
@@ -1485,6 +1494,9 @@ impl Cx<'_, '_> {
         }
     }
     fn binary(&mut self, op: BinOp, a: Val, b: Val) -> Result<Val> {
+        // The type checker compares through references (`&u64 == &u64`,
+        // `&string == &string`): read the referents.
+        let (a, b) = (self.through_refs(a)?, self.through_refs(b)?);
         if matches!(op, BinOp::Shl | BinOp::Shr) {
             let (Ty::Int(lhs), Ty::Int(rhs)) = (&a.ty, &b.ty) else {
                 return Err(Error::bug("shift operand types"));
@@ -2028,6 +2040,19 @@ impl Cx<'_, '_> {
         if let Some(result) = self.synchronization(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.vector(name, args, dest)? { return Ok(result); }
         if let Some(result) = self.ffi(name, args, dest)? { return Ok(result); }
+        // Explicit modular arithmetic (ADR 0060): no overflow check by design.
+        if let ([x, y], Ty::Int(i)) = (args, dest)
+            && let Some(op) = name.strip_prefix(i.name()).and_then(|rest| rest.strip_prefix('.'))
+            && matches!(op, "wrapping_add" | "wrapping_sub" | "wrapping_mul")
+        {
+            let (x, y) = (x.value.unwrap(), y.value.unwrap());
+            let value = match op {
+                "wrapping_add" => self.b.ins().iadd(x, y),
+                "wrapping_sub" => self.b.ins().isub(x, y),
+                _ => self.b.ins().imul(x, y),
+            };
+            return Ok(Val { value: Some(value), ty: dest.clone() });
+        }
         if args.len() != 1 {
             return Err(Error::unsupported(format!("intrinsic {name}")));
         }
@@ -2266,10 +2291,8 @@ fn validate_table(p: &post::Program, t: &Typed, interface: tarn_resolve::SymbolI
     if order.len() != methods.len() {
         return Err(Error::bug("vtable length mismatch"));
     }
-    let Ty::Adt(target, _) = concrete else {
-        return Err(Error::bug("invalid vtable concrete type"));
-    };
-    let resolved = t.decls.implementations.get(&(interface, *target)).ok_or_else(|| Error::bug("concrete/interface mismatch"))?;
+    let target = t.decls.impl_target(concrete).ok_or_else(|| Error::bug("invalid vtable concrete type"))?;
+    let resolved = t.decls.implementations.get(&(interface, target)).ok_or_else(|| Error::bug("concrete/interface mismatch"))?;
     if resolved.len() != methods.len() {
         return Err(Error::bug("incomplete resolved vtable"));
     }

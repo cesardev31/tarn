@@ -225,3 +225,27 @@ pub fn Builder.finish(self) string {
         None => { panic("internal string builder invariant") }
     }
 }
+
+/// Owned fields separated by ASCII whitespace (09..0D or 20). Empty runs
+/// disappear. Intended for proc-style records; not Unicode classification.
+pub fn fields(value &string) Vec<string> {
+    var out: Vec<string> = Vec.new()
+    data := value.bytes()
+    var start: usize = 0
+    for start < data.len() {
+        for start < data.len() {
+            byte := data[start]
+            if byte != 32 && (byte < 9 || byte > 13) { break }
+            start = start + 1
+        }
+        var end = start
+        for end < data.len() {
+            byte := data[end]
+            if byte == 32 || (byte >= 9 && byte <= 13) { break }
+            end = end + 1
+        }
+        if end > start { out.push(value.copy_range(start, end)) }
+        start = end
+    }
+    return out
+}

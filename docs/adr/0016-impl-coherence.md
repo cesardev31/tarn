@@ -17,7 +17,9 @@ that guarantees **at most one implementation of `I` for `T` in any program**.
 declares `I` or the module that declares `T`** (E2023). In addition:
 
 1. `T` must be a struct or enum (named type). `impl I for i32`,
-   `impl I for &T`, `impl I for []u8` are not allowed in v0 (E2024).
+   `impl I for &T`, `impl I for []u8` are not allowed in user modules (E2024).
+   Phase 31 implements the core-only primitive exception described below
+   ([ADR 0060](0060-general-purpose-foundations.md)).
 2. Type arguments of `T` are binders, as in ADR 0015:
    `impl Shape for Pair<A, B>` implements `Shape` for every `Pair`. No
    specialized impls (`impl Shape for Pair<i32, i32>`) in v0 (E2022).

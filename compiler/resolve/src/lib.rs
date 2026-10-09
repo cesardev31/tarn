@@ -339,6 +339,18 @@ mod tests {
     }
 
     #[test]
+    fn primitive_impl_requires_core_source_provenance() {
+        let mut map = tarn_diagnostics::SourceMap::new();
+        let id = map.add("core.tarn", "interface Extra { fn hash(&self) u64 }\nimpl Extra for i32 { fn hash(&self) u64 { return 0 } }\n");
+        let ast = tarn_parser::parse_file(id, map.file(id)).module;
+        for trusted in [false, true] {
+            let inputs = [crate::ModuleInput { name: "core".into(), ast: &ast, trusted_stdlib: trusted }];
+            let (_, diagnostics) = crate::resolve(&inputs);
+            assert_eq!(diagnostics.iter().any(|d| d.code == "E2024"), !trusted, "{diagnostics:?}");
+        }
+    }
+
+    #[test]
     fn private_stdlib_access_flows_only_down_the_layers() {
         use tarn_diagnostics::SourceMap;
         let mut map = SourceMap::new();

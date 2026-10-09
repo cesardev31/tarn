@@ -56,5 +56,8 @@ is used for ordinary parse failure. These APIs use Option, not io.Error.
 
 The module uses functions rather than adding primitive methods outside core.
 See [ADR 0042](adr/0042-string-essentials.md) for ownership, native bridges,
-allocation tradeoffs and bootstrap limits. Borrowed text iterators, mutable
-builders, Unicode classification and float formatting are deferred.
+allocation tradeoffs and bootstrap limits. `string.Builder` (Phase 17) accumulates text
+efficiently. Borrowed text iterators, Unicode classification and float formatting are deferred.
+
+`string.fields(&text)` (Phase 31) returns owned nonempty fields separated by
+ASCII whitespace. Unicode whitespace classification remains separate work.

@@ -195,3 +195,8 @@ Golden tests in `tests/**/fail/*.tarn` pin the rendered text of each code.
 E3062 was a temporary gate that prevented native compilation of async
 declarations before their state machines and destruction were implemented.
 Async bodies now lower onto verified frames (ADR 0037); the code is retired.
+
+## Phase 31 reference places
+
+- E3074 `deref_move`: a non-Copy value cannot be moved out of a reference; borrow or clone it instead.
+- E3075 `deref_non_reference`: `*` requires a reference; raw pointers use unsafe FFI helpers.

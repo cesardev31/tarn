@@ -1,0 +1,31 @@
+import "metrics"
+import "fs"
+import "io"
+import "time"
+import "runtime"
+import "console"
+import "string"
+import "json"
+fn main() Result<void, io.Error> {
+    before := metrics.parse_network(&try fs.read_text("/proc/net/dev"))
+    start := try time.Instant.now()
+    owner := try runtime.Execution.new()
+    var pause = runtime.Operation.new(&owner, time.sleep(time.Duration.milliseconds(100)))
+    try try owner.block_on(&mut pause)
+    after := metrics.parse_network(&try fs.read_text("/proc/net/dev"))
+    elapsed := try start.elapsed()
+    stamp := try time.now_utc()
+    rates := metrics.rates(&before, &after, elapsed.as_millis())
+    var body = string.Builder.new()
+    body.push("{\"unix_seconds\":")
+    body.push_i64(stamp.unix_seconds)
+    body.push(",\"elapsed_millis\":")
+    body.push_u64(elapsed.as_millis())
+    body.push(",\"interfaces\":")
+    body.push(&json.encode_list(rates.as_slice()))
+    body.push("}\n")
+    var output = console.stdout()
+    try output.write_text(&body.finish())
+    try output.flush()
+    return Ok(())
+}

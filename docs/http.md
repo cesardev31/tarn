@@ -32,7 +32,8 @@ HTTP does not introduce cross-execution migration.
 The application uses net.TcpListener.accept_async and moves each accepted stream
 into an owned connection task. The example serves GET/HEAD /health, POST /echo,
 and explicit 404/405 with Allow. It owns at most 128 task handles; admission waits
-for an existing handle when full. Tasks run on one Execution, not a thread pool.
+for an existing handle when full. Tasks run on one Execution; `http.serve_parallel` (below) runs one
+independent executor per worker instead of a shared pool.
 There is no generic server/router framework.
 
 read_request returns Result<Option<Request>, http.Error>. None is clean EOF before
@@ -107,6 +108,16 @@ For statuses and headers fixed in source, the module functions `http.json`,
 directly. An invalid fixed status (outside 200–599) or header is a programming
 error and aborts, like an out-of-range index. Use the `Response.*` forms,
 which return `Result`, when the status comes from data (ADR 0052).
+
+## Parallel serving (Phase 30)
+
+`serve_parallel<H: Handler + Share>(address, workers, &handler)` binds one
+SO_REUSEPORT listener per native worker before starting workers. Each owns an
+independent Execution and serves one connection at a time, closing it after one
+response. Implement `Handler.handle(&self, &Request) Result<Response, Error>`
+on a nominal shared type; protect mutable state with Mutex. Zero workers is
+InvalidInput. This is not shared-executor migration or work stealing, and it
+has no graceful shutdown API. See [the Phase 30 report](phase-30-report.md).
 
 ## Ownership and connection state
 
@@ -200,5 +211,5 @@ Connection state and transport viability decide whether rejection is possible.
 
 No client, TLS, HTTP/2/3, WebSocket, compression, multipart, streaming application
 bodies, routing/middleware framework, cookie/auth framework, scoped async tasks,
-generic async I/O, thread pool, cancellation or platform expansion. This is a
+generic async I/O, work-stealing scheduler, cancellation or platform expansion. This is a
 bounded server subset, not a blanket RFC-conformance claim.

@@ -5,7 +5,7 @@ fn first() {
 
 fn second() {
     print("still parsed")
-    z := * 3
+    z := / 3
 }
 
 fn third() {

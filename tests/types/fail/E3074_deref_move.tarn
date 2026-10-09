@@ -1,0 +1,3 @@
+fn bad(value &string) string {
+    return *value
+}

@@ -190,12 +190,16 @@ pub fn specialize_entry(p: &post::Program, t: &Typed, entry: FunctionId) -> Resu
                                 Ty::Ref(_, inner) => *inner,
                                 ty => ty,
                             };
-                            if let Ty::Adt(target, concrete_args) = &receiver_type {
+                            if let Some(target) = t.decls.impl_target(&receiver_type) {
+                                let concrete_args = match &receiver_type {
+                                    Ty::Adt(_, args) => args.clone(),
+                                    _ => Vec::new(),
+                                };
                                 let (interface, index) = t.decls.interface_methods.get(method).copied().ok_or_else(|| Error::bug("unregistered interface method"))?;
                                 let symbol = t
                                     .decls
                                     .implementations
-                                    .get(&(interface, *target))
+                                    .get(&(interface, target))
                                     .and_then(|ms| ms.get(index))
                                     .ok_or_else(|| Error::bug("missing resolved static implementation"))?;
                                 let id = p.by_symbol.get(symbol).copied().ok_or_else(|| Error::bug("missing static implementation function"))?;
@@ -264,11 +268,10 @@ fn operand_ty(f: &Function, t: &Typed, o: &Operand) -> Result<Ty> {
     }
 }
 fn table(concrete: &Ty, interface: tarn_resolve::SymbolId, t: &Typed, p: &post::Program, cx: &mut Instances<'_>) -> Result<Vec<FunctionId>> {
-    let Ty::Adt(target, args) = concrete else {
-        return Err(Error::unsupported("dynamic coercion of non-ADT"));
-    };
+    let target = t.decls.impl_target(concrete).ok_or_else(|| Error::bug("dynamic coercion without resolved implementation target"))?;
+    let args = match concrete { Ty::Adt(_, args) => args.clone(), _ => Vec::new() };
     let declarations = t.decls.interfaces.get(&interface).ok_or_else(|| Error::bug("missing interface table"))?;
-    let methods = t.decls.implementations.get(&(interface, *target)).ok_or_else(|| Error::bug("missing resolved implementation"))?;
+    let methods = t.decls.implementations.get(&(interface, target)).ok_or_else(|| Error::bug("missing resolved implementation"))?;
     if declarations.len() != methods.len() {
         return Err(Error::bug("incomplete interface table"));
     }

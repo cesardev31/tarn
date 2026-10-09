@@ -927,6 +927,7 @@ impl<'a, 'l> Builder<'a, 'l> {
             ExprKind::Field { .. } => self.res(e.id).is_none(),
             ExprKind::Index { index, .. } => !matches!(index.kind, ExprKind::Range { .. }),
             ExprKind::Paren(inner) => self.is_place(inner),
+            ExprKind::Unary { op: ast::UnaryOp::Deref, .. } => true,
             _ => false,
         }
     }
@@ -950,6 +951,7 @@ impl<'a, 'l> Builder<'a, 'l> {
                     None => p,
                 }
             }
+            ExprKind::Unary { op: ast::UnaryOp::Deref, operand } => self.place(operand).project(Proj::Deref),
             ExprKind::Index { base, index } if !matches!(index.kind, ExprKind::Range { .. }) => {
                 let (mut p, mut bt) = (self.place(base), self.ty(base));
                 while let Ty::Ref(_, inner) = bt {
@@ -1088,6 +1090,11 @@ impl<'a, 'l> Builder<'a, 'l> {
             ExprKind::Unary { op: ast::UnaryOp::Ref | ast::UnaryOp::RefMut, operand } => {
                 let rv = self.borrow(e, operand);
                 self.assign(dest, rv, span);
+            }
+            ExprKind::Unary { op: ast::UnaryOp::Deref, .. } => {
+                let place = self.place(e);
+                let o = self.read(place, &ty);
+                self.assign(dest, Rvalue::Use(o), span);
             }
             ExprKind::Unary { op, operand } if !matches!(operand.kind, ExprKind::Int(_)) => {
                 let o = self.operand(operand);

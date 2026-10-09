@@ -38,6 +38,8 @@ pub struct FnCx<'e, 'a> {
     inferred_lets: Vec<(SymbolId, Span)>,
     /// Operand of the `&`/`&mut` being checked (slices are legal there).
     borrowed: Option<NodeId>,
+    /// Assignment target being checked: `*r = v` writes, it does not read.
+    assigned: Option<NodeId>,
 }
 
 fn peel(t: &Ty) -> (Ty, Option<bool>) {
@@ -91,6 +93,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
             callable_share: HashMap::new(),
             inferred_lets: Vec::new(),
             borrowed: None,
+            assigned: None,
         }
     }
 
@@ -195,6 +198,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
         match self.infer.shallow(t) {
             Ty::Adt(s, _) => self.env.has_impl(iface, s),
             _ if Some(iface) == self.env.prelude.copy => self.is_copy(t),
+            ty @ (Ty::Bool | Ty::Int(_) | Ty::Float(_) | Ty::Str) => self.env.impl_target(&ty).is_some_and(|s| self.env.has_impl(iface, s)),
             Ty::Param(p) => self.env.decls.bounds.get(&p).is_some_and(|b| b.contains(&iface)),
             Ty::Any(i) => i == iface,
             Ty::Opaque | Ty::Error => true,
@@ -408,7 +412,9 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     self.callable_transfer.remove(&symbol);
                     self.callable_share.remove(&symbol);
                 }
+                let saved = self.assigned.replace(target.id);
                 let tt = self.expr(target, None);
+                self.assigned = saved;
                 self.require_mut(target, false);
                 let vt = self.expr(value, Some(&tt));
                 self.coerce(&vt, &tt, value.span, Some(value.id));
@@ -829,7 +835,7 @@ impl<'e, 'a> FnCx<'e, 'a> {
                     }
                 }
             }
-            ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => {
+            ExprKind::Unary { op: UnaryOp::Deref, operand: base } | ExprKind::Field { base, .. } | ExprKind::Index { base, .. } => {
                 let bt = self.tables.expr_types.get(&base.id).map(|t| self.infer.zonk(t)).unwrap_or(Ty::Error);
                 match bt {
                     Ty::Ref(true, _) | Ty::Opaque | Ty::Error => true,
@@ -879,7 +885,13 @@ impl<'e, 'a> FnCx<'e, 'a> {
             ExprKind::Bool(_) => Ty::Bool,
             ExprKind::Unit => Ty::Void,
             ExprKind::Error => Ty::Error,
-            ExprKind::Paren(inner) => self.expr(inner, expected),
+            ExprKind::Paren(inner) => {
+                let saved = self.assigned;
+                if saved == Some(e.id) { self.assigned = Some(inner.id); }
+                let ty = self.expr(inner, expected);
+                self.assigned = saved;
+                ty
+            },
             ExprKind::Ident(_) => self.name_value(e, expected),
             ExprKind::Field { base, name } => match self.res(e.id) {
                 Some(_) => self.name_value(e, expected),
@@ -1217,6 +1229,32 @@ impl<'e, 'a> FnCx<'e, 'a> {
                 let t = self.expr(operand, Some(&Ty::Bool));
                 self.coerce(&t, &Ty::Bool, operand.span, Some(operand.id));
                 Ty::Bool
+            }
+            UnaryOp::Deref => {
+                let place = self.borrowed == Some(e.id) || self.assigned == Some(e.id);
+                let t = self.expr(operand, None);
+                let z = self.infer.zonk(&t);
+                match z {
+                    Ty::Ref(_, inner) => {
+                        if !place && !self.is_copy(&inner) {
+                            let shown = self.show(&inner);
+                            self.err(
+                                Diagnostic::error("E3074", "deref_move", format!("cannot move `{shown}` out of a reference"))
+                                    .primary(e.span, "")
+                                    .note("`*r` reads a copy; only copy types can be read this way")
+                                    .help("borrow it (`&*r`, or use `r` directly), clone it, or assign a new value with `*r = value`"),
+                            );
+                        }
+                        *inner
+                    }
+                    Ty::Opaque | Ty::Error => z,
+                    other => {
+                        let shown = self.show(&other);
+                        let help = if matches!(other, Ty::Ptr(..)) { "raw pointers are read and written through `ffi` helpers inside `unsafe`" } else { "`*` applies to references (`&T` or `&mut T`)" };
+                        self.err(Diagnostic::error("E3075", "deref_non_reference", format!("cannot dereference `{shown}`")).primary(e.span, "").help(help));
+                        Ty::Error
+                    }
+                }
             }
             UnaryOp::Ref | UnaryOp::RefMut => {
                 let inner_expected = match expected.map(|x| self.infer.shallow(x)) {

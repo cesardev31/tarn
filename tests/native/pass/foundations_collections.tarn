@@ -1,0 +1,121 @@
+import "collections"
+fn check(ok bool) { if !ok { panic("collections assertion failed") } }
+pub copy struct Key { value i32 }
+impl Hash for Key { fn hash(&self) u64 { return 7 } }
+impl Eq for Key { fn eq(&self, other &Self) bool { return self.value == other.value } }
+fn compare(a &i32, b &i32) i32 {
+    if a < b { return -1 }
+    if a > b { return 1 }
+    return 0
+}
+fn main() {
+    var map: collections.Map<Key, string> = collections.Map.new()
+    check(map.is_empty())
+    var i: i32 = 0
+    for i < 64 {
+        check(map.insert(Key{value: i}, "payload").is_none())
+        i = i + 1
+    }
+    check(map.len() == 64)
+    i = 0
+    for i < 64 {
+        check(map.get(&Key{value: i}) == &"payload")
+        i = i + 1
+    }
+    match map.insert(Key{value: 32}, "replacement") {
+        Some(old) => { check(old == "payload") }
+        None => { panic("replacement lost") }
+    }
+    map.get_mut(&Key{value: 32}).clone()
+    i = 0
+    for i < 64 {
+        if i % 2 == 0 { check(map.remove(&Key{value: i}).is_some()) }
+        i = i + 1
+    }
+    check(map.len() == 32)
+    i = 0
+    for i < 64 {
+        check(map.contains(&Key{value: i}) == (i % 2 != 0))
+        i = i + 1
+    }
+    var seen: usize = 0
+    var slot: usize = 0
+    for slot < map.slot_count() {
+        if map.has_entry(slot) { check(map.entry_at(slot).key.value % 2 != 0)
+            seen = seen + 1 }
+        slot = slot + 1
+    }
+    check(seen == 32)
+    var moved = map.drain()
+    check(map.is_empty())
+    check(moved.len() == 32)
+    check(map.insert(Key{value: 99}, "reused").is_none())
+    check(map.get(&Key{value: 99}) == &"reused")
+    var signed: collections.Map<i64, i32> = collections.Map.new()
+    signed.insert(-9223372036854775808, 10)
+    signed.insert(-1, 20)
+    signed.insert(9223372036854775807, 30)
+    check(*signed.get(&-9223372036854775808) == 10)
+    value := signed.get_mut(&-1)
+    *value = 21
+    check(*signed.get(&-1) == 21)
+    check(*signed.get(&9223372036854775807) == 30)
+    var set: collections.Set<string> = collections.Set.new()
+    check(set.insert("one"))
+    check(!set.insert("one"))
+    check(set.contains(&"one"))
+    check(set.remove(&"one"))
+    check(!set.remove(&"one"))
+    set.insert("two")
+    check(set.drain().len() == 1)
+    check(set.is_empty())
+    var values: Vec<i32> = Vec.new()
+    collections.sort(&mut values, compare)
+    check(collections.binary_search(values.as_slice(), &0, compare).is_none())
+    values.push(3)
+    values.push(-1)
+    values.push(3)
+    values.push(0)
+    collections.sort(&mut values, compare)
+    check(values.at(0) == -1)
+    check(values.at(1) == 0)
+    check(values.at(2) == 3)
+    check(values.at(3) == 3)
+    match collections.binary_search(values.as_slice(), &3, compare) {
+        Some(index) => { check(index == 2) }
+        None => { panic("search missed") }
+    }
+    check(collections.binary_search(values.as_slice(), &2, compare).is_none())
+    check(collections.binary_search(values.as_slice(), &4, compare).is_none())
+    check(collections.binary_search(values.as_slice(), &-2, compare).is_none())
+    var owned: Vec<string> = Vec.new()
+    owned.push("a")
+    owned.push("b")
+    owned.swap(0, 1)
+    owned.swap(0, 0)
+    check(owned.get(0) == &"b")
+    check(owned.get(1) == &"a")
+    check(u8(255).wrapping_add(1) == 0)
+    check(i8(127).wrapping_add(1) == -128)
+    check(u64(0).wrapping_sub(1) == 18446744073709551615)
+    scalar := i32(-42)
+    hashed: &any Hash := &scalar
+    check(hashed.hash() == scalar.hash())
+    text := "café"
+    hashed_text: &any Hash := &text
+    check(hashed_text.hash() == text.hash())
+    var strings: collections.Map<string, i32> = collections.Map.new()
+    strings.insert("日本", 7)
+    strings.insert("café", 8)
+    check(*strings.get(&"日本") == 7)
+    check(*strings.get(&"café") == 8)
+    var flags: collections.Set<bool> = collections.Set.new()
+    check(flags.insert(true))
+    check(flags.insert(false))
+    check(!flags.insert(true))
+    var resource = "old"
+    loan := &mut resource
+    (*loan) = "new"
+    check(resource == "new")
+    print("collections ok")
+}

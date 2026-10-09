@@ -136,6 +136,8 @@ pub struct Decls {
     pub interfaces: HashMap<SymbolId, Vec<SymbolId>>,
     pub interface_methods: HashMap<SymbolId, (SymbolId, usize)>,
     pub implementations: HashMap<(SymbolId, SymbolId), Vec<SymbolId>>,
+    /// Primitive types that have `impl`s in `core` and the symbol naming them.
+    pub primitive_targets: Vec<(Ty, SymbolId)>,
     pub structs: HashMap<SymbolId, StructDef>,
     pub enums: HashMap<SymbolId, EnumDef>,
     pub fns: HashMap<SymbolId, FnSig>,
@@ -269,6 +271,9 @@ impl<'a> Env<'a> {
                 if let Some(order) = env.decls.interfaces.get(&interface) {
                     let methods = order.iter().filter_map(|decl| imp.methods.iter().find(|m| r.symbol(**m).name == r.symbol(*decl).name).copied()).collect();
                     env.decls.implementations.insert((interface, target), methods);
+                    if matches!(r.symbol(target).kind, SymbolKind::Primitive) && !env.decls.primitive_targets.iter().any(|(_, t)| *t == target) {
+                        env.decls.primitive_targets.push((primitive(&r.symbol(target).name), target));
+                    }
                 }
             }
         }
@@ -373,7 +378,9 @@ impl<'a> Env<'a> {
                         if let Some(t) = target {
                             self.inherit_bounds(t, &binders);
                         }
-                        let self_ty = target.map(|t| Ty::Adt(t, binders.iter().map(|b| Ty::Param(*b)).collect()));
+                        let self_ty = target.map(|t| {
+                            if matches!(self.r.symbol(t).kind, SymbolKind::Primitive) { primitive(&self.r.symbol(t).name) } else { Ty::Adt(t, binders.iter().map(|b| Ty::Param(*b)).collect()) }
+                        });
                         for f in &i.methods {
                             self.fn_sig(m, f, &binders, self_ty.clone(), None);
                         }
@@ -618,8 +625,25 @@ impl<'a> Env<'a> {
         }
     }
 
+    /// The symbol an `impl` names for this type: a struct/enum, or a
+    /// primitive (impls for primitives exist only in `core`, ADR 0016).
+    pub fn impl_target(&self, ty: &Ty) -> Option<SymbolId> {
+        self.decls.impl_target(ty)
+    }
+
     pub fn has_impl(&self, iface: SymbolId, target: SymbolId) -> bool {
         self.r.impls.iter().any(|i| i.interface == Some(iface) && i.target == Some(target))
+    }
+}
+
+impl Decls {
+    /// The symbol an `impl` names for this type: a struct/enum, or a
+    /// primitive (impls for primitives exist only in `core`, ADR 0016).
+    pub fn impl_target(&self, ty: &Ty) -> Option<SymbolId> {
+        match ty {
+            Ty::Adt(s, _) => Some(*s),
+            _ => self.primitive_targets.iter().find(|(t, _)| t == ty).map(|(_, s)| *s),
+        }
     }
 }
 

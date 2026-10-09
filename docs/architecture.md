@@ -245,3 +245,14 @@ on-demand per-type functions, so owned types may recurse through `Vec`. The
 type checker lets a non-consuming closure literal adopt an expected `mut fn`.
 The native bind bridge sets SO_REUSEADDR for TCP. See
 [ADR 0048](adr/0048-application-ergonomics.md).
+
+## General-purpose foundations (Phase 31)
+
+Ordinary bundled `collections` and `console` modules add owned Map/Set,
+comparator algorithms and non-owning standard-stream views. Hash/Eq primitive
+impls are confined to core; resolved implementation targets are reused by static
+and dynamic backend dispatch. Explicit reference places use normal IR Deref
+projections and ownership/drop checking. A small console C adapter only converts
+SIGPIPE to a reported errno using a thread-local signal mask. Clocks use the
+existing FFI layer and Linux x86_64 timespec; no scheduler or ownership catalog
+is added. See [ADR 0060](adr/0060-general-purpose-foundations.md).

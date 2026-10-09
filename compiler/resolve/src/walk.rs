@@ -537,7 +537,12 @@ impl<'c, 'a> Walker<'c, 'a> {
         let res = self.path_res(&bare)?;
         let Res::Symbol(id) = res else { return None };
         let kind = self.cx.sym(id).kind.clone();
-        if !matches!(kind, SymbolKind::Struct | SymbolKind::Enum) {
+        // ADR 0016: primitives get interface impls only inside `core`, which
+        // declares them; coherence then holds because no other module can.
+        let core_primitive = matches!(kind, SymbolKind::Primitive)
+            && self.cx.r.modules[self.m.0 as usize].name == prelude::CORE
+            && self.cx.inputs[self.m.0 as usize].trusted_stdlib;
+        if !matches!(kind, SymbolKind::Struct | SymbolKind::Enum) && !core_primitive {
             let mut d = Diagnostic::error("E2024", "invalid_impl_target", format!("cannot implement an interface for {} `{}`", kind_name(&kind), path_text(p)))
                 .primary(p.span, "")
                 .note("only structs and enums can implement interfaces in v0 (ADR 0016)");

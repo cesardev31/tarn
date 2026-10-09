@@ -43,7 +43,7 @@ stmt        = "return" [ expr ]
             | "var" IDENT [ ":" type ] "=" expr
             | "var" IDENT ":" type                  (* uninitialized, ADR 0024 *)
             | IDENT [ ":" type ] ":=" expr
-            | expr [ "=" expr ]                  (* assignment target: name, field, index *)
+            | expr [ "=" expr ]                  (* assignment target: name, field, index, *reference *)
             | if_stmt | for_stmt | match_stmt
             | block
             | "unsafe" block
@@ -57,7 +57,7 @@ cond        = expr ;                             (* no bare struct literals *)
 
 expr        = [ range_lhs ] ( ".." | "..=" ) [ binary ] | binary ;
 binary      = unary { BINOP binary } ;           (* precedence climbing, see below *)
-unary       = ( "-" | "!" | "&" [ "mut" ] | "try" | "await" ) unary | postfix ;
+unary       = ( "-" | "!" | "*" | "&" [ "mut" ] | "try" | "await" ) unary | postfix ;
 postfix     = primary { "." IDENT | "(" [ args ] ")" | "[" expr "]"
                       | "{" [ field_inits ] "}" } ;   (* struct literal: path-only primary *)
 primary     = INT | FLOAT | STRING | "true" | "false" | IDENT
@@ -89,7 +89,7 @@ literal     = [ "-" ] ( INT | FLOAT ) | STRING | "true" | "false" ;
 | 7 | `<<` `>>` | left |
 | 8 | `+` `-` | left |
 | 9 | `*` `/` `%` | left |
-| 10 | prefix `-` `!` `&` `&mut` `try` `await` | right (prefix) |
+| 10 | prefix `-` `!` `*` `&` `&mut` `try` `await` | right (prefix) |
 | 11 | postfix `.name` `(args)` `[i]` `Path{...}` | left |
 
 Bitwise operators bind tighter than comparisons (unlike C), so

@@ -198,6 +198,18 @@ impl Cx<'_, '_> {
                 self.vec_put(at, &args[2])?;
                 old
             }
+            ("swap", 3) if *mutable && *dest == Ty::Void => {
+                let (i, j) = (args[1].value.ok_or_else(|| Error::bug("vector index"))?, args[2].value.ok_or_else(|| Error::bug("vector index"))?);
+                self.vec_bounds(i, len);
+                self.vec_bounds(j, len);
+                let (x, y) = (self.vec_element(data, i, &elem)?, self.vec_element(data, j, &elem)?);
+                let first = self.vec_take(x, &elem)?;
+                let size = layout::layout(self.t, &elem)?.size;
+                // Equal indices: copying y onto x is a self-copy, then x is restored.
+                self.copy(x, y, size);
+                self.vec_put(y, &first)?;
+                Val { value: None, ty: Ty::Void }
+            }
             ("swap_remove", 2) if *mutable && *dest == elem => {
                 let index = args[1].value.ok_or_else(|| Error::bug("vector index"))?;
                 self.vec_bounds(index, len);

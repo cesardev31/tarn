@@ -1,0 +1,9 @@
+error[E3074]: cannot move `string` out of a reference
+ --> tests/types/fail/E3074_deref_move.tarn:2:12
+  |
+2 |     return *value
+  |            ^^^^^^
+  |
+  = note: `*r` reads a copy; only copy types can be read this way
+  = help: borrow it (`&*r`, or use `r` directly), clone it, or assign a new value with `*r = value`
+

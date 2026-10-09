@@ -10,7 +10,7 @@ pub(crate) fn mutated_symbols(body: &Block, uses: &HashMap<NodeId, tarn_resolve:
                 Some(Res::Symbol(s)) => Some(*s),
                 _ => None,
             },
-            ExprKind::Field { base, .. } | ExprKind::Index { base, .. } | ExprKind::Paren(base) => root(base, uses),
+            ExprKind::Field { base, .. } | ExprKind::Index { base, .. } | ExprKind::Paren(base) | ExprKind::Unary { op: UnaryOp::Deref, operand: base } => root(base, uses),
             _ => None,
         }
     }
@@ -147,7 +147,7 @@ pub(crate) fn consumed_symbols(body: &Block, uses: &HashMap<NodeId, tarn_resolve
                     Some(Res::Symbol(s)) => Some(*s),
                     _ => None,
                 },
-                ExprKind::Field { base, .. } | ExprKind::Index { base, .. } | ExprKind::Paren(base) => self.root(base),
+                ExprKind::Field { base, .. } | ExprKind::Index { base, .. } | ExprKind::Paren(base) | ExprKind::Unary { op: UnaryOp::Deref, operand: base } => self.root(base),
                 _ => None,
             }
         }
