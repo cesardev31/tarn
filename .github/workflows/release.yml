@@ -1,0 +1,72 @@
+name: Release Linux toolchain
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (vX.Y.Z)
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - id: version
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+      - name: Report existing formatting debt
+        continue-on-error: true
+        run: cargo fmt --all -- --check > formatting.log 2>&1
+      - run: cargo test --locked --workspace
+      - run: cargo build --locked --release -p tarn -p tarn-lsp
+      - run: tools/release/test-install.sh
+      - run: tools/release/package.sh "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-toolchain
+          path: |
+            target/dist/*.tar.gz
+            target/dist/SHA256SUMS
+            tools/release/install.sh
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-toolchain
+          path: artifacts
+      - name: Publish immutable prerelease assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing asset replacement' >&2
+            exit 1
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --generate-notes \
+            --title "Tarn $TAG — experimental Linux x86_64" \
+            artifacts/target/dist/*.tar.gz artifacts/target/dist/SHA256SUMS artifacts/tools/release/install.sh

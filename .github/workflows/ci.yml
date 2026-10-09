@@ -1,0 +1,30 @@
+name: Compiler CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Report existing formatting debt
+        continue-on-error: true
+        run: cargo fmt --all -- --check > formatting.log 2>&1
+      - run: cargo test --locked --workspace
+      - run: cargo build --locked --release -p tarn -p tarn-lsp
+      - name: Native application smoke
+        run: |
+          target/release/tarn build examples/csv_report/main.tarn -o /tmp/tarn-csv-report
+          target/release/tarn init /tmp/tarn-smoke
+          cd /tmp/tarn-smoke
+          "$GITHUB_WORKSPACE/target/release/tarn" run
+      - run: tools/release/test-install.sh
