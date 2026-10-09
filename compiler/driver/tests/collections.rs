@@ -30,7 +30,7 @@ fn collection_loans_and_primitive_coherence_remain_checked() {
 
 #[test]
 fn ordinary_foundation_modules_have_editor_sources() {
-    for module in ["collections", "console"] {
+    for module in ["collections", "console", "https", "string", "json"] {
         let entry = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("../../stdlib/{module}/{module}.tarn")).canonicalize().unwrap();
         let result = tarn_driver::check_editor_with_overlays(&entry, &Default::default()).unwrap();
         assert!(!result.has_errors(), "{module}: {:?}", result.diagnostics);

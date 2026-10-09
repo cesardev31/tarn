@@ -1,0 +1,76 @@
+import "https"
+import "os"
+import "string"
+fn check(ok bool) { if !ok { panic("HTTPS assertion") } }
+fn main() {
+    var args: Vec<string> = Vec.new()
+    match os.args() { Ok(value) => { args = value }
+        Err(error) => { panic("arguments") } }
+    // Ordinary native suite skips this fixture
+    // Integration supplies TLS URLs.
+    if args.len() != 4 { print("HTTPS integration fixture")
+            return }
+    base := args.get(1)
+    var options = https.Options.new()
+    options.ca_file = args.get(2).clone()
+    options.response_limit = 1024
+    options.timeout_millis = 2000
+    match https.get(&(base + "/ok"), &options) {
+        Ok(response) => { check(response.status == 200)
+            match string.from_utf8(response.body.as_slice()) { Some(body) => { check(body == "{\"ok\":true}") }
+                None => { panic("UTF-8 response") } } }
+        Err(error) => { print(error.code)
+            panic("GET") }
+    }
+    payload := "{\"ticket\":\"café 日本\"}"
+    match https.request(&(base + "/echo"), "POST", "api_access_token: fixture", payload.bytes(), &options) {
+        Ok(response) => { check(response.status == 201)
+            match string.from_utf8(response.body.as_slice()) { Some(body) => { check(body == payload) }
+                None => { panic("POST response") } } }
+        Err(error) => { print(error.code)
+            panic("POST") }
+    }
+    match https.get(&(base + "/redirect"), &options) {
+        Ok(response) => { check(response.status == 302) }
+        Err(error) => { panic("redirect response") }
+    }
+    match https.get(&(base + "/status"), &options) {
+        Ok(response) => { check(response.status == 429) }
+        Err(error) => { panic("HTTP status") }
+    }
+    match https.get(&(base + "/truncated"), &options) {
+        Err(error) => { check(error.code == 18 || error.code == 56) }
+        Ok(response) => { panic("truncated accepted") }
+    }
+    options.response_limit = 4
+    match https.get(&(base + "/ok"), &options) {
+        Err(error) => { check(error.code == -2) }
+        Ok(response) => { panic("oversize accepted") }
+    }
+    options.response_limit = 1024
+    options.timeout_millis = 100
+    match https.get(&(base + "/slow"), &options) {
+        Err(error) => { check(error.code == 28) }
+        Ok(response) => { panic("timeout ignored") }
+    }
+    options.timeout_millis = 2000
+    match https.get(args.get(3), &options) {
+        Err(error) => { check(error.code == 60) }
+        Ok(response) => { panic("wrong hostname accepted") }
+    }
+    options.ca_file = ""
+    match https.get(base, &options) {
+        Err(error) => { check(error.code == 60) }
+        Ok(response) => { panic("untrusted certificate accepted") }
+    }
+    match https.get("file:///etc/passwd", &options) {
+        Err(error) => { check(error.code == -3) }
+        Ok(response) => { panic("scheme accepted") }
+    }
+    match https.request(base, "GET", "x: a\r\ninjected: b", "".bytes(), &options) {
+        Err(error) => { check(error.code == -3) }
+        Ok(response) => { panic("header injection") }
+    }
+    check(https.encode_query("café 日本 &+") == "caf%C3%A9%20%E6%97%A5%E6%9C%AC%20%26%2B")
+    print("HTTPS integration fixture")
+}

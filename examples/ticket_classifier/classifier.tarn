@@ -1,0 +1,49 @@
+import "json"
+import "client"
+import "https"
+pub fn body(ticket &json.Value, categories &json.Value, model &string) string {
+    var out = json.Writer.new()
+    out.begin_object()
+    out.field_string("model", model)
+    out.key("state")
+    out.begin_object()
+    out.key("ticket")
+    out.value(ticket)
+    out.end_object()
+    out.key("questions")
+    out.begin_object()
+    out.key("categoria")
+    out.begin_object()
+    out.field_string("type", "choice")
+    out.field_string("instructions", "Which support category describes the customer's main issue in `ticket`?")
+    out.key("criteria")
+    out.value(categories)
+    out.end_object()
+    out.key("urgencia")
+    out.begin_object()
+    out.field_string("type", "score")
+    out.field_string("instructions", "How urgent is `ticket` based on its impact on the customer?")
+    out.key("criteria")
+    out.begin_array()
+    for level in [4]string{"General question or suggestion; no operational impact", "Annoying problem with a workaround; customer is not blocked", "An important customer function is blocked", "Service outage, financial or data loss, or imminent deadline"} { out.string(&level) }
+    out.end_array()
+    out.end_object()
+    out.key("molesto")
+    out.begin_object()
+    out.field_string("type", "noul")
+    out.field_string("instructions", "Does the customer express anger or frustration in `ticket`?")
+    out.end_object()
+    out.end_object()
+    out.end_object()
+    return out.finish()
+}
+pub fn classify(endpoint &string, token &string, ticket &json.Value, categories &json.Value, model &string, options &https.Options) Result<json.Value, client.Error> {
+    request := body(ticket, categories, model)
+    response := try client.fetch(endpoint, "POST", &("Authorization: Bearer " + token), &request, options)
+    answers := try client.member(&response, "answers")
+    category := try client.member(&answers, "categoria")
+    urgency := try client.member(&answers, "urgencia")
+    upset := try client.member(&answers, "molesto")
+    // Retain exact JSON scores/probabilities; no lossy float conversion.
+    return Ok(response)
+}

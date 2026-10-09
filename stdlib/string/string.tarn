@@ -127,8 +127,9 @@ pub fn lines(value &string) Vec<string> {
 
 /// Strict decimal parsing. Optional '+'; no whitespace or separators.
 /// Overflow is None, never a checked-arithmetic panic.
-pub fn parse_u64(value &string) Option<u64> {
-    data := value.bytes()
+pub fn parse_u64(value &string) Option<u64> { return parse_u64_bytes(value.bytes()) }
+/// Strict decimal parsing from borrowed bytes; no UTF-8 copy is necessary.
+pub fn parse_u64_bytes(data &[]u8) Option<u64> {
     if data.len() == 0 { return None }
     var index: usize = 0
     if data[0] == 43 { index = 1 }
@@ -215,8 +216,24 @@ pub struct Builder {
 }
 pub fn Builder.new() Builder { return Builder{data: Vec.new()} }
 pub fn Builder.push(&mut self, text &string) { self.data.extend_from_slice(text.bytes()) }
-pub fn Builder.push_u64(&mut self, value u64) { self.push(&from_u64(value)) }
-pub fn Builder.push_i64(&mut self, value i64) { self.push(&from_i64(value)) }
+pub fn Builder.push_u64(&mut self, value u64) {
+    var digits = [20]u8{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    var start: usize = 20
+    var number = value
+    for {
+        start = start - 1
+        digits[start] = u8(number % 10) + 48
+        number = number / 10
+        if number == 0 { break }
+    }
+    self.data.extend_from_slice(&digits[start..])
+}
+pub fn Builder.push_i64(&mut self, value i64) {
+    if value >= 0 { self.push_u64(u64(value)) } else {
+        self.push("-")
+        self.push_u64(u64(-(value + 1)) + 1)
+    }
+}
 /// Byte length accumulated so far.
 pub fn Builder.len(&self) usize { return self.data.len() }
 pub fn Builder.finish(self) string {
@@ -248,4 +265,134 @@ pub fn fields(value &string) Vec<string> {
         start = end
     }
     return out
+}
+
+/// Byte offsets only: does not own or borrow text. Validate against the source
+/// on every access; offsets may be reused only when that is intentional.
+pub copy struct Range { pub start usize
+ pub end usize }
+pub fn valid_range(value &string, range Range) bool {
+    if range.start > range.end || range.end > value.len() { return false }
+    data := value.bytes()
+    if range.start < data.len() && (data[range.start] & 192) == 128 { return false }
+    if range.end < data.len() && (data[range.end] & 192) == 128 { return false }
+    return true
+}
+/// Zero-copy UTF-8 bytes borrowing value. Invalid bounds abort, like indexing.
+/// Use valid_range first when bounds are untrusted. No mutable text access.
+pub fn range_bytes(value &string, range Range) &[]u8 {
+    if !valid_range(value, range) { panic("invalid UTF-8 text range") }
+    return &value.bytes()[range.start..range.end]
+}
+pub fn copy_span(value &string, range Range) Option<string> {
+    return slice(value, range.start, range.end)
+}
+/// Next nonempty ASCII-whitespace field. Cursor is a byte offset; at EOF it
+/// equals the source length. A cursor inside a UTF-8 scalar is invalid.
+pub fn next_field(value &string, cursor &mut usize) Option<Range> {
+    if !valid_range(value, Range{start: *cursor, end: *cursor}) { panic("invalid text cursor") }
+    data := value.bytes()
+    var start = *cursor
+    for start < data.len() && whitespace(data[start]) { start = start + 1 }
+    var end = start
+    for end < data.len() && !whitespace(data[end]) { end = end + 1 }
+    *cursor = end
+    if start == end { return None }
+    return Some(Range{start: start, end: end})
+}
+/// Next LF/CRLF line, preserving empty lines but no phantom trailing line.
+pub fn next_line(value &string, cursor &mut usize) Option<Range> {
+    if !valid_range(value, Range{start: *cursor, end: *cursor}) { panic("invalid text cursor") }
+    data := value.bytes()
+    start := *cursor
+    if start == data.len() { return None }
+    var end = start
+    for end < data.len() && data[end] != 10 { end = end + 1 }
+    *cursor = end
+    if end < data.len() {
+        *cursor = end + 1
+        if end > start && data[end - 1] == 13 { end = end - 1 }
+    }
+    return Some(Range{start: start, end: end})
+}
+/// Number of split parts without allocating parts or a vector. Empty separator
+/// counts UTF-8 scalars, matching split's existing contract.
+pub fn split_count(value &string, separator &string) usize {
+    data := value.bytes()
+    needle := separator.bytes()
+    var count: usize = 0
+    var index: usize = 0
+    if needle.is_empty() {
+        for index < data.len() {
+            if (data[index] & 192) != 128 { count = count + 1 }
+            index = index + 1
+        }
+        return count
+    }
+    count = 1
+    for index < data.len() {
+        if data[index] == needle[0] && equal_at(data, needle, index) {
+            count = count + 1
+            index = index + needle.len()
+        } else { index = index + 1 }
+    }
+    return count
+}
+
+/// Offset-only split state; no source or separator loan is stored. Keep both
+/// inputs unchanged during a traversal for meaningful results.
+pub copy struct SplitCursor { offset usize
+    finished bool }
+pub fn SplitCursor.new() SplitCursor { return SplitCursor{offset: 0, finished: false} }
+pub fn next_split(value &string, separator &string, cursor &mut SplitCursor) Option<Range> {
+    if cursor.finished { return None }
+    if !valid_range(value, Range{start: cursor.offset, end: cursor.offset}) { panic("invalid split cursor") }
+    data := value.bytes()
+    needle := separator.bytes()
+    start := cursor.offset
+    var end = start
+    if needle.is_empty() {
+        if start == data.len() { cursor.finished = true
+            return None }
+        end = end + 1
+        for end < data.len() && (data[end] & 192) == 128 { end = end + 1 }
+        cursor.offset = end
+        return Some(Range{start: start, end: end})
+    }
+    for end < data.len() {
+        if data[end] == needle[0] && equal_at(data, needle, end) {
+            cursor.offset = end + needle.len()
+            return Some(Range{start: start, end: end})
+        }
+        end = end + 1
+    }
+    cursor.finished = true
+    return Some(Range{start: start, end: end})
+}
+/// Split offsets, avoiding copied strings. A view borrows the source only
+/// when range_bytes is called; this vector stores no references.
+pub fn split_ranges(value &string, separator &string) Vec<Range> {
+    var spans: Vec<Range> = Vec.new()
+    var cursor = SplitCursor.new()
+    for {
+        match next_split(value, separator, &mut cursor) {
+            Some(span) => { spans.push(span) }
+            None => { break }
+        }
+    }
+    return spans
+}
+
+/// Byte range of at most limit UTF-8 scalars from the start. Scalars are not
+/// grapheme clusters; this may separate combining marks. No allocation.
+pub fn prefix_scalars(value &string, limit usize) Range {
+    data := value.bytes()
+    var offset: usize = 0
+    var count: usize = 0
+    for offset < data.len() && count < limit {
+        offset = offset + 1
+        for offset < data.len() && (data[offset] & 192) == 128 { offset = offset + 1 }
+        count = count + 1
+    }
+    return Range{start: 0, end: offset}
 }

@@ -1,0 +1,68 @@
+// Single-conversation read-only port. Tokens come from environment, never argv.
+import "client"
+import "ticket"
+import "classifier"
+import "https"
+import "json"
+import "string"
+import "os"
+import "fs"
+import "console"
+fn env(name &string) Result<string, client.Error> {
+    match os.env_or(name, "") { Ok(value) => { return Ok(value) }
+        Err(error) => { return Err(client.Error{code: -3}) } }
+}
+fn run() Result<void, client.Error> {
+    var args: Vec<string> = Vec.new()
+    match os.args() { Ok(value) => { args = value }
+        Err(error) => { return Err(client.Error{code: -3}) } }
+    if args.len() != 5 { return Err(client.Error{code: -3}) }
+    // base URL, account ID, conversation ID, categories JSON file.
+    for index in [2]usize{2, 3} {
+        if string.parse_u64(args.get(index)).is_none() { return Err(client.Error{code: -3}) }
+    }
+    token := try env("CHATWOOT_TOKEN")
+    key := try env("TYPESAFE_API_KEY")
+    if token.is_empty() || key.is_empty() { return Err(client.Error{code: -3}) }
+    var options = https.Options.new()
+    options.ca_file = try env("TARN_CA_FILE")
+    endpoint := try env("TYPESAFE_ENDPOINT")
+    var target = endpoint
+    if target.is_empty() { target = "https://api.typesafe.ai/v1/systemone" }
+    var source = ""
+    match fs.read_text(args.get(4)) { Ok(value) => { source = value }
+        Err(error) => { return Err(client.Error{code: -3}) } }
+    var categories = json.Value.Null
+    match json.parse(&source) { Ok(value) => { categories = value }
+        Err(error) => { return Err(client.Error{code: -4}) } }
+    base := args.get(1) + "/api/v1/accounts/" + args.get(2) + "/conversations/" + args.get(3)
+    header := "api_access_token: " + token
+    conversation := try client.fetch(&base, "GET", &header, "", &options)
+    var subject = ""
+    match conversation.get("additional_attributes") {
+        Some(attributes) => { subject = client.text(&attributes, "mail_subject") }
+        None => {}
+    }
+    messages := try client.fetch(&(base + "/messages"), "GET", &header, "", &options)
+    input := ticket.build(&subject, try client.member(&messages, "payload"))
+    if !ticket.has_customer(&input) { return Err(client.Error{code: -6}) }
+    result := try classifier.classify(&target, &key, &input, &categories, "jev-latest", &options)
+    var out = console.stdout()
+    match out.write_text(&(json.encode(&result) + "\n")) {
+        Ok(done) => {}
+        Err(error) => { return Err(client.Error{code: -5}) }
+    }
+    return Ok(())
+}
+fn main() {
+    match run() {
+        Ok(done) => {}
+        Err(error) => {
+            var err = console.stderr()
+            message := "ticket classifier failed (code " + string.from_i64(i64(error.code)) + ")\nUsage: classifier HTTPS_BASE ACCOUNT_ID CONVERSATION_ID CATEGORIES_JSON\n"
+            match err.write_text(&message) { Ok(done) => {}
+                Err(failure) => {} }
+            os.exit(1)
+        }
+    }
+}

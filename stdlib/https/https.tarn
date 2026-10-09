@@ -1,0 +1,61 @@
+// Bounded synchronous HTTPS using the system libcurl ABI (ADR 0062).
+import "ffi"
+import "string"
+extern "C" fn tarn_https_request(url *u8, method *u8, header *u8, body *u8, body_size u64, ca *u8, timeout u64, buffer *mut u8, limit u64, used *mut u64, status *mut i64) i32
+pub copy struct Error { pub code i32 }
+// -1 dependency unavailable; -2 response too large; -3 invalid input;
+// positive codes preserve libcurl failures (28 timeout, 60 certificate).
+pub struct Response { pub status i64
+    pub body Vec<u8> }
+pub struct Options { pub timeout_millis u64
+    pub response_limit usize
+    pub ca_file string }
+pub fn Options.new() Options { return Options{timeout_millis: 30000, response_limit: 1048576, ca_file: ""} }
+fn cstring(text &string) Result<ffi.CString, Error> {
+    match ffi.CString.new(text) { Some(value) => { return Ok(value) }
+        None => { return Err(Error{code: -3}) } }
+}
+/// HTTPS only. GET/POST. No automatic redirects, proxy environment or retries.
+/// Optional one header, validated against newline/NUL injection. HTTP error
+/// statuses are ordinary responses. Call blocks the current native task.
+pub fn request(url &string, method &string, header &string, body &[]u8, options &Options) Result<Response, Error> {
+    if !string.starts_with(url, "https://") || (method != &"GET" && method != &"POST") { return Err(Error{code: -3}) }
+    if options.timeout_millis == 0 || options.timeout_millis > 9223372036854775807 || options.response_limit > 67108864 { return Err(Error{code: -3}) }
+    if method == &"GET" && !body.is_empty() { return Err(Error{code: -3}) }
+    for byte in header.bytes() {
+        if byte == 10 || byte == 13 || byte == 0 { return Err(Error{code: -3}) }
+    }
+    address := try cstring(url)
+    verb := try cstring(method)
+    field := try cstring(header)
+    ca := try cstring(&options.ca_file)
+    var buffer: Vec<u8> = Vec.with_capacity(options.response_limit)
+    for buffer.len() < options.response_limit { buffer.push(0) }
+    var used: u64 = 0
+    var status: i64 = 0
+    var code: i32 = 0
+    unsafe { code = tarn_https_request(address.as_ptr(), verb.as_ptr(), field.as_ptr(), ffi.slice(body), u64(body.len()), ca.as_ptr(), options.timeout_millis, ffi.slice_mut(buffer.as_mut_slice()), u64(buffer.len()), ffi.of_mut(&mut used), ffi.of_mut(&mut status)) }
+    if code != 0 { return Err(Error{code: code}) }
+    for buffer.len() > usize(used) { buffer.pop() }
+    return Ok(Response{status: status, body: buffer})
+}
+pub fn get(url &string, options &Options) Result<Response, Error> {
+    empty := [0]u8{}
+    return request(url, "GET", "", &empty, options)
+}
+/// RFC 3986 percent encoding of one UTF-8 query value (space becomes %20).
+pub fn encode_query(value &string) string {
+    var bytes: Vec<u8> = Vec.new()
+    hex := "0123456789ABCDEF"
+    for byte in value.bytes() {
+        if (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 45 || byte == 46 || byte == 95 || byte == 126 {
+            bytes.push(byte)
+        } else {
+            bytes.push(37)
+            bytes.push(hex.bytes()[usize(byte / 16)])
+            bytes.push(hex.bytes()[usize(byte % 16)])
+        }
+    }
+    match string.from_utf8(bytes.as_slice()) { Some(text) => { return text }
+        None => { panic("query encoding invariant") } }
+}

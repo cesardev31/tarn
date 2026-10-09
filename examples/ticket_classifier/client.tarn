@@ -1,0 +1,24 @@
+import "https"
+import "json"
+import "string"
+pub copy struct Error { pub code i32 }
+pub fn fetch(url &string, method &string, header &string, body &string, options &https.Options) Result<json.Value, Error> {
+    var response: https.Response
+    match https.request(url, method, header, body.bytes(), options) {
+        Ok(value) => { response = value }
+        Err(error) => { return Err(Error{code: error.code}) }
+    }
+    if response.status < 200 || response.status >= 300 { return Err(Error{code: -1000 - i32(response.status)}) }
+    match json.parse_bytes(response.body.as_slice()) {
+        Ok(value) => { return Ok(value) }
+        Err(error) => { return Err(Error{code: -4}) }
+    }
+}
+pub fn member(value &json.Value, key &string) Result<json.Value, Error> {
+    match value.get(key) { Some(field) => { return Ok(field) }
+        None => { return Err(Error{code: -4}) } }
+}
+pub fn text(value &json.Value, key &string) string {
+    match value.text(key) { Some(field) => { return field }
+        None => { return "" } }
+}

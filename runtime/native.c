@@ -1145,3 +1145,101 @@ int64_t tarn_console_write(int32_t fd, const uint8_t *data, uint64_t count) {
     return tarn_console_output(fd, data, count, 0);
 }
 int32_t tarn_console_flush(void) { return (int32_t)tarn_console_output(-1, NULL, 0, 1); }
+
+/* Optional Linux x86_64 libcurl ABI adapter. No native owner escapes a call.
+ * Stable option numbers: curl 7.88.1 include/curl/curl.h (curl.se).
+ * Loaded lazily: applications not using HTTPS need no libcurl installation.
+ */
+#include <dlfcn.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+#include <limits.h>
+struct tarn_curl_api {
+    void *library;
+    void *(*init)(void);
+    int (*global_init)(long);
+    int (*setopt)(void *, int, ...);
+    int (*perform)(void *);
+    int (*getinfo)(void *, int, ...);
+    void (*cleanup)(void *);
+    void *(*append)(void *, const char *);
+    void (*free_headers)(void *);
+    int ready;
+};
+static struct tarn_curl_api tarn_curl;
+static pthread_once_t tarn_curl_once = PTHREAD_ONCE_INIT;
+static void tarn_curl_load(void) {
+    tarn_curl.library = dlopen("libcurl.so.4", RTLD_NOW | RTLD_LOCAL);
+    if (!tarn_curl.library) return;
+#define LOAD(field, symbol) do { *(void **)(&tarn_curl.field) = dlsym(tarn_curl.library, symbol); if (!tarn_curl.field) return; } while (0)
+    LOAD(init, "curl_easy_init"); LOAD(global_init, "curl_global_init");
+    LOAD(setopt, "curl_easy_setopt"); LOAD(perform, "curl_easy_perform");
+    LOAD(getinfo, "curl_easy_getinfo"); LOAD(cleanup, "curl_easy_cleanup");
+    LOAD(append, "curl_slist_append"); LOAD(free_headers, "curl_slist_free_all");
+#undef LOAD
+    tarn_curl.ready = tarn_curl.global_init(3L) == 0;
+    /* Process-lifetime library/global state; never unload beneath another task. */
+}
+struct tarn_https_buffer { uint8_t *bytes; size_t length, limit; int exceeded; };
+static size_t tarn_https_write(char *bytes, size_t size, size_t count, void *context) {
+    struct tarn_https_buffer *out = context;
+    if (size && count > SIZE_MAX / size) { out->exceeded = 1; return 0; }
+    size_t length = size * count;
+    if (length > out->limit - out->length) { out->exceeded = 1; return 0; }
+    if (length) memcpy(out->bytes + out->length, bytes, length);
+    out->length += length;
+    return length;
+}
+/* Inputs remain live only for this synchronous call. Caller owns the output
+ * buffer and both result scalars. -1 unavailable, -2 bound, -3 bad ABI input;
+ * positive values preserve libcurl error codes. HTTP statuses are not errors.
+ */
+int32_t tarn_https_request(const char *url, const char *method, const char *header,
+    const uint8_t *body, uint64_t body_size, const char *ca,
+    uint64_t timeout, uint8_t *buffer, uint64_t limit,
+    uint64_t *used, int64_t *status) {
+    *used = 0; *status = 0;
+    if (timeout == 0 || timeout > LONG_MAX || body_size > LONG_MAX || limit > SIZE_MAX) return -3;
+    pthread_once(&tarn_curl_once, tarn_curl_load);
+    if (!tarn_curl.ready) return -1;
+    void *handle = tarn_curl.init();
+    if (!handle) return 27;
+    struct tarn_https_buffer output = {buffer, 0, (size_t)limit, 0};
+    void *headers = NULL;
+    int code = 0;
+#define SET(option, value) do { code = tarn_curl.setopt(handle, option, value); if (code) goto done; } while (0)
+    /* Policy contract: HTTPS only, no redirects/proxy/cookies, full verification.
+     * Protocol restriction also rejects file:// and other libcurl schemes. */
+    SET(10002, url); SET(181, 2L); SET(182, 2L);
+    SET(52, 0L); SET(64, 1L); SET(81, 2L); SET(99, 1L);
+    SET(10004, ""); SET(155, (long)timeout); SET(156, (long)timeout);
+    SET(20011, tarn_https_write); SET(10001, &output);
+    if (*ca) SET(10065, ca);
+    if (*header) {
+        headers = tarn_curl.append(NULL, header);
+        if (!headers) { code = 27; goto done; }
+    }
+    void *more = tarn_curl.append(headers, "Content-Type: application/json");
+    if (!more) { code = 27; goto done; }
+    headers = more;
+    SET(10023, headers);
+    if (strcmp(method, "POST") == 0) {
+        SET(10015, body_size ? (const void *)body : (const void *)""); SET(60, (long)body_size);
+    }
+    SET(10036, method);
+    code = tarn_curl.perform(handle);
+    if (!code) {
+        long response = 0;
+        code = tarn_curl.getinfo(handle, 0x200002, &response);
+        *status = response;
+    }
+done:
+    *used = output.length;
+    if (output.exceeded) code = -2;
+    tarn_curl.cleanup(handle);
+    if (headers) tarn_curl.free_headers(headers);
+#undef SET
+    return code;
+}

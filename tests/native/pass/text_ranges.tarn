@@ -1,0 +1,67 @@
+import "string"
+fn check(ok bool) { if !ok { panic("text range assertion") } }
+fn main() {
+    text := "  café\t日本\r\n"
+    var cursor: usize = 0
+    match string.next_field(&text, &mut cursor) {
+        Some(span) => { check(span.start == 2 && span.end == 7)
+            check(string.range_bytes(&text, span).len() == 5) }
+        None => { panic("missing field") }
+    }
+    match string.next_field(&text, &mut cursor) {
+        Some(span) => { check(span.start == 8 && span.end == 14) }
+        None => { panic("missing field") }
+    }
+    check(string.next_field(&text, &mut cursor).is_none())
+    check(cursor == text.len())
+    check(!string.valid_range(&text, string.Range{start: 6, end: 7}))
+    check(!string.valid_range(&text, string.Range{start: 9, end: 14}))
+    check(!string.valid_range(&text, string.Range{start: 4, end: 3}))
+    check(!string.valid_range(&text, string.Range{start: 0, end: 99}))
+    check(string.valid_range(&text, string.Range{start: 16, end: 16}))
+    var lines: usize = 0
+    source := "\nα\r\nβ\r"
+    match string.next_line(&source, &mut lines) {
+        Some(span) => { check(span.start == 0 && span.end == 0) }
+        None => { panic("missing empty line") }
+    }
+    match string.next_line(&source, &mut lines) {
+        Some(span) => { check(span.start == 1 && span.end == 3) }
+        None => { panic("missing CRLF line") }
+    }
+    match string.next_line(&source, &mut lines) {
+        Some(span) => { check(span.start == 5 && span.end == 8) }
+        None => { panic("missing final line") }
+    }
+    check(string.next_line(&source, &mut lines).is_none())
+    for sample in [5]string{"", "a,,b,", "aaaa", "日本", "a,b"} {
+        for separator in [4]string{"", ",", "aa", "long separator"} {
+            parts := string.split(&sample, &separator)
+            ranges := string.split_ranges(&sample, &separator)
+            check(string.split_count(&sample, &separator) == parts.len())
+            check(ranges.len() == parts.len())
+            var i: usize = 0
+            for i < ranges.len() {
+                span := ranges.at(i)
+                check(sample.copy_range(span.start, span.end) == parts.get(i).clone())
+                i = i + 1
+            }
+        }
+    }
+    match string.parse_u64_bytes("18446744073709551615".bytes()) {
+        Some(value) => { check(value == 18446744073709551615) }
+        None => { panic("unsigned maximum") }
+    }
+    prefix := string.prefix_scalars("aé日本", 3)
+    check(prefix.start == 0 && prefix.end == 6)
+    check(string.prefix_scalars("é", 0).end == 0)
+    check(string.prefix_scalars("é", 99).end == 2)
+    var builder = string.Builder.new()
+    builder.push_u64(18446744073709551615)
+    builder.push(" ")
+    builder.push_i64(-9223372036854775808)
+    builder.push(" ")
+    builder.push_i64(0)
+    check(builder.finish() == "18446744073709551615 -9223372036854775808 0")
+    print("text ranges ok")
+}

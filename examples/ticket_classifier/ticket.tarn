@@ -1,0 +1,76 @@
+// Port of app.buildTicket: owned messages, sorted chronologically, bounded text.
+import "client"
+import "json"
+import "string"
+import "collections"
+struct Message { created u64
+    from string
+    text string }
+fn compare(a &Message, b &Message) i32 {
+    if a.created < b.created { return -1 }
+    if a.created > b.created { return 1 }
+    return 0
+}
+fn shorten(text &string) string {
+    span := string.prefix_scalars(text, 2000)
+    return text.copy_range(span.start, span.end)
+}
+pub fn build(subject &string, payload json.Value) json.Value {
+    var messages: Vec<Message> = Vec.new()
+    owned := payload.into_list()
+    for message in owned.as_slice() {
+        var private = false
+        match message.bool("private") { Some(value) => { private = value }
+            None => { private = true } }
+        text := client.text(message, "content")
+        if !private && !string.trim(&text).is_empty() {
+            var role = ""
+            match message.u64("message_type") {
+                Some(0) => { role = "cliente" }
+                Some(1) => { role = "agente" }
+                _ => {}
+            }
+            if !role.is_empty() {
+                var created: u64 = 0
+                match message.u64("created_at") { Some(value) => { created = value }
+                    None => {} }
+                messages.push(Message{created: created, from: role, text: shorten(&text)})
+            }
+        }
+    }
+    collections.sort(&mut messages, compare)
+    var out = json.Writer.new()
+    out.begin_object()
+    out.field_string("subject", subject)
+    out.key("messages")
+    out.begin_array()
+    var index: usize = 0
+    if messages.len() > 20 { index = messages.len() - 20 }
+    for index < messages.len() {
+        message := messages.get(index)
+        out.begin_object()
+        out.field_string("from", &message.from)
+        out.field_string("text", &message.text)
+        out.end_object()
+        index = index + 1
+    }
+    out.end_array()
+    out.end_object()
+    match json.parse(&out.finish()) {
+        Ok(value) => { return value }
+        Err(error) => { panic("ticket encoding invariant") }
+    }
+}
+
+pub fn has_customer(value &json.Value) bool {
+    match value.get("messages") {
+        Some(list) => {
+            messages := list.into_list()
+            for message in messages.as_slice() {
+                if client.text(message, "from") == "cliente" { return true }
+            }
+        }
+        None => {}
+    }
+    return false
+}

@@ -1,0 +1,17 @@
+import "json"
+fn main() {
+    source := "{\"n\":1.2300e+99,\"s\":\"café 日本\",\"a\":[null,true,false,-9223372036854775808]}"
+    match json.parse(&source) {
+        Ok(value) => {
+            if json.encode(&value) != source { panic("lossless JSON round trip") }
+        }
+        Err(error) => { panic("fixture JSON") }
+    }
+    var out = json.Writer.new()
+    out.begin_array()
+    if out.number("01") { panic("invalid JSON number accepted") }
+    if !out.number("1.5") { panic("valid JSON number rejected") }
+    out.end_array()
+    if out.finish() != "[1.5]" { panic("failed number changed writer") }
+    print("JSON value roundtrip ok")
+}

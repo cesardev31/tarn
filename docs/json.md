@@ -59,3 +59,12 @@ moves array elements out (empty for any other value).
 
 The parser copies its input once and accessors clone. These costs are
 deliberate until benchmarks justify borrowed views.
+
+## Lossless Value encoding (Phase 33)
+
+Parsed `json.Value` implements `json.Encode`, so `json.encode(&value)` and
+`writer.value(&value)` support nested owned trees. Number spelling/precision and
+object-member order, including duplicates, are preserved. Escapes may normalize
+while text content remains equivalent. `Writer.number(text)` validates a strict
+JSON number and returns false without writing on invalid input. Encoding a
+manually constructed invalid `Value.Number` aborts instead of injecting raw JSON.

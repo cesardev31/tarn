@@ -65,7 +65,7 @@ pub fn run(entry: &Path) -> Outcome {
 /// Standard-library modules whose function bodies appear in snapshots only
 /// when the program reaches them (Phase 27 maintenance): an unused `core`
 /// combinator or `string` helper must not churn every golden file.
-const STDLIB_MODULES: &[&str] = &["core", "io", "time", "net", "runtime", "fs", "process", "ffi", "string", "path", "http", "json", "os", "collections", "console"];
+const STDLIB_MODULES: &[&str] = &["core", "io", "time", "net", "runtime", "fs", "process", "ffi", "string", "path", "http", "json", "os", "collections", "console", "https"];
 
 /// Names of the functions worth printing: every function of an application
 /// module, and standard-library or generated functions reachable from one.

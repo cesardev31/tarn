@@ -37,6 +37,21 @@ Phase 29's workload-specific strings benchmark reported 2.6x Go's elapsed time
 Owned substring allocation and byte-loop checks remain text-performance work.
 Borrowed substring design must preserve the current aggregate-reference boundary.
 
+## Phase 32/33 follow-up
+
+Offset field/line/split traversal now avoids copying parts; borrowed UTF-8 byte
+views retain normal source provenance. Builder integer append removes temporary
+strings. A bounded UTF-8 stdin word-frequency CLI supplies application evidence.
+The ordinary https module now provides a bounded blocking GET/POST client via
+system libcurl with full TLS verification and query-component encoding. A
+selected-ticket classification CLI exercises Chatwoot and TypeSafe contracts
+against local HTTPS mocks. Parsed JSON Values now support lossless encoding.
+
+General borrowed &string values, richer text/float formatting, Unicode utilities,
+streaming/async HTTPS, richer URL handling and a complete Go application port
+remain open. Scope, measurements and validation:
+[Phase 32/33 report](phase-32-33-report.md).
+
 ## Original coverage (before Phase 31)
 
 The original assessment covered 13 modules; Phase 31 adds collections and console. Module count is not a measure of

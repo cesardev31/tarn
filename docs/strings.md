@@ -57,7 +57,45 @@ is used for ordinary parse failure. These APIs use Option, not io.Error.
 The module uses functions rather than adding primitive methods outside core.
 See [ADR 0042](adr/0042-string-essentials.md) for ownership, native bridges,
 allocation tradeoffs and bootstrap limits. `string.Builder` (Phase 17) accumulates text
-efficiently. Borrowed text iterators, Unicode classification and float formatting are deferred.
+efficiently. Offset cursors and borrowed byte views are available (Phase 32); general borrowed string values, Unicode classification and float formatting remain deferred.
 
 `string.fields(&text)` (Phase 31) returns owned nonempty fields separated by
 ASCII whitespace. Unicode whitespace classification remains separate work.
+
+## Offset traversal (Phase 32)
+
+`Range` contains Copy byte offsets, not a stored reference. `next_field(text,
+&mut cursor)` and `next_line(text, &mut cursor)` return Option<Range>; initialize
+cursor to zero. Fields use ASCII whitespace; lines preserve the existing LF/CRLF
+contract. `next_split(text, separator, &mut cursor)` uses SplitCursor.new() and
+preserves split's empty-separator/trailing-field behavior. `split_ranges` collects
+only offsets, and `split_count` counts without materializing any parts.
+
+`valid_range(text, range)` checks bounds and UTF-8 scalar boundaries.
+`range_bytes(text, range)` returns an immutable byte-slice loan, without copying;
+invalid access aborts like indexing. `copy_span` returns Option<string> when an
+independent owner is needed. Offset values have no source identity; reusing them
+with a different string is safe if validated but may select different content.
+Keep cursor inputs unchanged throughout traversal for meaningful results.
+
+```tarn
+fn first_bytes(text &string) &[]u8 {
+    var cursor: usize = 0
+    match string.next_field(text, &mut cursor) {
+        Some(span) => { return string.range_bytes(text, span) }
+        None => { return string.range_bytes(text, string.Range{start: 0, end: 0}) }
+    }
+}
+```
+
+`parse_u64_bytes` parses strict ASCII decimal directly from a borrowed slice.
+Builder.push_u64/push_i64 append stack-formatted digits without a temporary
+owned string. Existing owned APIs still copy; the cursor additions do not change
+string layout or allow references stored in aggregates. See
+[ADR 0061](adr/0061-offset-text-traversal.md) and the
+[textstats acceptance CLI](../examples/textstats/README.md).
+
+`prefix_scalars(text, limit)` returns the Range of at most `limit` UTF-8
+scalars from the start, without allocating. It never cuts a scalar but may
+separate combining marks; it is not grapheme-aware truncation. The ticket port
+uses it for the original 2,000-character message bound.

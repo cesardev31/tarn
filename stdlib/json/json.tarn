@@ -509,3 +509,41 @@ fn Parser.text(&mut self) Result<string, Error> {
         }
     }
 }
+
+/// Writes a strict JSON number, preserving its spelling and precision. False
+/// leaves the writer unchanged. Useful for lossless parsed JSON round trips.
+pub fn Writer.number(&mut self, value &string) bool {
+    match parse(value) {
+        Ok(Value.Number(number)) => {
+            self.separate()
+            self.text.push(&number)
+            return true
+        }
+        _ => { return false }
+    }
+}
+impl Encode for Value {
+    fn encode(&self, out &mut Writer) {
+        match self {
+            Value.Null => { out.null() }
+            Value.Bool(value) => { out.bool(value) }
+            Value.Number(value) => {
+                if !out.number(value) { panic("invalid JSON number value") }
+            }
+            Value.Text(value) => { out.string(value) }
+            Value.List(values) => {
+                out.begin_array()
+                for value in values.as_slice() { value.encode(out) }
+                out.end_array()
+            }
+            Value.Object(members) => {
+                out.begin_object()
+                for member in members.as_slice() {
+                    out.key(&member.key)
+                    member.value.encode(out)
+                }
+                out.end_object()
+            }
+        }
+    }
+}

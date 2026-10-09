@@ -209,7 +209,9 @@ Connection state and transport viability decide whether rejection is possible.
 
 ## Deferred work
 
-No client, TLS, HTTP/2/3, WebSocket, compression, multipart, streaming application
+This server module has no TLS termination or client API. A separate blocking
+client is now available in [https](https.md) (Phase 33). HTTP/2/3, WebSocket, compression, multipart, streaming application
 bodies, routing/middleware framework, cookie/auth framework, scoped async tasks,
-generic async I/O, work-stealing scheduler, cancellation or platform expansion. This is a
+generic async I/O, work-stealing scheduler, cancellation and platform expansion
+remain deferred. This is a
 bounded server subset, not a blanket RFC-conformance claim.

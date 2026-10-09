@@ -1,0 +1,74 @@
+import "console"
+import "io"
+import "string"
+import "collections"
+struct Word { text string
+ count u64 }
+fn compare(left &Word, right &Word) i32 {
+    if left.count > right.count { return -1 }
+    if left.count < right.count { return 1 }
+    a := left.text.bytes()
+    b := right.text.bytes()
+    var i: usize = 0
+    for i < a.len() && i < b.len() {
+        if a[i] < b[i] { return -1 }
+        if a[i] > b[i] { return 1 }
+        i = i + 1
+    }
+    if a.len() < b.len() { return -1 }
+    if a.len() > b.len() { return 1 }
+    return 0
+}
+fn main() Result<void, io.Error> {
+    var input = console.stdin()
+    var data: Vec<u8> = Vec.new()
+    var buffer = [32]u8{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+    for {
+        count := try input.read(&mut buffer)
+        if count == 0 { break }
+        if count > 8388608 - data.len() { return Err(io.Error.new(io.ErrorKind.InvalidData)) }
+        data.extend_from_slice(&buffer[0..count])
+    }
+    var text = ""
+    match string.from_utf8(data.as_slice()) {
+        Some(value) => { text = value }
+        None => { return Err(io.Error.new(io.ErrorKind.InvalidData)) }
+    }
+    var counts: collections.Map<string, u64> = collections.Map.new()
+    var cursor: usize = 0
+    for {
+        match string.next_field(&text, &mut cursor) {
+            Some(range) => {
+                match string.copy_span(&text, range) {
+                    Some(word) => {
+                        if counts.contains(&word) {
+                            count := counts.get_mut(&word)
+                            *count = *count + 1
+                        } else { counts.insert(word, 1) }
+                    }
+                    None => { panic("field boundary invariant") }
+                }
+            }
+            None => { break }
+        }
+    }
+    var rows: Vec<Word> = Vec.new()
+    var entries = counts.drain()
+    for entries.len() > 0 {
+        match entries.pop() {
+            Some(entry) => { rows.push(Word{text: entry.key, count: entry.value}) }
+            None => {}
+        }
+    }
+    collections.sort(&mut rows, compare)
+    var out = console.stdout()
+    for row in rows.as_slice() {
+        var line = string.Builder.new()
+        line.push_u64(row.count)
+        line.push("\t")
+        line.push(&row.text)
+        line.push("\n")
+        try out.write_text(&line.finish())
+    }
+    return Ok(())
+}

@@ -196,8 +196,8 @@ impl<'e, 'a> FnCx<'e, 'a> {
             return self.env.decls.capability(&self.infer.zonk(t), crate::Capability::Share);
         }
         match self.infer.shallow(t) {
-            Ty::Adt(s, _) => self.env.has_impl(iface, s),
             _ if Some(iface) == self.env.prelude.copy => self.is_copy(t),
+            Ty::Adt(s, _) => self.env.has_impl(iface, s),
             ty @ (Ty::Bool | Ty::Int(_) | Ty::Float(_) | Ty::Str) => self.env.impl_target(&ty).is_some_and(|s| self.env.has_impl(iface, s)),
             Ty::Param(p) => self.env.decls.bounds.get(&p).is_some_and(|b| b.contains(&iface)),
             Ty::Any(i) => i == iface,
