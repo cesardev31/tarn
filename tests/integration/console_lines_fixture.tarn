@@ -1,0 +1,28 @@
+import "console"
+import "os"
+fn main() {
+    var input = console.stdin().buffered()
+    var output = console.stdout().buffered()
+    for {
+        match input.read_line(4) {
+            Ok(line) => { match line {
+                Some(text) => {
+                    match output.write_text(&(text + "|")) { Ok(done) => {}
+                        Err(error) => { os.exit(3) } }
+                }
+                None => { break }
+            } }
+            Err(error) => {
+                match input.read_line(4) { Err(poisoned) => {}
+                    Ok(value) => { os.exit(4) } }
+                os.exit(2)
+            }
+        }
+    }
+    match output.finish() { Ok(done) => {}
+        Err(error) => { os.exit(3) } }
+    // Destruction must discard this pending output.
+    var discarded = console.stdout().buffered()
+    match discarded.write_text("SHOULD NOT APPEAR") { Ok(done) => {}
+        Err(error) => { os.exit(3) } }
+}

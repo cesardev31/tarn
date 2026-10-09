@@ -99,3 +99,17 @@ string layout or allow references stored in aggregates. See
 scalars from the start, without allocating. It never cuts a scalar but may
 separate combining marks; it is not grapheme-aware truncation. The ticket port
 uses it for the original 2,000-character message bound.
+
+## Evidence-led additions (ADR 0063)
+
+`rfind` returns the last byte offset (empty pattern: end). `parse_f64` accepts
+finite decimal text with optional sign, dot and exponent, without whitespace,
+hex or NaN/infinity. `from_f64` and `Builder.push_f64` use 17 significant digits
+for round trips, rather than shortest display; parsing validates first in Tarn
+and uses a locale-independent native conversion. Overflow is None.
+
+ASCII casing helpers preserve other UTF-8 bytes. `replace_all` replaces
+nonoverlapping matches; an empty pattern inserts at Unicode scalar boundaries.
+`format` takes a string slice: `{}` consumes one argument and `{{`/`}}` escape
+braces. Errors include kind and byte offset; there are no implicit conversions.
+Use typed Builder methods for mixed values without temporary strings.

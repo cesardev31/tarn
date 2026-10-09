@@ -547,3 +547,11 @@ impl Encode for Value {
         }
     }
 }
+
+/// Writes a finite number; nonfinite input returns false without writing.
+pub fn Writer.f64(&mut self, value f64) bool {
+    if !string.is_finite(value) { return false }
+    self.separate()
+    self.text.push_f64(value)
+    return true
+}

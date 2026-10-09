@@ -1,0 +1,121 @@
+// Incremental owned CSV records over explicit bounded console input.
+import "console"
+import "io"
+pub copy enum ParseErrorKind { UnexpectedQuote
+    TrailingCharacters
+    UnexpectedNewline
+    UnclosedQuote
+    LimitExceeded }
+pub copy struct ParseError { pub kind ParseErrorKind
+    pub offset usize }
+pub copy enum Error { Io(io.Error)
+    Parse(ParseError) }
+pub copy struct Limits { pub record_bytes usize
+    pub fields usize }
+pub fn Limits.new() Limits { return Limits{record_bytes: 1048576, fields: 1024} }
+struct Parser { fields Vec<string>
+    field Vec<u8>
+    quoted bool
+    closed bool
+    start bool
+    continuation bool
+    offset usize
+    limits Limits }
+fn Parser.new(limits Limits) Parser {
+    return Parser{fields: Vec.new(), field: Vec.new(), quoted: false, closed: false, start: true, continuation: false, offset: 0, limits: limits}
+}
+fn Parser.end_field(&mut self) Result<void, ParseError> {
+    if self.fields.len() >= self.limits.fields { return Err(ParseError{kind: ParseErrorKind.LimitExceeded, offset: self.offset}) }
+    match string_from_utf8(self.field.as_slice()) {
+        Some(text) => { self.fields.push(text) }
+        None => { panic("CSV UTF-8 field invariant") }
+    }
+    self.field = Vec.new()
+    self.start = true
+    self.closed = false
+    return Ok(())
+}
+fn Parser.feed(&mut self, text &string) Result<bool, ParseError> {
+    if self.limits.record_bytes > 67108864 || self.limits.fields == 0 || self.limits.fields > 65536 { return Err(ParseError{kind: ParseErrorKind.LimitExceeded, offset: self.offset}) }
+    if self.continuation {
+        if self.offset == self.limits.record_bytes { return Err(ParseError{kind: ParseErrorKind.LimitExceeded, offset: self.offset}) }
+        self.field.push(10)
+        self.offset = self.offset + 1
+    }
+    if text.len() > self.limits.record_bytes - self.offset { return Err(ParseError{kind: ParseErrorKind.LimitExceeded, offset: self.offset}) }
+    for byte in text.bytes() {
+        if self.quoted {
+            if byte == 34 { self.quoted = false
+                self.closed = true } else { self.field.push(byte) }
+        } else {
+            if self.closed {
+                if byte == 34 { self.field.push(34)
+                    self.quoted = true
+                    self.closed = false } else {
+                    if byte != 44 { return Err(ParseError{kind: ParseErrorKind.TrailingCharacters, offset: self.offset}) }
+                    try self.end_field()
+                }
+            } else {
+                if byte == 44 { try self.end_field() } else {
+                    if byte == 34 {
+                        if !self.start { return Err(ParseError{kind: ParseErrorKind.UnexpectedQuote, offset: self.offset}) }
+                        self.quoted = true
+                    } else {
+                        if byte == 10 || byte == 13 { return Err(ParseError{kind: ParseErrorKind.UnexpectedNewline, offset: self.offset}) }
+                        self.field.push(byte)
+                    }
+                    self.start = false
+                }
+            }
+        }
+        self.offset = self.offset + 1
+    }
+    self.continuation = self.quoted
+    return Ok(!self.quoted)
+}
+fn Parser.finish(self) Result<Vec<string>, ParseError> {
+    var parser = self
+    if parser.quoted { return Err(ParseError{kind: ParseErrorKind.UnclosedQuote, offset: parser.offset}) }
+    try parser.end_field()
+    return Ok(parser.fields)
+}
+pub fn parse_record(text &string) Result<Vec<string>, ParseError> { return parse_record_with_limits(text, Limits.new()) }
+pub fn parse_record_with_limits(text &string, limits Limits) Result<Vec<string>, ParseError> {
+    var parser = Parser.new(limits)
+    try parser.feed(text)
+    return parser.finish()
+}
+pub struct Reader { input console.LineReader
+    failed bool }
+pub fn Reader.new(input console.LineReader) Reader { return Reader{input: input, failed: false} }
+/// Quoted physical lines normalize LF/CRLF to LF. Errors poison the CSV reader.
+pub fn Reader.read_record(&mut self, limits Limits) Result<Option<Vec<string>>, Error> {
+    if self.failed { return Err(Error.Io(io.Error.new(io.ErrorKind.InvalidData))) }
+    var parser = Parser.new(limits)
+    var read = false
+    for {
+        var line: Option<string>
+        match self.input.read_line(limits.record_bytes) {
+            Ok(value) => { line = value }
+            Err(error) => { self.failed = true
+                return Err(Error.Io(error)) }
+        }
+        match line {
+            Some(text) => {
+                read = true
+                match parser.feed(&text) {
+                    Ok(done) => { if done { break } }
+                    Err(error) => { self.failed = true
+                        return Err(Error.Parse(error)) }
+                }
+            }
+            None => { if !read { return Ok(None) }
+                break }
+        }
+    }
+    match parser.finish() {
+        Ok(fields) => { return Ok(Some(fields)) }
+        Err(error) => { self.failed = true
+            return Err(Error.Parse(error)) }
+    }
+}

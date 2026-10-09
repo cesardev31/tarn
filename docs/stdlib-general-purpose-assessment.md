@@ -20,6 +20,23 @@ x86_64 platform. Platform expansion is a separate decision. A standard library
 alone cannot make a language general-purpose: language ergonomics, diagnostics,
 tooling, package availability and operational reliability also matter.
 
+## Phase 34 foundations follow-up
+
+The original inventory is historical. The workspace now additionally provides
+finite float conversion, ASCII casing/comparison, replacement and string
+formatting, reverse search, bounded console line input, explicit buffering,
+owned streaming CSV, blocking sleep and recoverable map lookup helpers.
+A CSV-to-JSON CLI and corrected status-device collector provide executable
+pressure. `tarn stdlib --json` exposes embedded public APIs and source identity
+for agents; existing Option.ok_or/map and Result.map_err were overlooked by
+an independent port report, so discovery matters as much as API coverage.
+
+See [foundation report](phase-34-foundations-report.md),
+[updated execution plan](phase-34-plan.md) and [agent guide](llm-guide.md).
+Full agent-tooling milestones, desktop integration, richer Unicode/calendar
+handling and the extended classifier remain open. No broad production-readiness
+or language-wide performance claim follows from these examples.
+
 ## Phase 31 follow-up
 
 The initial assessment below predates Phase 31. The workspace now implements

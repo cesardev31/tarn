@@ -1,0 +1,52 @@
+{
+  "tarn": {
+    "median_seconds": 0.41401210999993054,
+    "samples": [
+      {
+        "seconds": 0.81361581299916,
+        "stdout": "cpu%\n73.68421052631578\nmem%\n52.037536350863164\nprocesses\n395\nms per tick\n39\n"
+      },
+      {
+        "seconds": 0.46622514099999535,
+        "stdout": "cpu%\n52.631578947368418\nmem%\n52.217597395755902\nprocesses\n399\nms per tick\n22\n"
+      },
+      {
+        "seconds": 0.41401210999993054,
+        "stdout": "cpu%\n55.555555555555557\nmem%\n52.333386761037417\nprocesses\n399\nms per tick\n19\n"
+      },
+      {
+        "seconds": 0.41263080699991406,
+        "stdout": "cpu%\n60\nmem%\n52.398028121632436\nprocesses\n399\nms per tick\n19\n"
+      },
+      {
+        "seconds": 0.4034027710004011,
+        "stdout": "cpu%\n40\nmem%\n52.239250139092476\nprocesses\n399\nms per tick\n19\n"
+      }
+    ]
+  },
+  "go": {
+    "median_seconds": 0.36324232700007997,
+    "samples": [
+      {
+        "seconds": 0.3593187750002471,
+        "stdout": "cpu% 42.857142857142854 mem% 52.317226420888666 processes 399 ms per tick 16\n"
+      },
+      {
+        "seconds": 0.3863588289996187,
+        "stdout": "cpu% 50 mem% 52.38934061851326 processes 399 ms per tick 18\n"
+      },
+      {
+        "seconds": 0.3702740150001773,
+        "stdout": "cpu% 25 mem% 52.3478835367591 processes 399 ms per tick 17\n"
+      },
+      {
+        "seconds": 0.35255807700013975,
+        "stdout": "cpu% 30.76923076923077 mem% 52.39470099277829 processes 399 ms per tick 16\n"
+      },
+      {
+        "seconds": 0.36324232700007997,
+        "stdout": "cpu% 33.33333333333333 mem% 52.38202621619102 processes 399 ms per tick 17\n"
+      }
+    ]
+  }
+}

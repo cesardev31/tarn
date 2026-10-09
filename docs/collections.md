@@ -82,3 +82,13 @@ unsafe FFI helpers. Pattern projection keeps ADR 0018's existing semantics.
 
 Integer `wrapping_add`, `wrapping_sub` and `wrapping_mul` explicitly compute
 modulo the integer width. Ordinary operators and numeric casts remain checked.
+
+## Recoverable lookup and cursors
+
+`collections.get_copy(&map, &key)` returns `Option<V>` for Copy values.
+It is a free function because conditional method bounds are unsupported.
+`map.get_or(&key, &fallback)` returns an ordinary loan of the map or fallback;
+conservative result provenance includes both. Existing get/get_mut keep their
+abort-on-missing contract. `next_slot(&mut cursor)` skips empty slots and returns
+an occupied offset for entry_at; start at zero, keep the map unchanged during
+traversal. It allocates nothing and stores no references.

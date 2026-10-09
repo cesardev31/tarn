@@ -1243,3 +1243,30 @@ done:
 #undef SET
     return code;
 }
+
+/* Mechanical libc decimal conversion using an explicit C numeric locale.
+ * Public grammar, policies and UTF-8 ownership stay in Tarn. */
+#include <locale.h>
+static locale_t tarn_numeric_locale;
+static pthread_once_t tarn_numeric_once = PTHREAD_ONCE_INIT;
+static void tarn_numeric_init(void) {
+    tarn_numeric_locale = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
+    if (!tarn_numeric_locale) abort();
+}
+int32_t tarn_parse_f64(const char *text, double *out) {
+    pthread_once(&tarn_numeric_once, tarn_numeric_init);
+    char *end;
+    double value = strtod_l(text, &end, tarn_numeric_locale);
+    if (end == text || *end || !isfinite(value)) return 0;
+    *out = value;
+    return 1;
+}
+uint64_t tarn_format_f64(double value, uint8_t *out, uint64_t capacity) {
+    pthread_once(&tarn_numeric_once, tarn_numeric_init);
+    locale_t previous = uselocale(tarn_numeric_locale);
+    if (!previous) abort();
+    int count = snprintf((char *)out, capacity, "%.17g", value);
+    if (!uselocale(previous)) abort();
+    if (count < 0 || (uint64_t)count >= capacity) return 0;
+    return (uint64_t)count;
+}

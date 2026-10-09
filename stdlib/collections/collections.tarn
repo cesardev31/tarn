@@ -242,3 +242,25 @@ pub fn binary_search<T>(values &[]T, key &T, compare fn(&T, &T) i32) Option<usiz
     }
     return None
 }
+
+/// Recoverable lookup for Copy values. No reference is stored in Option.
+pub fn get_copy<K: Hash + Eq, V: Copy>(map &Map<K, V>, key &K) Option<V> {
+    match map.find(key) { Some(slot) => { return Some(*map.get(key)) }
+        None => { return None } }
+}
+/// Borrow a value or the caller's fallback; absence never aborts.
+/// Result provenance conservatively includes the map and fallback.
+pub fn Map<K, V>.get_or(&self, key &K, fallback &V) &V {
+    if self.contains(key) { return self.get(key) }
+    return fallback
+}
+/// Offset cursor over occupied entries, without stored loans or allocation.
+/// Pass the returned slot to entry_at before requesting the next slot.
+pub fn Map<K, V>.next_slot(&self, cursor &mut usize) Option<usize> {
+    for *cursor < self.slots.len() {
+        slot := *cursor
+        *cursor = *cursor + 1
+        if self.has_entry(slot) { return Some(slot) }
+    }
+    return None
+}

@@ -30,3 +30,15 @@ Buffers are bytes. UTF-8 validation is explicit through string.from_utf8.
 There is no line-reader, bounded read-to-end helper, terminal control or async
 console API in this phase. Calling console I/O in an async computation blocks
 its executor thread. See [ADR 0060](adr/0060-general-purpose-foundations.md).
+
+## Explicit buffering
+
+`stdin().buffered()` creates LineReader. `read_line(limit)` returns
+`Result<Option<string>, io.Error>`: UTF-8 text without LF/CRLF, None at EOF.
+Limits count returned bytes and may not exceed 64 MiB. A bare final CR remains
+text. Errors poison the reader; subsequent reads report InvalidData.
+
+`stdout().buffered()` and `stderr().buffered()` hold 4096 bytes. Call flush or
+consuming finish explicitly. Destruction discards pending bytes and never
+performs I/O. Successful partial writes are remembered when flush is retried;
+retrying a whole write_all after an error is not a transaction.

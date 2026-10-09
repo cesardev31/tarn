@@ -1,0 +1,180 @@
+import "fs"
+import "io"
+import "string"
+import "time"
+import "collections"
+extern "C" fn getpagesize() i32
+
+// Port of the status_device collector core: system CPU %, memory, load average
+// and per-process CPU %/RSS from /proc. Unlike the Go service it never reads
+// smaps_rollup (PSS); RSS from statm is enough for the indicator.
+
+struct CpuTimes {
+    total u64
+    idle u64
+}
+
+struct Proc {
+    pid u64
+    name string
+    ticks u64
+    start u64
+    rss_pages u64
+}
+
+struct Usage {
+    name string
+    pid u64
+    cpu f64
+    rss_mib u64
+}
+
+fn field(text &string, index usize) u64 {
+    var cursor: usize = 0
+    var position: usize = 0
+    for {
+        match string.next_field(text, &mut cursor) {
+            Some(range) => {
+                if position == index { return string.parse_u64_bytes(string.range_bytes(text, range)).unwrap_or(0) }
+                position = position + 1
+            }
+            None => { return 0 }
+        }
+    }
+}
+
+fn read_cpu() Result<CpuTimes, io.Error> {
+    text := try fs.read_text("/proc/stat")
+    lines := string.lines(&text)
+    if lines.is_empty() { return Err(io.Error.new(io.ErrorKind.InvalidData)) }
+    line := lines.get(0)
+    var total: u64 = 0
+    for i in 1..9 { total = total + field(line, usize(i)) }
+    return Ok(CpuTimes{total: total, idle: field(line, 4) + field(line, 5)})
+}
+
+fn cpu_percent(prev &CpuTimes, cur &CpuTimes) f64 {
+    if cur.total < prev.total || cur.idle < prev.idle { return 0.0 }
+    dt := cur.total - prev.total
+    if dt == 0 { return 0.0 }
+    di := cur.idle - prev.idle
+    if di > dt { return 0.0 }
+    return f64(dt - di) / f64(dt) * 100.0
+}
+
+// Index of the last ')' in /proc/<pid>/stat: comm may contain spaces and ')'.
+
+fn read_proc(pid u64) Result<Proc, io.Error> {
+    dir := "/proc/" + string.from_u64(pid)
+    stat := try fs.read_text(&(dir + "/stat"))
+    close := try string.rfind(&stat, ")").ok_or(io.Error.new(io.ErrorKind.InvalidData))
+    open := string.find(&stat, &"(").unwrap_or(0)
+    if open >= close || close + 2 > stat.len() { return Err(io.Error.new(io.ErrorKind.InvalidData)) }
+    name := string.slice(&stat, open + 1, close).unwrap_or("?")
+    rest := string.slice(&stat, close + 2, stat.len()).unwrap_or("")
+    // `rest` starts at field 3 (state); utime is field 14, starttime field 22.
+    ticks := field(&rest, 11) + field(&rest, 12)
+    start := field(&rest, 19)
+    statm := try fs.read_text(&(dir + "/statm"))
+    return Ok(Proc{pid: pid, name: name, ticks: ticks, start: start, rss_pages: field(&statm, 1)})
+}
+
+fn sample() Result<Vec<Proc>, io.Error> {
+    entries := try fs.read_dir("/proc")
+    var out: Vec<Proc> = Vec.new()
+    for entry in entries.as_slice() {
+        match string.parse_u64(entry.name()) {
+            Some(pid) => {
+                match read_proc(pid) {
+                    Ok(p) => { out.push(p) }
+                    Err(_) => { }
+                }
+            }
+            None => { }
+        }
+    }
+    return Ok(out)
+}
+
+fn mem_used_percent() Result<f64, io.Error> {
+    text := try fs.read_text("/proc/meminfo")
+    var total: u64 = 0
+    var avail: u64 = 0
+    for line in string.lines(&text).as_slice() {
+        if string.starts_with(line, &"MemTotal:") { total = field(line, 1) }
+        if string.starts_with(line, &"MemAvailable:") { avail = field(line, 1) }
+    }
+    if total == 0 { return Ok(0.0) }
+    if avail > total { return Err(io.Error.new(io.ErrorKind.InvalidData)) }
+    return Ok(f64(total - avail) / f64(total) * 100.0)
+}
+
+fn compare_cpu(a &Usage, b &Usage) i32 {
+    if a.cpu > b.cpu { return -1 }
+    if a.cpu < b.cpu { return 1 }
+    return 0
+}
+
+copy struct Previous { ticks u64
+    start u64 }
+
+// Percent of aggregate machine CPU, not percent of one logical CPU.
+fn process_percent(before Previous, current &Proc, delta u64) f64 {
+    if delta == 0 || current.start != before.start || current.ticks < before.ticks { return 0.0 }
+    return f64(current.ticks - before.ticks) / f64(delta) * 100.0
+}
+
+fn run() Result<void, io.Error> {
+    var prev_cpu = try read_cpu()
+    var prev_ticks: collections.Map<u64, Previous> = collections.Map.new()
+    for p in (try sample()).as_slice() { prev_ticks.insert(p.pid, Previous{ticks: p.ticks, start: p.start}) }
+    var page_size: i32 = 0
+    unsafe { page_size = getpagesize() }
+    if page_size <= 0 { return Err(io.Error.new(io.ErrorKind.InvalidData)) }
+    began := try time.Instant.now()
+    rounds := 20
+    var last: Vec<Usage> = Vec.new()
+    var cpu_now = 0.0
+    for round in 0..rounds {
+        cur_cpu := try read_cpu()
+        var delta: u64 = 0
+        if cur_cpu.total >= prev_cpu.total { delta = cur_cpu.total - prev_cpu.total }
+        cpu_now = cpu_percent(&prev_cpu, &cur_cpu)
+        procs := try sample()
+        var usages: Vec<Usage> = Vec.new()
+        var next_ticks: collections.Map<u64, Previous> = collections.Map.new()
+        for p in procs.as_slice() {
+            var pct = 0.0
+            match collections.get_copy(&prev_ticks, &p.pid) {
+                Some(before) => {
+                    pct = process_percent(before, p, delta)
+                }
+                None => {}
+            }
+            usages.push(Usage{name: p.name.clone(), pid: p.pid, cpu: pct, rss_mib: p.rss_pages * u64(page_size) / 1048576})
+            next_ticks.insert(p.pid, Previous{ticks: p.ticks, start: p.start})
+        }
+        prev_cpu = cur_cpu
+        prev_ticks = next_ticks
+        last = usages
+    }
+    spent := try began.elapsed()
+    collections.sort(&mut last, compare_cpu)
+    mem := try mem_used_percent()
+    print("cpu%")
+    print(cpu_now)
+    print("mem%")
+    print(mem)
+    print("processes")
+    print(last.len())
+    print("ms per tick")
+    print(spent.as_millis() / u64(rounds))
+    return Ok(())
+}
+
+fn main() {
+    match run() {
+        Ok(_) => { }
+        Err(_) => { print("error") }
+    }
+}

@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "platform": "Linux x86_64",
+  "workload": "20 /proc rounds; stat, statm and meminfo; no smaps_rollup or sleep",
+  "method": "one warmup each; alternating order; whole process wall time",
+  "runs": 7,
+  "results": {
+    "tarn": {
+      "median_seconds": 0.40319939400069416,
+      "samples": [
+        {
+          "seconds": 0.7177804769999057,
+          "stdout": "cpu%\n38.461538461538467\nmem%\n52.311153090440612\nprocesses\n397\nms per tick\n34\n"
+        },
+        {
+          "seconds": 0.7227487359996303,
+          "stdout": "cpu%\n31.03448275862069\nmem%\n52.325016127332916\nprocesses\n397\nms per tick\n34\n"
+        },
+        {
+          "seconds": 0.6613285789990186,
+          "stdout": "cpu%\n34.782608695652172\nmem%\n52.30188466006117\nprocesses\n397\nms per tick\n31\n"
+        },
+        {
+          "seconds": 0.40319939400069416,
+          "stdout": "cpu%\n26.666666666666668\nmem%\n52.264203605498636\nprocesses\n397\nms per tick\n19\n"
+        },
+        {
+          "seconds": 0.39787723799963715,
+          "stdout": "cpu%\n14.285714285714285\nmem%\n52.262856910486242\nprocesses\n397\nms per tick\n18\n"
+        },
+        {
+          "seconds": 0.3896238119996269,
+          "stdout": "cpu%\n13.333333333333334\nmem%\n52.35628057624816\nprocesses\n397\nms per tick\n18\n"
+        },
+        {
+          "seconds": 0.3899512179996236,
+          "stdout": "cpu%\n33.333333333333329\nmem%\n52.313476799481606\nprocesses\n397\nms per tick\n18\n"
+        }
+      ]
+    },
+    "go": {
+      "median_seconds": 0.4044252920011786,
+      "samples": [
+        {
+          "seconds": 0.6242525300003763,
+          "stdout": "cpu% 39.285714285714285 mem% 52.3360273394931 processes 397 ms per tick 29\n"
+        },
+        {
+          "seconds": 0.6112990490000811,
+          "stdout": "cpu% 19.047619047619047 mem% 52.359924574516995 processes 397 ms per tick 28\n"
+        },
+        {
+          "seconds": 0.4906529190011497,
+          "stdout": "cpu% 13.333333333333334 mem% 52.29795019816221 processes 397 ms per tick 22\n"
+        },
+        {
+          "seconds": 0.4044252920011786,
+          "stdout": "cpu% 20 mem% 52.29657709736526 processes 397 ms per tick 18\n"
+        },
+        {
+          "seconds": 0.3490717439999571,
+          "stdout": "cpu% 15.384615384615385 mem% 52.319418101006875 processes 397 ms per tick 16\n"
+        },
+        {
+          "seconds": 0.3625125119997392,
+          "stdout": "cpu% 15.384615384615385 mem% 52.367265382623785 processes 397 ms per tick 16\n"
+        },
+        {
+          "seconds": 0.35714850799922715,
+          "stdout": "cpu% 27.27272727272727 mem% 52.31170761191629 processes 397 ms per tick 16\n"
+        }
+      ]
+    }
+  }
+}

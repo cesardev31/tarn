@@ -11,20 +11,17 @@ use tarn_ast::{ItemKind, Module};
 use tarn_diagnostics::{Diagnostic, Severity, SourceMap};
 use tarn_resolve::{ModuleInput, Resolved};
 
-const HTTP_SOURCE: &str = include_str!("../../../stdlib/http/http.tarn");
-
-const PATH_SOURCE: &str = include_str!("../../../stdlib/path/path.tarn");
-
-const STRING_SOURCE: &str = include_str!("../../../stdlib/string/string.tarn");
-
-const JSON_SOURCE: &str = include_str!("../../../stdlib/json/json.tarn");
-
-const OS_SOURCE: &str = include_str!("../../../stdlib/os/os.tarn");
-
-const CONSOLE_SOURCE: &str = include_str!("../../../stdlib/console/console.tarn");
-
-const HTTPS_SOURCE: &str = include_str!("../../../stdlib/https/https.tarn");
-const COLLECTIONS_SOURCE: &str = include_str!("../../../stdlib/collections/collections.tarn");
+const ORDINARY_STDLIB: &[(&str, &str)] = &[
+    ("http", include_str!("../../../stdlib/http/http.tarn")),
+    ("path", include_str!("../../../stdlib/path/path.tarn")),
+    ("string", include_str!("../../../stdlib/string/string.tarn")),
+    ("json", include_str!("../../../stdlib/json/json.tarn")),
+    ("os", include_str!("../../../stdlib/os/os.tarn")),
+    ("console", include_str!("../../../stdlib/console/console.tarn")),
+    ("https", include_str!("../../../stdlib/https/https.tarn")),
+    ("collections", include_str!("../../../stdlib/collections/collections.tarn")),
+    ("csv", include_str!("../../../stdlib/csv/csv.tarn")),
+];
 
 const CORE_SOURCE: &str = include_str!("../../../stdlib/core/core.tarn");
 
@@ -46,7 +43,17 @@ fn trusted_source(name: &str) -> Option<&'static str> {
     TRUSTED_STDLIB.iter().find(|(n, _)| *n == name).map(|(_, source)| *source)
 }
 
-fn official_module(name: &str) -> bool { (name == "string" || name == "path" || name == "http" || name == "json" || name == "os" || name == "collections" || name == "console" || name == "https") || trusted_source(name).is_some() }
+/// Embedded public modules, sorted independently of filesystem state.
+pub fn stdlib_modules() -> Vec<&'static str> {
+    let mut names: Vec<_> = TRUSTED_STDLIB.iter().chain(ORDINARY_STDLIB).map(|(name, _)| *name).collect();
+    names.sort_unstable();
+    names
+}
+/// Source shipped by this compiler; this query grants no intrinsic authority.
+pub fn stdlib_source(name: &str) -> Option<&'static str> {
+    trusted_source(name).or_else(|| ORDINARY_STDLIB.iter().find(|(n, _)| *n == name).map(|(_, source)| *source))
+}
+fn official_module(name: &str) -> bool { stdlib_source(name).is_some() }
 
 pub struct Program {
     pub import_targets: std::collections::HashMap<(String, String), String>,
@@ -156,7 +163,7 @@ fn official_stdlib_path(name: &str) -> PathBuf {
 
 fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBuf, String>, editor: bool, packages: Option<&PackageSet>) -> Result<(Program, Vec<Diagnostic>), String> {
     let official_entry = if editor {
-        entry.canonicalize().ok().and_then(|entry| TRUSTED_STDLIB.iter().map(|(name, _)| *name).chain(["string", "path", "http", "json", "os", "collections", "console", "https"]).find(|name|
+        entry.canonicalize().ok().and_then(|entry| stdlib_modules().into_iter().find(|name|
             official_stdlib_path(name).canonicalize().ok().as_ref() == Some(&entry)))
     } else { None };
     let packages = if official_entry.is_none() { packages } else { None };
@@ -198,14 +205,7 @@ fn load_editor_sources(entry: &Path, overlays: &std::collections::HashMap<PathBu
         } else {
             match overlays.get(&path) {
                 Some(text) => text.clone(),
-                None if name == "string" && !path.is_file() => STRING_SOURCE.to_string(),
-                None if name == "path" && !path.is_file() => PATH_SOURCE.to_string(),
-                None if name == "http" && !path.is_file() => HTTP_SOURCE.to_string(),
-                None if name == "json" && !path.is_file() => JSON_SOURCE.to_string(),
-                None if name == "os" && !path.is_file() => OS_SOURCE.to_string(),
-                None if name == "collections" && !path.is_file() => COLLECTIONS_SOURCE.to_string(),
-                None if name == "https" && !path.is_file() => HTTPS_SOURCE.to_string(),
-                None if name == "console" && !path.is_file() => CONSOLE_SOURCE.to_string(),
+                None if !path.is_file() && stdlib_source(&name).is_some() => stdlib_source(&name).unwrap().to_string(),
                 None => {
                     let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read `{}`: {e}", path.display()))?;
                     disk_sources.push(path.clone());

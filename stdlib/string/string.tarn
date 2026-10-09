@@ -396,3 +396,174 @@ pub fn prefix_scalars(value &string, limit usize) Range {
     }
     return Range{start: 0, end: offset}
 }
+
+/// Last match as a byte offset; an empty pattern matches at the end.
+pub fn rfind(value &string, pattern &string) Option<usize> {
+    data := value.bytes()
+    needle := pattern.bytes()
+    if needle.len() > data.len() { return None }
+    var index = data.len() - needle.len()
+    for {
+        if equal_at(data, needle, index) { return Some(index) }
+        if index == 0 { return None }
+        index = index - 1
+    }
+}
+
+// Finite, locale-independent decimal conversion; no implicit numeric coercion.
+import "ffi"
+extern "C" fn tarn_parse_f64(text *u8, out *mut f64) i32
+extern "C" fn tarn_format_f64(value f64, out *mut u8, capacity usize) usize
+pub fn is_finite(value f64) bool { return value <= 1.7976931348623157e308 && value >= -1.7976931348623157e308 }
+/// Strict decimal: optional sign, decimal point and exponent; no whitespace,
+/// hex, NaN or infinity. Overflow is None; underflow follows libc rounding.
+pub fn parse_f64(value &string) Option<f64> {
+    data := value.bytes()
+    var i: usize = 0
+    if data.is_empty() { return None }
+    if data[0] == 43 || data[0] == 45 { i = 1 }
+    var digits: usize = 0
+    for i < data.len() && data[i] >= 48 && data[i] <= 57 { digits = digits + 1
+        i = i + 1 }
+    if i < data.len() && data[i] == 46 {
+        i = i + 1
+        for i < data.len() && data[i] >= 48 && data[i] <= 57 { digits = digits + 1
+            i = i + 1 }
+    }
+    if digits == 0 { return None }
+    if i < data.len() && (data[i] == 69 || data[i] == 101) {
+        i = i + 1
+        if i < data.len() && (data[i] == 43 || data[i] == 45) { i = i + 1 }
+        start := i
+        for i < data.len() && data[i] >= 48 && data[i] <= 57 { i = i + 1 }
+        if i == start { return None }
+    }
+    if i != data.len() { return None }
+    var text: ffi.CString
+    match ffi.CString.new(value) { Some(value) => { text = value }
+        None => { return None } }
+    var number: f64 = 0.0
+    var result: i32 = 0
+    unsafe { result = tarn_parse_f64(text.as_ptr(), ffi.of_mut(&mut number)) }
+    if result != 1 { return None }
+    return Some(number)
+}
+/// Round-trip decimal with up to 17 significant digits (not shortest display).
+/// Nonfinite values format as nan/inf/-inf, which are not JSON numbers.
+pub fn from_f64(value f64) string {
+    var buffer = [32]u8{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+    var count: usize = 0
+    unsafe { count = tarn_format_f64(value, ffi.slice_mut(&mut buffer), buffer.len()) }
+    if count == 0 { panic("float formatting invariant") }
+    match from_utf8(&buffer[0..count]) { Some(text) => { return text }
+        None => { panic("float encoding invariant") } }
+}
+pub fn Builder.push_f64(&mut self, value f64) {
+    var buffer = [32]u8{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+    var count: usize = 0
+    unsafe { count = tarn_format_f64(value, ffi.slice_mut(&mut buffer), buffer.len()) }
+    if count == 0 { panic("float formatting invariant") }
+    self.data.extend_from_slice(&buffer[0..count])
+}
+pub fn from_bool(value bool) string { if value { return "true" }
+    return "false" }
+pub fn Builder.push_bool(&mut self, value bool) { self.push(&from_bool(value)) }
+/// ASCII only; other UTF-8 buffer remain unchanged.
+pub fn to_ascii_lower(value &string) string {
+    var out: Vec<u8> = Vec.with_capacity(value.len())
+    for byte in value.bytes() {
+        var next = byte
+        if byte >= 65 && byte <= 90 { next = byte + 32 }
+        out.push(next)
+    }
+    match from_utf8(out.as_slice()) { Some(text) => { return text }
+        None => { panic("ASCII conversion invariant") } }
+}
+pub fn to_ascii_upper(value &string) string {
+    var out: Vec<u8> = Vec.with_capacity(value.len())
+    for byte in value.bytes() {
+        var next = byte
+        if byte >= 97 && byte <= 122 { next = byte - 32 }
+        out.push(next)
+    }
+    match from_utf8(out.as_slice()) { Some(text) => { return text }
+        None => { panic("ASCII conversion invariant") } }
+}
+pub fn equal_ascii_case_insensitive(left &string, right &string) bool {
+    a := left.bytes()
+    b := right.bytes()
+    if a.len() != b.len() { return false }
+    var i: usize = 0
+    for i < a.len() {
+        var x = a[i]
+        var y = b[i]
+        if x >= 65 && x <= 90 { x = x + 32 }
+        if y >= 65 && y <= 90 { y = y + 32 }
+        if x != y { return false }
+        i = i + 1
+    }
+    return true
+}
+pub fn Builder.push_range(&mut self, text &string, range Range) { self.data.extend_from_slice(range_bytes(text, range)) }
+/// Non-overlapping replacement. Empty pattern inserts at scalar boundaries,
+/// including before and after the source; no grapheme/normalization semantics.
+pub fn replace_all(value &string, pattern &string, replacement &string) string {
+    var out = Builder.new()
+    data := value.bytes()
+    needle := pattern.bytes()
+    var start: usize = 0
+    var i: usize = 0
+    if needle.is_empty() {
+        out.push(replacement)
+        for i < data.len() {
+            start = i
+            i = i + 1
+            for i < data.len() && (data[i] & 192) == 128 { i = i + 1 }
+            out.push_range(value, Range{start: start, end: i})
+            out.push(replacement)
+        }
+        return out.finish()
+    }
+    for i < data.len() {
+        if data[i] == needle[0] && equal_at(data, needle, i) {
+            out.push_range(value, Range{start: start, end: i})
+            out.push(replacement)
+            i = i + needle.len()
+            start = i
+        } else { i = i + 1 }
+    }
+    out.push_range(value, Range{start: start, end: data.len()})
+    return out.finish()
+}
+pub copy enum FormatErrorKind { InvalidTemplate
+    ArgumentCount }
+pub copy struct FormatError { pub kind FormatErrorKind
+    pub offset usize }
+/// {} consumes one string argument; {{ and }} escape braces. No reflection,
+/// implicit conversions, positional/width directives or interpolation syntax.
+pub fn format(template &string, arguments &[]string) Result<string, FormatError> {
+    var out = Builder.new()
+    buffer := template.bytes()
+    var i: usize = 0
+    var start: usize = 0
+    var arg: usize = 0
+    for i < buffer.len() {
+        byte := buffer[i]
+        if byte == 123 || byte == 125 {
+            out.push_range(template, Range{start: start, end: i})
+            if i + 1 >= buffer.len() { return Err(FormatError{kind: FormatErrorKind.InvalidTemplate, offset: i}) }
+            next := buffer[i + 1]
+            if next == byte { out.push_range(template, Range{start: i, end: i + 1}) } else {
+                if byte != 123 || next != 125 { return Err(FormatError{kind: FormatErrorKind.InvalidTemplate, offset: i}) }
+                if arg == arguments.len() { return Err(FormatError{kind: FormatErrorKind.ArgumentCount, offset: i}) }
+                out.push(&arguments[arg])
+                arg = arg + 1
+            }
+            i = i + 2
+            start = i
+        } else { i = i + 1 }
+    }
+    if arg != arguments.len() { return Err(FormatError{kind: FormatErrorKind.ArgumentCount, offset: i}) }
+    out.push_range(template, Range{start: start, end: buffer.len()})
+    return Ok(out.finish())
+}

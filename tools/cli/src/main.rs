@@ -1,6 +1,7 @@
 //! `tarn` — the single official CLI.
 
 mod args;
+mod stdlib;
 mod watch;
 mod process;
 mod testing;
@@ -42,6 +43,7 @@ usage:
     tarn profile <file.tarn> [--link lib]... [-- args...]
                                      run under callgrind and list the costliest
                                      Tarn functions (requires valgrind)
+    tarn stdlib [module] [--json]     discover embedded public APIs
     tarn version                     print the compiler version
 
 Entry uses the nearest tarn.toml package.entry; otherwise ./main.tarn.
@@ -81,6 +83,7 @@ fn main() -> ExitCode {
         return packages::run(command, &args[1..]);
     }
     match args.first().map(String::as_str) {
+        Some("stdlib") => stdlib::run(&args[1..]),
         Some("lex") => cmd_lex(&args[1..]),
         Some("ast") => cmd_ast(&args[1..]),
         Some("check") => cmd_check(&args[1..], false),

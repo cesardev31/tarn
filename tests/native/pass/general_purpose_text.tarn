@@ -1,0 +1,68 @@
+import "string"
+import "collections"
+import "csv"
+import "json"
+import "time"
+import "io"
+fn assert(value bool) { if !value { panic("assertion failed") } }
+fn main() Result<void, io.Error> {
+    assert(string.rfind("a)b)c", ")").unwrap_or(99) == 3)
+    assert(string.rfind("日本", "").unwrap_or(99) == 6)
+    assert(string.rfind("abc", "z").is_none())
+    assert(string.parse_f64("1.25e2").unwrap_or(0.0) == 125.0)
+    assert(string.parse_f64("1e309").is_none())
+    assert(string.parse_f64("NaN").is_none())
+    assert(string.parse_f64(" 1").is_none())
+    assert(string.parse_f64("0x1").is_none())
+    assert(string.parse_f64("1e").is_none())
+    for value in [5]f64{0.0, -0.0, 1.7976931348623157e308, 5e-324, 1.2345678901234567} {
+        assert(string.parse_f64(&string.from_f64(value)).unwrap_or(-1.0) == value)
+    }
+    assert(string.to_ascii_lower("ABC É") == "abc É")
+    assert(string.to_ascii_upper("abc é") == "ABC é")
+    assert(string.equal_ascii_case_insensitive("TaRn", "tArN"))
+    assert(!string.equal_ascii_case_insensitive("É", "é"))
+    assert(string.replace_all("aaaa", "aa", "b") == "bb")
+    assert(string.replace_all("é日", "", "-") == "-é-日-")
+    arguments := [2]string{"Tarn", "42"}
+    match string.format("{{{}: {}}}", &arguments) { Ok(text) => { assert(text == "{Tarn: 42}") }
+        Err(error) => { panic("format failed") } }
+    match string.format("{}", &[0]string{}) { Err(error) => { match error.kind { string.FormatErrorKind.ArgumentCount => {}
+    _ => { panic("wrong format error") } } }
+        Ok(text) => { panic("format accepted missing argument") } }
+    var map: collections.Map<u64, u64> = collections.Map.new()
+    map.insert(1, 7)
+    assert(collections.get_copy(&map, &1).unwrap_or(0) == 7)
+    assert(collections.get_copy(&map, &2).is_none())
+    fallback: u64 := 9
+    assert(*map.get_or(&2, &fallback) == 9)
+    var cursor: usize = 0
+    match map.next_slot(&mut cursor) { Some(slot) => { assert(map.entry_at(slot).value == 7) }
+        None => { panic("missing entry") } }
+    assert(map.next_slot(&mut cursor).is_none())
+    match csv.parse_record("a,\"b,b\",\"x\"\"y\",\"日本\"") {
+        Ok(fields) => { assert(fields.len() == 4)
+            assert(fields.get(1) == &"b,b")
+            assert(fields.get(2) == & "x\"y") }
+        Err(error) => { panic("CSV failed") }
+    }
+    match csv.parse_record("\"unclosed") { Err(error) => { match error.kind { csv.ParseErrorKind.UnclosedQuote => {}
+    _ => { panic("wrong CSV error") } } }
+        Ok(fields) => { panic("CSV accepted unclosed quote") } }
+    var writer = json.Writer.new()
+    zero: f64 := 0.0
+    assert(!writer.f64(zero / zero))
+    assert(writer.f64(1.25))
+    assert(writer.finish() == "1.25")
+    match csv.parse_record_with_limits("a,b", csv.Limits{record_bytes: 2, fields: 2}) {
+        Err(error) => {}
+        Ok(fields) => { panic("CSV byte limit bypassed") }
+    }
+    match csv.parse_record_with_limits("a,b", csv.Limits{record_bytes: 3, fields: 1}) {
+        Err(error) => {}
+        Ok(fields) => { panic("CSV field limit bypassed") }
+    }
+    try time.sleep_blocking(time.Duration.milliseconds(1))
+    print("general purpose text ok")
+    return Ok(())
+}
