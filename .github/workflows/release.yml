@@ -36,7 +36,7 @@ jobs:
       - name: Report existing formatting debt
         continue-on-error: true
         run: cargo fmt --all -- --check > formatting.log 2>&1
-      - run: cargo test --locked --workspace
+      - run: cargo test --locked --release --workspace
       - run: cargo build --locked --release -p tarn -p tarn-lsp
       - run: tools/release/test-install.sh
       - run: tools/release/package.sh "$VERSION"
