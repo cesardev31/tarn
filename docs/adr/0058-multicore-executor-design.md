@@ -3,6 +3,8 @@
 Status: option 1 accepted and implemented in Phase 30 (`http.serve_parallel`,
 `net.TcpListener.bind_shared`); option 2 (work stealing) remains unapproved.
 See [the Phase 30 report](../phase-30-report.md).
+Bounded cooperative connections inside each worker are specified in
+[ADR 0064](0064-bounded-cooperative-http-workers.md); frames still never migrate.
 
 ## Problem
 

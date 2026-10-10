@@ -845,12 +845,17 @@ pub interface Handler {
 }
 
 /// Serve on `workers` cores (Phase 30, ADR 0058). Each worker owns a
-/// SO_REUSEPORT listener and its own Execution, and runs the same sequential
-/// loop as `serve`; the kernel spreads connections across workers, so no task
+/// SO_REUSEPORT listener and its own Execution; up to 64 connections per worker
+/// progress cooperatively. The kernel spreads connections across workers, so no task
 /// moves between threads. Every listener is bound before any worker starts,
 /// so address errors are returned immediately. Runs until a listener fails.
 pub fn serve_parallel<H: Handler + Share>(address &string, workers usize, handler &H) Result<void, io.Error> {
-    if workers == 0 { return Err(io.Error.new(io.ErrorKind.InvalidInput)) }
+    return serve_parallel_with_limit(address, workers, 64, handler)
+}
+/// Bounded cooperative connections per worker. At capacity, new connections
+/// remain in the kernel accept queue until an active connection completes.
+pub fn serve_parallel_with_limit<H: Handler + Share>(address &string, workers usize, connections_per_worker usize, handler &H) Result<void, io.Error> {
+    if workers == 0 || connections_per_worker == 0 { return Err(io.Error.new(io.ErrorKind.InvalidInput)) }
     var listeners: Vec<net.TcpListener> = Vec.new()
     var n: usize = 0
     for n < workers {
@@ -862,7 +867,7 @@ pub fn serve_parallel<H: Handler + Share>(address &string, workers usize, handle
     // Each worker's handle lives in its own scope frame until every later
     // worker has started; dropping a handle would join it (ADR 0033).
     failure: Mutex<Option<io.Error>> := Mutex.new(None)
-    _start_workers(&mut listeners, handler, &failure)
+    _start_workers(&mut listeners, handler, &failure, connections_per_worker)
     var guard = failure.lock()
     var result: Result<void, io.Error> = Ok(())
     match guard.replace(None) {
@@ -871,12 +876,12 @@ pub fn serve_parallel<H: Handler + Share>(address &string, workers usize, handle
     }
     return result
 }
-fn _start_workers<H: Handler + Share>(listeners &mut Vec<net.TcpListener>, handler &H, failure &Mutex<Option<io.Error>>) {
+fn _start_workers<H: Handler + Share>(listeners &mut Vec<net.TcpListener>, handler &H, failure &Mutex<Option<io.Error>>, limit usize) {
     match listeners.pop() {
         Some(listener) => {
             scope {
                 task := spawn move fn() {
-                    match _worker(listener, handler) {
+                    match _worker(listener, handler, limit) {
                         Ok(done) => {}
                         Err(error) => {
                             var guard = failure.lock()
@@ -884,17 +889,50 @@ fn _start_workers<H: Handler + Share>(listeners &mut Vec<net.TcpListener>, handl
                         }
                     }
                 }
-                _start_workers(listeners, handler, failure)
+                _start_workers(listeners, handler, failure, limit)
                 task.join()
             }
         }
         None => {}
     }
 }
-fn _worker<H: Handler + Share>(listener net.TcpListener, handler &H) Result<void, io.Error> {
-    var call: mut fn(&Request) Result<Response, Error> = fn(request &Request) Result<Response, Error> { return handler.handle(request) }
+fn _worker<H: Handler + Share>(listener net.TcpListener, handler &H, limit usize) Result<void, io.Error> {
+    var socket = listener
     execution := try runtime.Execution.new()
-    var operation = runtime.Operation.new(&execution, _serve(listener, &execution, &mut call))
-    try try execution.block_on(&mut operation)
-    return Ok(())
+    var executor = runtime.Executor.new()
+    var accepting = runtime.Operation.new(&execution, socket.accept_async())
+    accepting.wake()
+    for {
+        active := try executor.turn(&execution, 0)
+        var progressed = false
+        if active < limit && accepting.runnable() {
+            progressed = true
+            match accepting.poll() {
+                io.Progress.Pending => {}
+                io.Progress.Ready(result) => {
+                    accepting.finish()
+                    stream := try result
+                    match Connection.new(stream, Limits.defaults(), Timeouts.defaults()) {
+                        Ok(connection) => {
+                            executor = executor.add(runtime.Operation.new(&execution, _answer_shared(connection, &execution, handler)))
+                        }
+                        Err(error) => {}
+                    }
+                    accepting = runtime.Operation.new(&execution, socket.accept_async())
+                    accepting.wake()
+                }
+            }
+        }
+        if !progressed {
+            if active == 0 { try execution.wait(-1) } else {
+                // turn sleeps only when no connection made progress. Preserve
+                // self-wakes rather than blocking after a runnable poll.
+                try executor.turn(&execution, -1)
+            }
+        }
+    }
+}
+async fn _answer_shared<H: Handler + Share>(connection Connection, owner &runtime.Execution, handler &H) {
+    var call: mut fn(&Request) Result<Response, Error> = fn(request &Request) Result<Response, Error> { return handler.handle(request) }
+    await _answer(connection, owner, &mut call)
 }

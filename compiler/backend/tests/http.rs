@@ -996,3 +996,136 @@ fn main() Result<void, io.Error> {{
     child.wait().unwrap();
     std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
 }
+
+#[test]
+fn cooperative_workers_progress_past_slow_clients_and_enforce_capacity() {
+    struct Running(Child);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    for limit in [1, 2] {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let source = format!(
+            r#"import "http"
+import "io"
+struct App {{}}
+impl http.Handler for App {{
+    fn handle(&self, request &http.Request) Result<http.Response, http.Error> {{
+        return http.Response.text(200, "ready")
+    }}
+}}
+fn main() Result<void, io.Error> {{
+    app := App{{}}
+    return http.serve_parallel_with_limit("127.0.0.1:{port}", 1, {limit}, &app)
+}}
+"#
+        );
+        let exe = compile(&source, &format!("cooperative-limit-{limit}"));
+        let server = Running(
+            Command::new(&exe)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let start = Instant::now();
+        let mut slow = loop {
+            match TcpStream::connect(("127.0.0.1", port)) {
+                Ok(peer) => break peer,
+                Err(_) => {
+                    assert!(
+                        start.elapsed() < Duration::from_secs(10),
+                        "server did not bind"
+                    );
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+        };
+        // First connection never completes its request head. One worker must
+        // still answer the next client when it has spare cooperative capacity.
+        slow.write_all(b"GET / HTTP/1.1\r\nHost:").unwrap();
+        let mut fast = connect(port);
+        fast.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+        let mut reader = BufReader::new(fast);
+        if limit == 1 {
+            reader
+                .get_mut()
+                .set_read_timeout(Some(Duration::from_millis(250)))
+                .unwrap();
+            let mut byte = [0];
+            let error = reader
+                .read(&mut byte)
+                .expect_err("capacity-one worker accepted another active connection");
+            assert!(matches!(
+                error.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ));
+            drop(slow);
+        } else {
+            reader
+                .get_mut()
+                .set_read_timeout(Some(Duration::from_secs(1)))
+                .unwrap();
+        }
+        if limit == 1 {
+            reader
+                .get_mut()
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+        }
+        let reply = response(&mut reader, false);
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.body, b"ready");
+        drop(server);
+        std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn cooperative_server_rejects_zero_workers_or_capacity_before_binding() {
+    let exe = compile(
+        r#"import "http"
+import "io"
+struct App {}
+impl http.Handler for App {
+    fn handle(&self, request &http.Request) Result<http.Response, http.Error> {
+        return http.Response.text(200, "ready")
+    }
+}
+fn main() {
+    app := App{}
+    for capacity in [2]usize{0, 1} {
+        workers := usize(1) - capacity
+        match http.serve_parallel_with_limit("not an address", workers, capacity, &app) {
+            Ok(_) => { panic("invalid configuration accepted") }
+            Err(error) => {
+                match error.kind {
+                    io.ErrorKind.InvalidInput => {}
+                    _ => { panic("configuration was not checked before binding") }
+                }
+            }
+        }
+    }
+    print("invalid limits rejected")
+}
+"#,
+        "cooperative-invalid-limits",
+    );
+    let output = Command::new(&exe).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"invalid limits rejected\n");
+    assert!(output.stderr.is_empty());
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}

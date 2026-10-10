@@ -1,5 +1,8 @@
 # Release rerun and bottleneck analysis — 2026-10-09
 
+Latest async evolution: [bounded cooperative HTTP workers](http-cooperative-2026-10-09.md)
+keeps fast-request throughput while allowing progress past slow connections.
+
 Subsequent implementation: [string split optimization](string-optimization-2026-10-09.md)
 reduced the ranges benchmark time by 26% in an alternating nine-run comparison.
 The tables below preserve the pre-optimization release baseline.

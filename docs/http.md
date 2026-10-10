@@ -14,6 +14,8 @@ Runnable application: [http_server.tarn](../examples/http_server.tarn).
 | Header | new(name, bytes), text(name, text), name(), value(), value_text(), clone() |
 | Response | bytes(status, owned_bytes), text(status, borrowed_text), json(status, owned_text), empty(status), method_not_allowed(allow), consuming header(header), consuming close_connection(), status() |
 | serve | serve(address, handler) Result<void, io.Error>: sequential, one request per connection |
+| serve_parallel | serve_parallel(address, workers, handler): bounded cooperative connections on independent workers |
+| serve_parallel_with_limit | serve_parallel_with_limit(address, workers, connections_per_worker, handler): explicit per-worker admission |
 | Limits / Timeouts | defaults(); public Copy configuration fields |
 | Error | Io, Protocol, Limit, Timeout, InvalidConfig, InvalidResponse, InvalidText, InvalidState; status() |
 
@@ -113,11 +115,16 @@ which return `Result`, when the status comes from data (ADR 0052).
 
 `serve_parallel<H: Handler + Share>(address, workers, &handler)` binds one
 SO_REUSEPORT listener per native worker before starting workers. Each owns an
-independent Execution and serves one connection at a time, closing it after one
-response. Implement `Handler.handle(&self, &Request) Result<Response, Error>`
-on a nominal shared type; protect mutable state with Mutex. Zero workers is
-InvalidInput. This is not shared-executor migration or work stealing, and it
+independent Execution and existing Executor, driving up to 64 connections
+cooperatively and closing each after one response. To configure admission, use
+`serve_parallel_with_limit(address, workers, connections_per_worker, &handler)`.
+At capacity, new connections remain in the kernel accept queue until an active
+operation finishes. Implement `Handler.handle(&self, &Request) Result<Response, Error>`
+on a nominal shared type; protect mutable state with Mutex. Zero workers or a zero
+connection limit is InvalidInput. A blocking handler still blocks its worker.
+This is not shared-executor migration or work stealing, and it
 has no graceful shutdown API. See [the Phase 30 report](phase-30-report.md).
+The bounded connection model is specified in [ADR 0064](adr/0064-bounded-cooperative-http-workers.md).
 
 ## Ownership and connection state
 

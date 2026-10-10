@@ -1,0 +1,10 @@
+{
+  "before": {
+    "response": "timeout",
+    "timeout_seconds": 1
+  },
+  "after": {
+    "response": "200",
+    "latency_seconds": 0.00033718500344548374
+  }
+}
