@@ -164,7 +164,7 @@ fn stdlib_behaviors_are_tested_in_tarn() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("5 passed; 0 failed"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("8 passed; 0 failed"));
 }
 
 #[test]
