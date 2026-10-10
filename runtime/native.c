@@ -716,6 +716,8 @@ void tarn_rt_net_waker_new(uintptr_t *out, TarnExecution *owner) {
     *out = (uintptr_t)wake;
 }
 static TarnWake *net_wake_find(TarnExecution *owner, uint64_t id) {
+    /* Zero is the absent-parent sentinel; identities start at one. */
+    if (!id) return NULL;
     for (TarnWake *wake = owner->head; wake; wake = wake->next) if (wake->identity == id) return wake;
     return NULL;
 }

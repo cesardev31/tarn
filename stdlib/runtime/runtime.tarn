@@ -27,7 +27,8 @@ struct _Spawned {
     operation Operation<void>
     record usize
 }
-pub struct Executor { tasks Vec<_Spawned> }
+pub struct Executor { tasks Vec<_Spawned>
+    validated_owner usize }
 extern "intrinsic" fn _task_new<R>(owner &Execution) AsyncTask<R>
 extern "intrinsic" fn _task_complete<R>(task &_TaskRef, value R)
 extern "intrinsic" fn _task_take<R>(task &AsyncTask<R>) Option<R>
@@ -64,18 +65,20 @@ pub fn Operation<R>.poll(&mut self) io.Progress<R> {
 }
 // Consume the operation to release its conservative across-suspension loans.
 pub fn Operation<R>.finish(self) {}
-pub fn Executor.new() Executor { return Executor{tasks: Vec.new()} }
+pub fn Executor.new() Executor { return Executor{tasks: Vec.new(), validated_owner: 0} }
 // Consuming insertion returns the new loan holder through ordinary provenance.
 pub fn Executor.add(self, operation Operation<void>) Executor {
     var executor = self
     executor.tasks.push(_Spawned{operation: operation, record: 0})
+    executor.validated_owner = 0
     return executor
 }
 // Move spawned operations from the Execution mailbox into this executor.
 fn Executor.drain(&mut self, owner &Execution) {
     for {
         match _inbox_pop(owner) {
-            Some(spawned) => { self.tasks.push(spawned) }
+            Some(spawned) => { self.tasks.push(spawned)
+                self.validated_owner = 0 }
             None => { return }
         }
     }
@@ -85,6 +88,9 @@ fn Executor.drain(&mut self, owner &Execution) {
 // (their frame is destroyed through its verified abandonment path).
 fn Executor.step(&mut self, owner &Execution) Result<bool, io.Error> {
     self.drain(owner)
+    // Waker ownership is immutable. Revalidate after insertion or when a
+    // caller supplies another Execution, not on every unchanged fair turn.
+    validate_owner := self.validated_owner != owner.state.native
     var polled = false
     var i = usize(0)
     var count = self.tasks.len()
@@ -94,7 +100,7 @@ fn Executor.step(&mut self, owner &Execution) Result<bool, io.Error> {
         if entry.record != 0 && _task_abandoned(entry.record) {
             finished = true
         } else {
-            try io._check(_wake_owner(&entry.operation.waker, owner.state.native))
+            if validate_owner { try io._check(_wake_owner(&entry.operation.waker, owner.state.native)) }
             if entry.operation.runnable() {
                 polled = true
                 match entry.operation.poll() {
@@ -112,6 +118,7 @@ fn Executor.step(&mut self, owner &Execution) Result<bool, io.Error> {
             i = i + 1
         }
     }
+    self.validated_owner = owner.state.native
     return Ok(polled)
 }
 pub fn Executor.turn(&mut self, owner &Execution, timeout i32) Result<usize, io.Error> {

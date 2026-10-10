@@ -1,0 +1,21 @@
+import "runtime"
+import "io"
+fn main() Result<void, io.Error> {
+    execution := try runtime.Execution.new()
+    var executor = runtime.Executor.new()
+    var i: usize = 0
+    for i < 1024 {
+        executor = executor.add(runtime.Operation.new(&execution, move fn(waker &io.Waker) io.Progress<void> { return io.Progress.Pending }))
+        i = i + 1
+    }
+    executor = executor.add(runtime.Operation.new(&execution, move fn(waker &io.Waker) io.Progress<void> { waker.wake()
+                return io.Progress.Pending }))
+    var turn: usize = 0
+    var active: usize = 0
+    for turn < 20000 {
+        active = try executor.turn(&execution, 0)
+        turn = turn + 1
+    }
+    print(active)
+    return Ok(())
+}

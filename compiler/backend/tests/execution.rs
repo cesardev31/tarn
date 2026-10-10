@@ -1,5 +1,37 @@
 //! Manual suspended state and real native execution, before async syntax.
 use std::{path::{Path, PathBuf}, process::{Command, Output}, collections::HashSet};
+
+#[test]
+fn executor_cached_owner_validation_rejects_switches_and_foreign_insertions() {
+    let source = r#"import "runtime"
+import "io"
+fn main() Result<void, io.Error> {
+    first := try runtime.Execution.new()
+    second := try runtime.Execution.new()
+    var executor = runtime.Executor.new()
+    executor = executor.add(runtime.Operation.new(&first, move fn(waker &io.Waker) io.Progress<void> { return io.Progress.Pending }))
+    try executor.turn(&first, 0)
+    try executor.turn(&first, 0)
+    match executor.turn(&second, 0) {
+        Ok(_) => { panic("cached owner accepted another execution") }
+        Err(_) => {}
+    }
+    try executor.turn(&first, 0)
+    executor = executor.add(runtime.Operation.new(&second, move fn(waker &io.Waker) io.Progress<void> { return io.Progress.Pending }))
+    match executor.turn(&first, 0) {
+        Ok(_) => { panic("foreign insertion bypassed owner validation") }
+        Err(_) => {}
+    }
+    print("ownership checks retained")
+    return Ok(())
+}
+"#;
+    let exe = compile(source, "executor-owner-cache");
+    let out = run(&exe);
+    balanced(&out);
+    assert_eq!(out.stdout, b"ownership checks retained\n");
+    std::fs::remove_dir_all(exe.parent().unwrap()).unwrap();
+}
 fn checked(src: &str, tag: &str) -> (PathBuf, tarn_driver::CheckResult) {
     let dir = std::env::temp_dir().join(format!("tarn-exec-{}-{tag}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
