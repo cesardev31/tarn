@@ -1,5 +1,58 @@
 import "string"
 
+fn test_signed_decimal_expected_text_and_roundtrip() {
+    values := [10]i64 { 0, 9, 9223372036854775807, -1, -9, -10, -99, -100, -1000000000000000000, -9223372036854775808 }
+    expected := [10]string { "0", "9", "9223372036854775807", "-1", "-9", "-10", "-99", "-100", "-1000000000000000000", "-9223372036854775808" }
+    var index: usize = 0
+    for index < 10 {
+        text := string.from_i64(values[index])
+        if text != expected[index] { panic("signed decimal text differs") }
+        match string.parse_i64(&text) {
+            Some(value) => { if value != values[index] { panic("signed decimal roundtrip differs") } }
+            None => { panic("signed decimal output failed to parse") }
+        }
+        index = index + 1
+    }
+}
+
+fn test_builder_integer_digit_boundaries() {
+    for value in [10]u64 { 0, 1, 9, 10, 19, 99, 100, 101, 1000, 18446744073709551615 } {
+        var builder = string.Builder.new()
+        builder.push_u64(value)
+        if builder.finish() != string.from_u64(value) { panic("builder unsigned formatting differs") }
+    }
+    for value in [7]i64 { 0, -1, -9, -10, -99, -100, -9223372036854775808 } {
+        var builder = string.Builder.new()
+        builder.push_i64(value)
+        if builder.finish() != string.from_i64(value) { panic("builder signed formatting differs") }
+    }
+}
+
+fn test_split_ranges_matches_owned_and_cursor_splits() {
+    for source in [8]string { "", ",", "a,,b,", "aaaaa", "café日本é", "éé", "🙂x🙂", "abc" } {
+        for separator in [7]string { "", ",", "aa", "é", "日本", "🙂", "long separator" } {
+            parts := string.split(&source, &separator)
+            spans := string.split_ranges(&source, &separator)
+            if spans.len() != parts.len() { panic("split range count differs") }
+            var cursor = string.SplitCursor.new()
+            var index: usize = 0
+            for index < spans.len() {
+                span := spans.at(index)
+                if !string.valid_range(&source, span) { panic("split produced an invalid UTF-8 boundary") }
+                if source.copy_range(span.start, span.end) != parts.get(index).clone() { panic("split range text differs") }
+                match string.next_split(&source, &separator, &mut cursor) {
+                    Some(expected) => {
+                        if expected.start != span.start || expected.end != span.end { panic("split cursor differs") }
+                    }
+                    None => { panic("split cursor ended early") }
+                }
+                index = index + 1
+            }
+            if !string.next_split(&source, &separator, &mut cursor).is_none() { panic("split cursor has extra results") }
+        }
+    }
+}
+
 fn test_trim_and_split() {
     trimmed := string.trim(&"  hello  ")
     if trimmed != "hello" { panic("trim changed the text") }

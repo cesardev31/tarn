@@ -1,4 +1,13 @@
-# Native baseline (2026-10-05)
+# Native benchmarks
+
+Run `python3 benchmarks/native/run.py` to use the installed `tarn` from PATH
+(override with `TARN=/absolute/path/to/tarn`). This checks each fixture's output
+over five executions and reports median runtime, ELF size and total build time.
+Build time includes the frontend, code generation, runtime compilation and link;
+it cannot be compared directly with the isolated codegen/link columns below.
+It does not rebuild the compiler. Timings include process startup and printing.
+
+## Historical native baseline (2026-10-05)
 
 Linux x86_64 host, debug Rust compiler and Cranelift default code generation;
 C runtime compiled with cc -O0, no optimization changes. Dependency downloads

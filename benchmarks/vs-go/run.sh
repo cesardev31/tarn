@@ -2,12 +2,13 @@
 # Tarn vs Go: same program, same output, median wall time of 5 runs.
 set -euo pipefail
 cd "$(dirname "$0")"
-TARN=${TARN:-../../target/release/tarn}
+TARN=${TARN:-tarn}
 out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
 median() { sort -n | awk '{a[NR]=$1} END{print a[int((NR+1)/2)]}'; }
 time_of() { for _ in 1 2 3 4 5; do /usr/bin/time -f "%e" "$@" >/dev/null 2>>"$out/t"; done; tail -5 "$out/t" | median; : > "$out/t"; }
 printf "%-10s %8s %8s %7s\n" bench tarn go ratio
-for name in ${@:-arith fib vec strings enums jsoncodec parallel tasks}; do
+for name in ${@:-arith fib vec builder format-i64 strings strings-ranges enums jsoncodec parallel tasks}; do
     "$TARN" build "$name.tarn" -o "$out/$name-tarn" >/dev/null
     go_source="$name.go"
     if [ "$name" = "strings-ranges" ]; then go_source="strings.go"; fi

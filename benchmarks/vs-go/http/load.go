@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -48,6 +49,10 @@ func main() {
 	var all []time.Duration
 	for _, l := range latencies {
 		all = append(all, l...)
+	}
+	if len(all) == 0 {
+		fmt.Printf("0 req/s  failed %d (no successful requests)\n", failed)
+		os.Exit(1)
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i] < all[j] })
 	p := func(q float64) time.Duration { return all[int(float64(len(all)-1)*q)] }
